@@ -1,0 +1,237 @@
+# ------------------------------------------------------------------------------
+# Docker Compose configuration for the local RAG AI-System
+#
+# This file defines:
+# - the application container ("expert")
+# - the vector database (Qdrant)
+# - the models used by the system
+# - the system prompt configuration
+#
+# The architecture roughly looks like this:
+# User -> Retriever (expert container) -> Qdrant DB -> LLM
+# ------------------------------------------------------------------------------
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Main application container
+  #
+  # This container runs the Node.js application (index.js).
+  # Responsibilities:
+  # - load files from the /data directory
+  # - create embeddings for the files
+  # - store embeddings in Qdrant
+  # - retrieve similar chunks for user queries
+  # - send the final prompt to the chat model
+  # ---------------------------------------------------------------------------
+  expert:
+
+    # Build this container from the Dockerfile in the current directory
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    environment:
+
+      # Terminal compatibility for interactive usage
+      TERM: xterm-256color
+
+      # -----------------------------------------------------------------------
+      # Conversation settings
+      # -----------------------------------------------------------------------
+
+      # Number of previous chat messages kept in context
+      # Helps the model maintain short conversation memory
+      HISTORY_MESSAGES: 2
+
+      # Maximum number of similar knowledge chunks retrieved from the DB
+      # Increasing this may improve context but also increases prompt size
+      MAX_SIMILARITIES: 3
+
+      # Cosine similarity threshold
+      # Only chunks above this similarity score are considered relevant
+      COSINE_LIMIT: 0.4
+
+      # -----------------------------------------------------------------------
+      # LLM generation parameters
+      # These influence how the chat model generates answers
+      # -----------------------------------------------------------------------
+
+      # Temperature controls randomness (0 = deterministic)
+      OPTION_TEMPERATURE: 0.0
+
+      # Controls nucleus sampling (limits token probability mass)
+      OPTION_TOP_P: 0.9
+
+      # Penalizes repetition and encourages new topics
+      OPTION_PRESENCE_PENALTY: 2.2
+
+      # Path inside the container where the knowledge files are stored
+      CONTENT_PATH: /app/data
+
+    # Mount the local ./data folder into the container
+    # All knowledge files placed here will be embedded and searchable
+    volumes:
+      - ./data:/app/data
+
+    # Keep STDIN open so we can interact with the container
+    stdin_open: true   # equivalent to docker run -i
+
+    # Enable TTY support for interactive terminal usage
+    tty: true          # equivalent to docker run -t
+
+    # -----------------------------------------------------------------------
+    # System prompt configuration
+    #
+    # This injects a system prompt file into the container.
+    # It defines how the AI should behave and how it should use the
+    # knowledge base during answers.
+    # -----------------------------------------------------------------------
+    configs:
+      - source: system.instructions.md
+        target: /app/system.instructions.md
+
+    # -----------------------------------------------------------------------
+    # Model configuration
+    #
+    # Docker Model Runner provides the models.
+    # The application connects to the model endpoints using environment
+    # variables provided by Docker Compose.
+    # -----------------------------------------------------------------------
+    models:
+
+      # Chat model used for generating answers
+      chat-model:
+
+        # Environment variable where the model endpoint is stored
+        endpoint_var: MODEL_RUNNER_BASE_URL
+
+        # Environment variable containing the selected chat model
+        model_var: MODEL_RUNNER_LLM_CHAT
+
+      # Embedding model used for converting text into vector embeddings
+      embedding-model:
+
+        endpoint_var: MODEL_RUNNER_BASE_URL
+        model_var: MODEL_RUNNER_LLM_EMBEDDING
+
+    # -----------------------------------------------------------------------
+    # Development helper
+    #
+    # This enables live synchronization of files between the host and
+    # the container during development.
+    #
+    # Changes to the project files will automatically appear inside
+    # the container without rebuilding it.
+    # -----------------------------------------------------------------------
+    develop:
+      watch:
+        - action: sync
+          path: ./
+          target: /app
+          initial_sync: true
+          ignore:
+            - node_modules/
+
+    # Ensure the vector database starts before the application
+    depends_on:
+      - qdrant
+
+
+  # ---------------------------------------------------------------------------
+  # Qdrant Vector Database
+  #
+  # Qdrant stores vector embeddings of text chunks.
+  #
+  # The retriever queries this DB to find the most relevant information
+  # related to a user prompt.
+  # ---------------------------------------------------------------------------
+  qdrant:
+
+    # Official Qdrant container image
+    image: qdrant/qdrant
+
+    # Fixed container name for easier access
+    container_name: qdrant
+
+    # Expose the API port so the application can connect
+    ports:
+      - "6333:6333"
+
+    # Persist database data even when the container is stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+
+# ------------------------------------------------------------------------------
+# Named Docker volumes
+#
+# Used for persistent data storage.
+# This ensures the vector database survives container restarts.
+# ------------------------------------------------------------------------------
+volumes:
+  qdrant_data:
+
+
+# ------------------------------------------------------------------------------
+# Model configuration
+#
+# These models are provided through Docker Model Runner.
+#
+# You can replace these models with other ones depending on your needs
+# and hardware capabilities.
+# ------------------------------------------------------------------------------
+models:
+
+  # Chat model used for generating answers
+  chat-model:
+
+    # Qwen coder model in GGUF format (quantized)
+    # Q4_K_M is a good balance between performance and memory usage
+   model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
+
+  # Embedding model used for vectorizing text
+  embedding-model:
+
+    # EmbeddingGemma model optimized for text embeddings
+    model: ai/embeddinggemma:latest
+
+
+# ------------------------------------------------------------------------------
+# Config files injected into containers
+#
+# Here we define the system prompt used by the LLM.
+# This prompt tells the AI how to behave and how to use the knowledge base.
+# ------------------------------------------------------------------------------
+configs:
+
+  system.instructions.md:
+
+    # Inline content of the system prompt
+    content: |
+      You are Bob, a knowledgeable and helpful AI assistant.
+
+      Your task is to answer the user's questions using the information provided in the KNOWLEDGE BASE and your general reasoning abilities.
+
+      The KNOWLEDGE BASE contains relevant pieces of retrieved information that may help answer the user's question.
+
+      Follow these rules carefully:
+
+      1. Use the KNOWLEDGE BASE as your primary source of information.
+      2. If the KNOWLEDGE BASE contains relevant information, use it to construct your answer.
+      3. If multiple pieces of information are provided, combine them logically.
+      4. If the KNOWLEDGE BASE does not contain enough information to answer the question, say that the information is not available in the knowledge base.
+      5. Do NOT invent facts or fabricate information that is not supported by the KNOWLEDGE BASE.
+      6. If the question is unrelated to the KNOWLEDGE BASE, answer to the best of your ability but clearly indicate that the answer is based on general knowledge.
+      7. Be clear, concise, and structured in your responses.
+
+      Response guidelines:
+
+      - Provide accurate and helpful answers.
+      - Use clear explanations when needed.
+      - Use bullet points or structured formatting when helpful.
+      - If code or technical explanations are required, provide complete and readable examples.
+      - When appropriate, briefly explain your reasoning.
+
+      Remember:
+      The KNOWLEDGE BASE may contain partial or fragmented information. Carefully interpret it and integrate it into a coherent answer when possible.

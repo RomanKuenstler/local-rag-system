@@ -1,0 +1,624 @@
+// -----------------------------------------------------------------------------
+// IMPORTS
+// -----------------------------------------------------------------------------
+// Node.js and external libraries used by the RAG system
+
+import crypto from "crypto"; // used for SHA256 hashing (file change detection)
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai"; // LLM + embedding model
+import { QdrantClient } from "@qdrant/js-client-rest"; // vector database client
+import prompts from "prompts"; // CLI interaction library
+import fs from "fs"; // filesystem access
+import path from "path"; // filesystem path utilities
+import { randomUUID } from "crypto"; // generate unique IDs for vector DB records
+
+// ------
+// HELPER
+// ------
+// Recursively reads files from a directory and returns file metadata + content
+// Used to load knowledge base files from the ./data directory
+function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8") {
+  dirPath = path.resolve(dirPath);
+
+  // normalize extension input
+  if (!Array.isArray(allowedExtensions)) {
+    allowedExtensions = [allowedExtensions];
+  }
+
+  allowedExtensions = allowedExtensions.map((ext) =>
+    ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`
+  );
+
+  const files = [];
+
+  // create SHA256 hash for detecting file changes
+  function sha256(content) {
+    return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+  }
+
+  // recursive directory scanner
+  function scanDirectory(currentPath) {
+    const items = fs.readdirSync(currentPath);
+
+    for (const item of items) {
+      const itemPath = path.join(currentPath, item);
+      const stats = fs.statSync(itemPath);
+
+      // recurse into directories
+      if (stats.isDirectory()) {
+        scanDirectory(itemPath);
+        continue;
+      }
+
+      if (!stats.isFile()) {
+        continue;
+      }
+
+      // only process allowed file extensions
+      const ext = path.extname(item).toLowerCase();
+      if (!allowedExtensions.includes(ext)) {
+        continue;
+      }
+try {
+        const content = fs.readFileSync(itemPath, encoding);
+
+        // store file metadata + content
+        files.push({
+          path: itemPath,
+          relativePath: path.relative(dirPath, itemPath),
+          filename: path.basename(itemPath),
+          extension: ext,
+          content,
+          hash: sha256(content), // used to detect changes later
+        });
+      } catch (error) {
+        console.error(`Error reading file ${itemPath}: ${error.message}`);
+      }
+    }
+  }
+
+  try {
+    scanDirectory(dirPath);
+  } catch (error) {
+    console.error(`Error accessing directory ${dirPath}: ${error.message}`);
+  }
+
+  return files;
+}
+
+// --------------
+// CHUNKS
+// --------------
+// Splits markdown files into logical sections based on headers (#, ##, ###)
+// Smaller chunks improve retrieval quality in RAG systems
+function splitMarkdownBySectionsWithMetadata(markdown) {
+  if (!markdown || markdown === "") {
+    return [];
+  }
+
+  const headerRegex = /^\s*(#+)\s+(.*)$/gm;
+  const headerMatches = [];
+  let match;
+
+  // detect markdown headers
+  while ((match = headerRegex.exec(markdown)) !== null) {
+    headerMatches.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      title: match[2].trim(),
+    });
+  }
+
+  // if no headers exist treat entire file as one chunk
+  if (headerMatches.length === 0) {
+    const trimmed = markdown.trim();
+    return trimmed ? [{ title: "Document", content: trimmed }] : [];
+  }
+
+  const sections = [];
+
+  // capture text before first header
+  if (headerMatches[0].start > 0) {
+    const preHeader = markdown.substring(0, headerMatches[0].start).trim();
+    if (preHeader !== "") {
+      sections.push({
+        title: "Introduction",
+        content: preHeader,
+      });
+    }
+  }
+
+  // create chunks between headers
+  for (let i = 0; i < headerMatches.length; i++) {
+    const start = headerMatches[i].start;
+    const end =
+      i < headerMatches.length - 1
+        ? headerMatches[i + 1].start
+        : markdown.length;
+
+    const section = markdown.substring(start, end).trim();
+    if (section !== "") {
+      sections.push({
+        title: headerMatches[i].title || "Section",
+        content: section,
+      });
+ }
+  }
+
+  return sections;
+}
+
+// --------------------------------------------------------
+// CONFIG
+// --------------------------------------------------------
+// Configuration mostly comes from environment variables
+// (configured in docker-compose.yml)
+
+const COLLECTION_NAME = process.env.QDRANT_COLLECTION || "knowledge_base";
+const QDRANT_URL = process.env.QDRANT_URL || "http://qdrant:6333";
+const QDRANT_API_KEY = process.env.QDRANT_API_KEY || undefined;
+const CONTENT_PATH = process.env.CONTENT_PATH || "./data";
+
+// number of previous messages remembered in conversation
+const HISTORY_MESSAGES = parseInt(process.env.HISTORY_MESSAGES || "10", 10);
+
+// number of similarity results retrieved from vector DB
+const MAX_SIMILARITIES = parseInt(process.env.MAX_SIMILARITIES || "4", 10);
+
+// minimum similarity score required
+const COSINE_LIMIT = parseFloat(process.env.COSINE_LIMIT || "0.45");
+
+// local file tracking indexing state
+const INDEX_STATE_FILE =
+  process.env.INDEX_STATE_FILE || path.resolve("./.index-state.json");
+
+
+// --------------------------------------------------------
+// LLM CHAT MODEL
+// --------------------------------------------------------
+// Uses Docker Model Runner with an OpenAI-compatible API
+
+const chatModel = new ChatOpenAI({
+  model:
+    process.env.MODEL_RUNNER_LLM_CHAT ||
+    "hf.co/qwen/qwen2.5-coder-3b-instruct-gguf:q4_k_m",
+  apiKey: "",
+  configuration: {
+    baseURL:
+      process.env.MODEL_RUNNER_BASE_URL ||
+      "http://localhost:12434/engines/llama.cpp/v1/",
+  },
+
+  // generation parameters
+  temperature: parseFloat(process.env.OPTION_TEMPERATURE || "0.0"),
+  top_p: parseFloat(process.env.OPTION_TOP_P || "0.5"),
+  presencePenalty: parseFloat(process.env.OPTION_PRESENCE_PENALTY || "2.2"),
+});
+
+
+// --------------------------------------------------------
+// EMBEDDINGS MODEL
+// --------------------------------------------------------
+// Converts text into vectors used for similarity search
+
+const embeddingsModel = new OpenAIEmbeddings({
+  model: process.env.MODEL_RUNNER_LLM_EMBEDDING || "ai/embeddinggemma:latest",
+  configuration: {
+    baseURL:
+      process.env.MODEL_RUNNER_BASE_URL ||
+      "http://localhost:12434/engines/llama.cpp/v1/",
+    apiKey: "",
+  },
+});
+
+
+// --------------------------------------------------------
+// QDRANT CLIENT
+// --------------------------------------------------------
+// Vector database used for storing embeddings
+
+const qdrant = new QdrantClient({
+  url: QDRANT_URL,
+  apiKey: QDRANT_API_KEY,
+  checkCompatibility: false,
+});
+
+
+// --------------------------------------------------------
+// HISTORY
+// --------------------------------------------------------
+// Stores limited conversation history for contextual chat
+
+const conversationMemory = new Map();
+
+function getConversationHistory(sessionId) {
+  if (!conversationMemory.has(sessionId)) {
+    conversationMemory.set(sessionId, []);
+  }
+  return conversationMemory.get(sessionId);
+}
+
+function addToHistory(sessionId, role, content) {
+  const history = getConversationHistory(sessionId);
+  history.push([role, content]);
+
+  // keep only last N messages
+  if (history.length > HISTORY_MESSAGES * 2) {
+    history.splice(0, 2);
+  }
+}
+
+
+// --------------------------------------------------------
+// INDEX STATE
+// --------------------------------------------------------
+// Keeps track of file hashes so only changed files are re-embedded
+
+function loadIndexState() {
+  try {
+    if (!fs.existsSync(INDEX_STATE_FILE)) {
+      return {};
+    }
+    return JSON.parse(fs.readFileSync(INDEX_STATE_FILE, "utf8"));
+  } catch (error) {
+    console.error(`Failed to load index state: ${error.message}`);
+    return {};
+  }
+}
+
+function saveIndexState(state) {
+  try {
+    fs.writeFileSync(INDEX_STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+  } catch (error) {
+    console.error(`Failed to save index state: ${error.message}`);
+  }
+}
+
+
+// --------------------------------------------------------
+// QDRANT HELPERS
+// --------------------------------------------------------
+// Utility functions for managing the vector database
+
+async function collectionExists(collectionName) {
+  const collections = await qdrant.getCollections();
+  return collections.collections.some((c) => c.name === collectionName);
+}
+
+
+// ensure the vector collection exists and matches embedding dimension
+async function ensureCollection(vectorSize) {
+  const exists = await collectionExists(COLLECTION_NAME);
+
+  if (!exists) {
+    await qdrant.createCollection(COLLECTION_NAME, {
+      vectors: {
+        size: vectorSize,
+        distance: "Cosine",
+      },
+    });
+
+    // create indexes for faster filtering
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "source",
+      field_schema: "keyword",
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "filename",
+      field_schema: "keyword",
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "extension",
+      field_schema: "keyword",
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "documentHash",
+      field_schema: "keyword",
+    });
+
+    console.log(`✅ Qdrant collection "${COLLECTION_NAME}" created`);
+    return;
+  }
+
+  const info = await qdrant.getCollection(COLLECTION_NAME);
+  let currentSize = null;
+
+  if (
+    info?.config?.params?.vectors &&
+    !Array.isArray(info.config.params.vectors)
+  ) {
+    currentSize = info.config.params.vectors.size;
+  }
+
+if (currentSize !== vectorSize) {
+    console.log(
+      `⚠️ Vector size changed (${currentSize} -> ${vectorSize}), recreating collection...`
+    );
+
+    await qdrant.deleteCollection(COLLECTION_NAME);
+    await qdrant.createCollection(COLLECTION_NAME, {
+      vectors: {
+        size: vectorSize,
+        distance: "Cosine",
+      },
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "source",
+      field_schema: "keyword",
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "filename",
+      field_schema: "keyword",
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "extension",
+      field_schema: "keyword",
+    });
+
+    await qdrant.createPayloadIndex(COLLECTION_NAME, {
+      field_name: "documentHash",
+      field_schema: "keyword",
+    });
+
+    console.log(`✅ Qdrant collection "${COLLECTION_NAME}" recreated`);
+  }
+}
+
+
+// delete all chunks belonging to a specific source file
+async function deletePointsBySource(relativePath) {
+  await qdrant.delete(COLLECTION_NAME, {
+    wait: true,
+filter: {
+      must: [
+        {
+          key: "source",
+          match: {
+            value: relativePath,
+          },
+        },
+      ],
+    },
+  });
+}
+
+
+// convert file → chunk records
+function fileToChunks(file) {
+  let sections;
+
+  if (file.extension === ".md") {
+    sections = splitMarkdownBySectionsWithMetadata(file.content);
+  } else {
+    const trimmed = file.content.trim();
+    sections = trimmed
+      ? [{ title: "Document", content: trimmed }]
+      : [];
+  }
+
+  return sections.map((section, index) => ({
+    id: randomUUID(),
+    text: section.content,
+    title: section.title,
+    chunkIndex: index,
+    source: file.relativePath,
+    filename: file.filename,
+    extension: file.extension,
+    documentHash: file.hash,
+  }));
+}
+
+
+// --------------------------------------------------------
+// INDEXING PIPELINE
+// --------------------------------------------------------
+// Reads files, creates embeddings, and stores them in Qdrant
+
+async function indexChangedDocuments() {
+
+  console.log("========================================================");
+  console.log("Embeddings model:", embeddingsModel.model);
+  console.log(`Reading documents from: ${CONTENT_PATH}`);
+
+  const files = readTextFilesRecursively(CONTENT_PATH, [".md", ".txt"]);
+  console.log(`Files found: ${files.length}`);
+
+  if (files.length === 0) {
+    console.log("⚠️ No files found to index.");
+    console.log("========================================================");
+    return;
+  }
+
+  const indexState = loadIndexState();
+
+  const changedFiles = files.filter((file) => indexState[file.relativePath] !== file.hash);
+  const removedFiles = Object.keys(indexState).filter(
+    (relativePath) => !files.some((file) => file.relativePath === relativePath)
+  );
+
+  console.log(`Changed/new files: ${changedFiles.length}`);
+  console.log(`Removed files: ${removedFiles.length}`);
+
+  if (changedFiles.length === 0 && removedFiles.length === 0) {
+    console.log("No indexing needed.");
+    console.log("========================================================");
+    return;
+  }
+
+  const probeEmbedding = await embeddingsModel.embedQuery("dimension probe");
+  await ensureCollection(probeEmbedding.length);
+
+  // remove deleted files
+  for (const removedFile of removedFiles) {
+    try {
+      console.log(`Removing deleted file from index: ${removedFile}`);
+      await deletePointsBySource(removedFile);
+      delete indexState[removedFile];
+    } catch (error) {
+      console.error(`Failed removing ${removedFile}: ${error.message}`);
+    }
+  }
+
+  // index changed files
+  for (const file of changedFiles) {
+    try {
+      console.log(`Indexing file: ${file.relativePath}`);
+
+      await deletePointsBySource(file.relativePath);
+
+      const chunkRecords = fileToChunks(file).filter((chunk) => chunk.text?.trim());
+      if (chunkRecords.length === 0) {
+        console.log(`No chunks for file: ${file.relativePath}`);
+        indexState[file.relativePath] = file.hash;
+        continue;
+}
+
+      const embeddings = await embeddingsModel.embedDocuments(
+        chunkRecords.map((chunk) => chunk.text)
+      );
+
+      const points = chunkRecords.map((chunk, index) => ({
+        id: chunk.id,
+        vector: embeddings[index],
+        payload: {
+          text: chunk.text,
+          title: chunk.title,
+          source: chunk.source,
+          filename: chunk.filename,
+          extension: chunk.extension,
+          chunkIndex: chunk.chunkIndex,
+          documentHash: chunk.documentHash,
+        },
+      }));
+
+      await qdrant.upsert(COLLECTION_NAME, {
+        wait: true,
+        points,
+      });
+
+      indexState[file.relativePath] = file.hash;
+      console.log(`Indexed ${points.length} chunks from ${file.relativePath}`);
+    } catch (error) {
+      console.error(`Error indexing ${file.relativePath}: ${error.message}`);
+    }
+  }
+
+  saveIndexState(indexState);
+  console.log("Index state saved");
+  console.log("========================================================");
+  console.log();
+}
+
+
+// --------------------------------------------------------
+// RETRIEVAL
+// --------------------------------------------------------
+// Performs similarity search in the vector database
+
+async function searchKnowledgeBase(userMessage) {
+  const userQuestionEmbedding = await embeddingsModel.embedQuery(userMessage);
+
+  const results = await qdrant.search(COLLECTION_NAME, {
+    vector: userQuestionEmbedding,
+    limit: MAX_SIMILARITIES,
+    with_payload: true,
+});
+
+  const filteredResults = results.filter((result) => result.score >= COSINE_LIMIT);
+
+  let knowledgeBase = `The following information was retrieved from the knowledge base.
+Use it if relevant to answer the user.
+
+KNOWLEDGE BASE:
+`;
+
+  for (const result of filteredResults) {
+    const payload = result.payload || {};
+    const text = payload.text || "";
+    const source = payload.source || "unknown";
+    const title = payload.title || "Untitled";
+
+    console.log(
+      "Score:",
+      result.score,
+      "Source:",
+      source,
+      "Title:",
+      title
+    );
+
+    knowledgeBase += `[Source: ${source} | Section: ${title} | Score: ${result.score}]\n${text}\n\n`;
+  }
+
+  console.log(`Similarities found: ${filteredResults.length}`);
+  console.log("========================================================");
+  console.log();
+
+  return knowledgeBase;
+}
+
+
+// --------------------------------------------------------
+// MAIN PROGRAM
+// --------------------------------------------------------
+
+let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
+
+// index documents before chat starts
+await indexChangedDocuments();
+
+let exit = false;
+while (!exit) {
+  const response = await prompts({
+    type: "text",
+    name: "userMessage",
+    message: `Your question (${chatModel.model}): `,
+    validate: (value) => (value ? true : "Question cannot be empty"),
+  });
+
+  const userMessage = response.userMessage;
+
+  if (!userMessage) {
+    continue;
+  }
+
+  // exit command
+  if (userMessage === "/bye") {
+    console.log("👋 See you later!");
+    exit = true;
+    continue;
+  }
+
+  const history = getConversationHistory("default-session-id");
+
+  // retrieve relevant knowledge
+  const knowledgeBase = await searchKnowledgeBase(userMessage);
+
+  // build final prompt
+  const messages = [
+    ["system", systemInstructions],
+    ["system", knowledgeBase],
+    ...history,
+    ["user", userMessage],
+  ];
+
+  let assistantResponse = "";
+
+  // stream response from LLM
+  const stream = await chatModel.stream(messages);
+  for await (const chunk of stream) {
+    assistantResponse += chunk.content;
+    process.stdout.write(chunk.content);
+  }
+
+  console.log("\n");
+
+  // update conversation history
+  addToHistory("default-session-id", "user", userMessage);
+  addToHistory("default-session-id", "assistant", assistantResponse);
+}
