@@ -14,6 +14,54 @@ import { randomUUID } from "crypto"; // generate unique IDs for vector DB record
 // ------
 // HELPER
 // ------
+// Global SHA256 helper
+function sha256(content) {
+  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+
+// Normalize text before chunking/embedding.
+// Goal: make indexing input more stable and cleaner.
+function normalizeTextForIndexing(text) {
+  if (!text) {
+    return "";
+  }
+
+  text.normalize("NFKC");
+
+  return text
+    .replace(/\r\n/g, "\n")          // Windows -> Unix line endings
+    .replace(/\r/g, "\n")            // old Mac line endings -> Unix
+    .replace(/\t/g, "    ")          // tabs -> spaces
+    .replace(/[ \t]+$/gm, "")        // remove trailing spaces at line ends
+    .replace(/\n{3,}/g, "\n\n")      // collapse 3+ blank lines into 2
+    .trim();
+}
+
+
+// Build the effective document hash used for incremental indexing.
+//
+// Important:
+// This hash depends on:
+// - normalized text
+// - chunking config
+// - indexing schema version
+//
+// Result:
+// - changing chunking settings forces re-indexing
+// - changing normalization logic can be versioned
+function buildIndexRelevantHash(content) {
+  const normalizedContent = normalizeTextForIndexing(content);
+
+  return sha256(
+    JSON.stringify({
+      normalizedContent,
+      chunkSize: CHUNK_SIZE,
+      chunkOverlap: CHUNK_OVERLAP,
+      indexSchemaVersion: INDEX_SCHEMA_VERSION,
+    })
+  );
+}
 // Recursively reads files from a directory and returns file metadata + content
 // Used to load knowledge base files from the ./data directory
 function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8") {
@@ -29,11 +77,6 @@ function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8")
   );
 
   const files = [];
-
-  // create SHA256 hash for detecting file changes
-  function sha256(content) {
-    return crypto.createHash("sha256").update(content, "utf8").digest("hex");
-  }
 
   // recursive directory scanner
   function scanDirectory(currentPath) {
@@ -59,16 +102,16 @@ function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8")
         continue;
       }
 try {
-        const content = fs.readFileSync(itemPath, encoding);
+        const rawContent = fs.readFileSync(itemPath, encoding);
+        const content = normalizeTextForIndexing(rawContent);
 
-        // store file metadata + content
         files.push({
           path: itemPath,
           relativePath: path.relative(dirPath, itemPath),
           filename: path.basename(itemPath),
           extension: ext,
-          content,
-          hash: sha256(content), // used to detect changes later
+          content, // cleaned content used for chunking + embedding
+          hash: buildIndexRelevantHash(rawContent), // hash also reacts to chunking strategy changes
         });
       } catch (error) {
         console.error(`Error reading file ${itemPath}: ${error.message}`);
@@ -370,6 +413,11 @@ const INDEX_STATE_FILE =
 // CHUNK_OVERLAP = number of overlapping characters between adjacent chunks
 const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE || "1200", 10);
 const CHUNK_OVERLAP = parseInt(process.env.CHUNK_OVERLAP || "400", 10);
+
+// Version for indexing/chunking strategy.
+// Bump this manually when you make major indexing changes and want to force
+// a full re-embedding of all documents.
+const INDEX_SCHEMA_VERSION = process.env.INDEX_SCHEMA_VERSION || "1";
 
 // --------------------------------------------------------
 // LLM CHAT MODEL

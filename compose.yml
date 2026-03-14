@@ -60,6 +60,9 @@ services:
       CHUNK_SIZE: 900
       CHUNK_OVERLAP: 150
 
+      # Manual version lever when changing indexing, embedding, chunking
+      # INDEX_SCHEMA_VERSION: "1"
+
       # -----------------------------------------------------------------------
       # LLM generation parameters
       # These influence how the chat model generates answers
