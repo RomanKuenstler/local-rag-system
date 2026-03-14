@@ -561,32 +561,6 @@ function saveIndexState(state) {
   }
 }
 
-function validateRetrievalConfig() {
-  if (!Number.isInteger(MAX_SIMILARITIES) || MAX_SIMILARITIES < 1) {
-    throw new Error(
-      `Invalid MAX_SIMILARITIES: ${MAX_SIMILARITIES}. It must be an integer >= 1.`
-    );
-  }
-
-  if (!Number.isInteger(MIN_SIMILARITIES) || MIN_SIMILARITIES < 0) {
-    throw new Error(
-      `Invalid MIN_SIMILARITIES: ${MIN_SIMILARITIES}. It must be an integer >= 0.`
-    );
-  }
-
-  if (MIN_SIMILARITIES > MAX_SIMILARITIES) {
-    throw new Error(
-      `Invalid retrieval config: MIN_SIMILARITIES (${MIN_SIMILARITIES}) must be <= MAX_SIMILARITIES (${MAX_SIMILARITIES}).`
-    );
-  }
-
-  if (Number.isNaN(COSINE_LIMIT)) {
-    throw new Error(
-      `Invalid COSINE_LIMIT: ${COSINE_LIMIT}. It must be a valid number.`
-    );
-  }
-}
-
 // --------------------------------------------------------
 // QDRANT HELPERS
 // --------------------------------------------------------

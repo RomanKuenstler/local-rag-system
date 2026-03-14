@@ -46,7 +46,7 @@ services:
 
       # Minimum number of acceptable similarities required after filtering
       # before retrieval is treated as sufficiently strong
-      MIN_SIMILARITIES: 3
+      MIN_SIMILARITIES: 2
 
       # Maximum number of similar knowledge chunks retrieved from the DB
       # Increasing this may improve context but also increases prompt size
@@ -54,12 +54,12 @@ services:
 
       # Cosine similarity threshold
       # Only chunks above this similarity score are considered relevant
-      COSINE_LIMIT: 0.7
+      COSINE_LIMIT: 0.55
 
       # Chunking configuration
       # Each section is split into smaller chunks with overlap
-      CHUNK_SIZE: 1200
-      CHUNK_OVERLAP: 400
+      CHUNK_SIZE: 900
+      CHUNK_OVERLAP: 150
 
       # -----------------------------------------------------------------------
       # LLM generation parameters
