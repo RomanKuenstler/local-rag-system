@@ -65,6 +65,11 @@ services:
 
       MAX_EMBEDDING_CHARS: 400
 
+      # -------------
+      # PDF characters minimum of extraction to be embedded
+      # -------------
+      PDF_MIN_EXTRACTED_CHARS: 100
+
       # -----------------------------------------------------------------------
       # LLM generation parameters
       # These influence how the chat model generates answers
