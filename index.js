@@ -222,6 +222,90 @@ const qdrant = new QdrantClient({
   checkCompatibility: false,
 });
 
+// --------------------------------------------------------
+// RAG MESSAGE PACKAGE HELPERS
+// --------------------------------------------------------
+
+// Simple evidence-quality assessment.
+// This is intentionally lightweight for now and can be improved later.
+function getEvidenceQuality(results) {
+  if (!results || results.length === 0) {
+    return "weak";
+  }
+
+  const scores = results.map((result) => result.score ?? 0);
+  const maxScore = Math.max(...scores);
+  const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+
+  // Simple first version:
+  // - strong   -> multiple decent matches
+  // - moderate -> at least one usable match
+  // - weak     -> very limited / low-confidence evidence
+  if (results.length >= 2 && avgScore >= 0.7) {
+    return "strong";
+  }
+
+  if (maxScore >= 0.55) {
+    return "moderate";
+  }
+
+  return "weak";
+}
+
+
+// Formats one evidence entry for Option 2
+function formatEvidenceEntry(result, index) {
+  const payload = result.payload || {};
+  const source = payload.source || "unknown";
+  const section = payload.title || "Untitled";
+  const score =
+    typeof result.score === "number" ? result.score.toFixed(4) : "n/a";
+  const content = payload.text || "";
+
+  return `[Evidence ${index}]
+Source file: ${source}
+Section: ${section}
+Retrieval score: ${score}
+
+${content}`;
+}
+
+function buildRagContextPackage({ results, userMessage, evidenceQuality }) {
+  const evidenceBlock =
+    results.length > 0
+      ? results.map((result, index) => formatEvidenceEntry(result, index + 1)).join("\n\n")
+      : "No relevant evidence was retrieved from the knowledge base.";
+
+  return `RAG CONTEXT PACKAGE
+
+You are given retrieved knowledge from the knowledge base.
+Some retrieved entries may be more relevant than others.
+Use the retrieved content as the primary basis for your answer.
+
+EVIDENCE SUMMARY
+Retrieved entries: ${results.length}
+Evidence quality assessment: ${evidenceQuality}
+
+INTERPRETATION GUIDE
+- Prefer evidence that is most relevant to the user's question.
+- Use metadata such as source, section, and retrieval score as helpful hints, but rely mainly on the content itself.
+- Ignore retrieved entries that are clearly irrelevant.
+- Do not invent unsupported facts.
+- If multiple entries support the same answer, combine them into one coherent explanation.
+
+RETRIEVED EVIDENCE
+
+${evidenceBlock}
+
+ANSWERING TASK
+- Answer the user's question using the retrieved knowledge as the primary source.
+- If the evidence is partial, answer only what is supported and clearly indicate what is missing.
+- If the evidence is insufficient, say that the knowledge base does not contain enough information.
+- If you provide additional general knowledge, clearly label it as general knowledge and not as knowledge-base content.
+
+USER QUESTION
+${userMessage}`;
+}
 
 // --------------------------------------------------------
 // HISTORY
@@ -527,19 +611,14 @@ async function searchKnowledgeBase(userMessage) {
     vector: userQuestionEmbedding,
     limit: MAX_SIMILARITIES,
     with_payload: true,
-});
+  });
 
   const filteredResults = results.filter((result) => result.score >= COSINE_LIMIT);
 
-  let knowledgeBase = `The following information was retrieved from the knowledge base.
-Use it if relevant to answer the user.
-
-KNOWLEDGE BASE:
-`;
+  const evidenceQuality = getEvidenceQuality(filteredResults);
 
   for (const result of filteredResults) {
     const payload = result.payload || {};
-    const text = payload.text || "";
     const source = payload.source || "unknown";
     const title = payload.title || "Untitled";
 
@@ -551,17 +630,25 @@ KNOWLEDGE BASE:
       "Title:",
       title
     );
-
-    knowledgeBase += `[Source: ${source} | Section: ${title} | Score: ${result.score}]\n${text}\n\n`;
   }
 
   console.log(`Similarities found: ${filteredResults.length}`);
+  console.log(`Evidence quality: ${evidenceQuality}`);
   console.log("========================================================");
   console.log();
 
-  return knowledgeBase;
-}
+  const ragContextPackage = buildRagContextPackage({
+    results: filteredResults,
+    userMessage,
+    evidenceQuality,
+  });
 
+  return {
+    results: filteredResults,
+    evidenceQuality,
+    ragContextPackage,
+  };
+}
 
 // --------------------------------------------------------
 // MAIN PROGRAM
@@ -597,12 +684,13 @@ while (!exit) {
   const history = getConversationHistory("default-session-id");
 
   // retrieve relevant knowledge
-  const knowledgeBase = await searchKnowledgeBase(userMessage);
+  const { ragContextPackage, evidenceQuality, results } =
+  await searchKnowledgeBase(userMessage);
 
   // build final prompt
   const messages = [
     ["system", systemInstructions],
-    ["system", knowledgeBase],
+    ["system", ragContextPackage],
     ...history,
     ["user", userMessage],
   ];
