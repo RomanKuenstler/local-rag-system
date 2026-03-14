@@ -63,7 +63,7 @@ services:
       # Manual version lever when changing indexing, embedding, chunking
       # INDEX_SCHEMA_VERSION: "1"
 
-      MAX_EMBEDDING_CHARS: 700
+      MAX_EMBEDDING_CHARS: 400
 
       # -----------------------------------------------------------------------
       # LLM generation parameters

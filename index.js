@@ -24,36 +24,83 @@ function enforceEmbeddingSizeLimit(chunks, maxChars = MAX_EMBEDDING_CHARS) {
   const safeChunks = [];
 
   for (const chunk of chunks) {
-    if (!chunk.text || chunk.text.length <= maxChars) {
-      safeChunks.push(chunk);
-      continue;
-    }
-
-    const splitTexts = splitLongTextWithOverlap(
-      chunk.text,
-      maxChars,
-      Math.min(CHUNK_OVERLAP, Math.floor(maxChars / 5))
-    );
-
-    for (let i = 0; i < splitTexts.length; i++) {
-      const splitText = splitTexts[i]?.trim();
-      if (!splitText) {
-        continue;
-      }
-
-      safeChunks.push({
-        ...chunk,
-        id: randomUUID(),
-        text: splitText,
-        subchunkIndex:
-          typeof chunk.subchunkIndex === "number"
-            ? `${chunk.subchunkIndex}.${i}`
-            : `${i}`,
-      });
-    }
+    const splitChunks = splitChunkRecursivelyToSafeSize(chunk, maxChars);
+    safeChunks.push(...splitChunks);
   }
 
   return safeChunks;
+}
+
+
+function splitChunkRecursivelyToSafeSize(chunk, maxChars) {
+  if (!chunk.text || chunk.text.length <= maxChars) {
+    return [chunk];
+  }
+
+  const overlap = Math.min(CHUNK_OVERLAP, Math.floor(maxChars / 6));
+
+  const splitTexts = splitLongTextWithOverlap(chunk.text, maxChars, overlap);
+
+  // Safety fallback: if splitting failed for some reason, hard-cut
+  if (splitTexts.length <= 1 && chunk.text.length > maxChars) {
+    const hardSplitTexts = hardSplitText(chunk.text, maxChars, overlap);
+
+    return hardSplitTexts.flatMap((text, index) =>
+      splitChunkRecursivelyToSafeSize(
+        {
+          ...chunk,
+          id: randomUUID(),
+          text,
+          subchunkIndex: formatSubchunkIndex(chunk.subchunkIndex, index),
+        },
+        maxChars
+      )
+    );
+  }
+
+  return splitTexts.flatMap((text, index) =>
+    splitChunkRecursivelyToSafeSize(
+      {
+        ...chunk,
+        id: randomUUID(),
+        text: text.trim(),
+        subchunkIndex: formatSubchunkIndex(chunk.subchunkIndex, index),
+      },
+      maxChars
+    )
+  );
+}
+
+
+function hardSplitText(text, maxChars, overlap) {
+  const chunks = [];
+  let start = 0;
+
+  while (start < text.length) {
+    const end = Math.min(start + maxChars, text.length);
+    const piece = text.slice(start, end).trim();
+
+    if (piece) {
+      chunks.push(piece);
+    }
+
+    if (end >= text.length) {
+      break;
+    }
+
+    start = Math.max(end - overlap, start + 1);
+  }
+
+  return chunks;
+}
+
+
+function formatSubchunkIndex(baseIndex, index) {
+  if (baseIndex === undefined || baseIndex === null) {
+    return `${index}`;
+  }
+
+  return `${baseIndex}.${index}`;
 }
 
 // Normalize text before chunking/embedding.
@@ -662,7 +709,7 @@ const INDEX_SCHEMA_VERSION = process.env.INDEX_SCHEMA_VERSION || "1";
 
 // Max embedding chars to decrease input tokens for embedding model
 const MAX_EMBEDDING_CHARS = parseInt(
-  process.env.MAX_EMBEDDING_CHARS || "700",
+  process.env.MAX_EMBEDDING_CHARS || "400",
   10
 );
 
@@ -1092,6 +1139,18 @@ async function indexChangedDocuments() {
         indexState[file.relativePath] = file.hash;
         continue;
 }
+
+      const chunkLengths = chunkRecords.map((chunk) => chunk.text.length);
+      const maxChunkLength = chunkLengths.length > 0 ? Math.max(...chunkLengths) : 0;
+      const avgChunkLength =
+        chunkLengths.length > 0
+          ? Math.round(chunkLengths.reduce((a, b) => a + b, 0) / chunkLengths.length)
+          : 0;
+
+       console.log(
+        `Prepared ${chunkRecords.length} chunks from ${file.relativePath} ` +
+        `(avg chars: ${avgChunkLength}, max chars: ${maxChunkLength})`
+      );
 
       const embeddings = await embeddingsModel.embedDocuments(
         chunkRecords.map((chunk) => chunk.text)
