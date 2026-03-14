@@ -11,6 +11,7 @@ import fs from "fs"; // filesystem access
 import path from "path"; // filesystem path utilities
 import { randomUUID } from "crypto"; // generate unique IDs for vector DB records
 import * as cheerio from "cheerio";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 // ------
 // HELPER
@@ -278,6 +279,76 @@ function normalizeInlineText(text) {
     .trim();
 }
 
+// Extract readable text from a PDF page-by-page.
+// v1 design:
+// - text-based PDFs only
+// - no OCR
+// - page-aware structure
+// - light cleanup
+async function extractTextFromPdf(filePath) {
+  const loadingTask = pdfjsLib.getDocument(filePath);
+  const pdf = await loadingTask.promise;
+
+  const pageSections = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+
+    // Extract text items in order
+    const rawItems = textContent.items
+      .map((item) => ("str" in item ? item.str : ""))
+      .map((text) => text.trim())
+      .filter(Boolean);
+
+    if (rawItems.length === 0) {
+      continue;
+    }
+
+    // Light first-pass line reconstruction.
+    // v1 keeps this intentionally simple.
+    const pageText = normalizePdfPageText(rawItems.join("\n"));
+
+    if (!pageText || pageText.length < PDF_MIN_EXTRACTED_CHARS) {
+      continue;
+    }
+
+    // Label each page as a markdown section so your existing
+    // markdown-style section splitter can reuse it.
+    pageSections.push(`## PDF Page ${pageNumber}\n\n${pageText}`);
+  }
+
+  const combined = pageSections.join("\n\n");
+
+  return combined.trim();
+}
+
+
+// Light cleanup specific to PDF-extracted page text.
+// Keep it conservative so we do not destroy useful technical content.
+function normalizePdfPageText(text) {
+  if (!text) {
+    return "";
+  }
+
+  let cleaned = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  // Optional tiny improvement:
+  // remove lines that are only page numbers
+  cleaned = cleaned
+    .split("\n")
+    .filter((line) => !/^\s*\d+\s*$/.test(line))
+    .join("\n")
+    .trim();
+
+  return cleaned;
+}
 
 // Normalize preformatted/code text but keep line structure
 function normalizePreformattedText(text) {
@@ -351,7 +422,7 @@ function buildIndexRelevantHash(content) {
 }
 // Recursively reads files from a directory and returns file metadata + content
 // Used to load knowledge base files from the ./data directory
-function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8") {
+async function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8") {
   dirPath = path.resolve(dirPath);
 
   // normalize extension input
@@ -366,7 +437,7 @@ function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8")
   const files = [];
 
   // recursive directory scanner
-  function scanDirectory(currentPath) {
+  async function scanDirectory(currentPath) {
     const items = fs.readdirSync(currentPath);
 
     for (const item of items) {
@@ -388,18 +459,30 @@ function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8")
       if (!allowedExtensions.includes(ext)) {
         continue;
       }
-try {
-        const rawContent = fs.readFileSync(itemPath, encoding);
-        const extractedContent = extractIndexableTextByExtension(rawContent, ext);
-        const content = normalizeTextForIndexing(rawContent);
+      try {
+        let extractedContent = "";
+
+        if (ext === ".pdf") {
+          extractedContent = await extractTextFromPdf(itemPath);
+        } else {
+          const rawContent = fs.readFileSync(itemPath, encoding);
+          extractedContent = extractIndexableTextByExtension(rawContent, ext);
+        }
+
+        const content = normalizeTextForIndexing(extractedContent);
+
+        if (!content || content.length === 0) {
+          console.log(`Skipping file with no indexable text: ${itemPath}`);
+          continue;
+        }
 
         files.push({
           path: itemPath,
           relativePath: path.relative(dirPath, itemPath),
           filename: path.basename(itemPath),
           extension: ext,
-          content, // cleaned content used for chunking + embedding
-          hash: buildIndexRelevantHash(rawContent), // hash also reacts to chunking strategy changes
+          content,
+          hash: buildIndexRelevantHash(extractedContent),
         });
       } catch (error) {
         console.error(`Error reading file ${itemPath}: ${error.message}`);
@@ -408,7 +491,7 @@ try {
   }
 
   try {
-    scanDirectory(dirPath);
+    await scanDirectory(dirPath);
   } catch (error) {
     console.error(`Error accessing directory ${dirPath}: ${error.message}`);
   }
@@ -719,6 +802,22 @@ if (!Number.isInteger(MAX_EMBEDDING_CHARS) || MAX_EMBEDDING_CHARS < 200) {
   );
 }
 
+// PDF extraction configuration
+// Minimum amount of extracted text required before we treat a PDF as useful.
+const PDF_MIN_EXTRACTED_CHARS = parseInt(
+  process.env.PDF_MIN_EXTRACTED_CHARS || "80",
+  10
+);
+
+  if (
+    !Number.isInteger(PDF_MIN_EXTRACTED_CHARS) ||
+    PDF_MIN_EXTRACTED_CHARS < 0
+  ) {
+    throw new Error(
+      `Invalid PDF_MIN_EXTRACTED_CHARS: ${PDF_MIN_EXTRACTED_CHARS}. It must be an integer >= 0.`
+    );
+  }
+
 // --------------------------------------------------------
 // LLM CHAT MODEL
 // --------------------------------------------------------
@@ -1027,7 +1126,12 @@ filter: {
 function fileToChunks(file) {
   let sections;
 
-  if (file.extension === ".md" || file.extension === ".html" || file.extension === ".htm") {
+  if (
+    file.extension === ".md" ||
+    file.extension === ".html" ||
+    file.extension === ".htm" ||
+    file.extension === ".pdf"
+  ) {
     sections = splitMarkdownBySectionsWithMetadata(file.content);
   } else {
     const trimmed = file.content.trim();
@@ -1087,7 +1191,13 @@ async function indexChangedDocuments() {
   console.log("Embeddings model:", embeddingsModel.model);
   console.log(`Reading documents from: ${CONTENT_PATH}`);
 
-  const files = readTextFilesRecursively(CONTENT_PATH, [".md", ".txt", ".html", ".htm"]);
+  const files = await readTextFilesRecursively(CONTENT_PATH, [
+    ".md",
+    ".txt",
+    ".html",
+    ".htm",
+    ".pdf",
+  ]);
   console.log(`Files found: ${files.length}`);
 
   if (files.length === 0) {
