@@ -32,7 +32,6 @@ services:
       dockerfile: Dockerfile
 
     environment:
-
       # Terminal compatibility for interactive usage
       TERM: xterm-256color
 
@@ -82,7 +81,6 @@ services:
     # All knowledge files placed here will be embedded and searchable
     volumes:
       - ./data:/app/data
-
     # Keep STDIN open so we can interact with the container
     stdin_open: true   # equivalent to docker run -i
 
