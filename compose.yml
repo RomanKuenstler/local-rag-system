@@ -32,7 +32,6 @@ services:
       dockerfile: Dockerfile
 
     environment:
-
       # Terminal compatibility for interactive usage
       TERM: xterm-256color
 
@@ -46,7 +45,7 @@ services:
 
       # Minimum number of acceptable similarities required after filtering
       # before retrieval is treated as sufficiently strong
-      MIN_SIMILARITIES: 3
+      MIN_SIMILARITIES: 2
 
       # Maximum number of similar knowledge chunks retrieved from the DB
       # Increasing this may improve context but also increases prompt size
@@ -54,7 +53,15 @@ services:
 
       # Cosine similarity threshold
       # Only chunks above this similarity score are considered relevant
-      COSINE_LIMIT: 0.7
+      COSINE_LIMIT: 0.55
+
+      # Chunking configuration
+      # Each section is split into smaller chunks with overlap
+      CHUNK_SIZE: 900
+      CHUNK_OVERLAP: 150
+
+      # Manual version lever when changing indexing, embedding, chunking
+      # INDEX_SCHEMA_VERSION: "1"
 
       # -----------------------------------------------------------------------
       # LLM generation parameters
@@ -77,7 +84,6 @@ services:
     # All knowledge files placed here will be embedded and searchable
     volumes:
       - ./data:/app/data
-
     # Keep STDIN open so we can interact with the container
     stdin_open: true   # equivalent to docker run -i
 
