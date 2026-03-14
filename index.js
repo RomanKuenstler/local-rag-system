@@ -20,6 +20,41 @@ function sha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function enforceEmbeddingSizeLimit(chunks, maxChars = MAX_EMBEDDING_CHARS) {
+  const safeChunks = [];
+
+  for (const chunk of chunks) {
+    if (!chunk.text || chunk.text.length <= maxChars) {
+      safeChunks.push(chunk);
+      continue;
+    }
+
+    const splitTexts = splitLongTextWithOverlap(
+      chunk.text,
+      maxChars,
+      Math.min(CHUNK_OVERLAP, Math.floor(maxChars / 5))
+    );
+
+    for (let i = 0; i < splitTexts.length; i++) {
+      const splitText = splitTexts[i]?.trim();
+      if (!splitText) {
+        continue;
+      }
+
+      safeChunks.push({
+        ...chunk,
+        id: randomUUID(),
+        text: splitText,
+        subchunkIndex:
+          typeof chunk.subchunkIndex === "number"
+            ? `${chunk.subchunkIndex}.${i}`
+            : `${i}`,
+      });
+    }
+  }
+
+  return safeChunks;
+}
 
 // Normalize text before chunking/embedding.
 // Goal: make indexing input more stable and cleaner.
@@ -625,6 +660,18 @@ const CHUNK_OVERLAP = parseInt(process.env.CHUNK_OVERLAP || "400", 10);
 // a full re-embedding of all documents.
 const INDEX_SCHEMA_VERSION = process.env.INDEX_SCHEMA_VERSION || "1";
 
+// Max embedding chars to decrease input tokens for embedding model
+const MAX_EMBEDDING_CHARS = parseInt(
+  process.env.MAX_EMBEDDING_CHARS || "700",
+  10
+);
+
+if (!Number.isInteger(MAX_EMBEDDING_CHARS) || MAX_EMBEDDING_CHARS < 200) {
+  throw new Error(
+    `Invalid MAX_EMBEDDING_CHARS: ${MAX_EMBEDDING_CHARS}. It must be an integer >= 200.`
+  );
+}
+
 // --------------------------------------------------------
 // LLM CHAT MODEL
 // --------------------------------------------------------
@@ -979,7 +1026,7 @@ function fileToChunks(file) {
     }
   }
 
-  return chunkRecords;
+  return enforceEmbeddingSizeLimit(chunkRecords);
 }
 
 // --------------------------------------------------------
@@ -1172,7 +1219,7 @@ while (!exit) {
 
   // exit command
   if (userMessage === "/bye") {
-    console.log("👋 See you later!");
+    console.log("See you later!");
     exit = true;
     continue;
   }
