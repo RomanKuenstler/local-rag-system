@@ -10,6 +10,7 @@ import prompts from "prompts"; // CLI interaction library
 import fs from "fs"; // filesystem access
 import path from "path"; // filesystem path utilities
 import { randomUUID } from "crypto"; // generate unique IDs for vector DB records
+import * as cheerio from "cheerio";
 
 // ------
 // HELPER
@@ -27,7 +28,7 @@ function normalizeTextForIndexing(text) {
     return "";
   }
 
-  text.normalize("NFKC");
+  text = text.normalize("NFKC");
 
   return text
     .replace(/\r\n/g, "\n")          // Windows -> Unix line endings
@@ -38,6 +39,210 @@ function normalizeTextForIndexing(text) {
     .trim();
 }
 
+// Extract readable structured text from HTML.
+// Goal:
+// - keep meaningful document content
+// - remove obvious layout/UI junk
+// - preserve headings so we can reuse markdown-style section splitting
+function extractTextFromHtml(html) {
+  if (!html || html.trim() === "") {
+    return "";
+  }
+
+  const $ = cheerio.load(html);
+
+  // Remove obvious non-content / UI / boilerplate elements
+  $(
+    [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "canvas",
+      "iframe",
+      "nav",
+      "footer",
+      "aside",
+      "form",
+      "button",
+      "input",
+      "select",
+      "textarea",
+      "img",
+      "picture",
+      "video",
+      "audio",
+      "source",
+      "meta",
+      "link",
+      "object",
+      "embed",
+      "advertisement",
+    ].join(", ")
+  ).remove();
+
+  // Prefer the semantically most relevant root
+  const root =
+    $("main").first().length > 0
+      ? $("main").first()
+      : $("article").first().length > 0
+        ? $("article").first()
+        : $('[role="main"]').first().length > 0
+          ? $('[role="main"]').first()
+          : $("body").first().length > 0
+            ? $("body").first()
+            : $.root();
+
+  const blocks = [];
+  const selectors = [
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "li",
+    "blockquote",
+    "pre",
+    "table",
+  ].join(", ");
+
+  root.find(selectors).each((_, element) => {
+    const $el = $(element);
+    const tagName = (element.tagName || "").toLowerCase();
+
+    if (!tagName) {
+      return;
+    }
+
+    // Skip elements inside removed/non-content zones if they somehow remain
+    if (
+      $el.closest("nav, footer, aside, form, script, style, noscript").length > 0
+    ) {
+      return;
+    }
+
+    let text = "";
+
+    if (tagName === "table") {
+      const rows = [];
+
+      $el.find("tr").each((_, row) => {
+        const cells = [];
+        $(row)
+          .find("th, td")
+          .each((_, cell) => {
+            const cellText = normalizeInlineText($(cell).text());
+            if (cellText) {
+              cells.push(cellText);
+            }
+          });
+
+        if (cells.length > 0) {
+          rows.push(cells.join(" | "));
+        }
+      });
+
+      if (rows.length > 0) {
+        text = rows.join("\n");
+      }
+    } else if (tagName === "pre") {
+      text = normalizePreformattedText($el.text());
+      if (text) {
+        text = `\`\`\`\n${text}\n\`\`\``;
+      }
+    } else {
+      text = normalizeInlineText($el.text());
+    }
+
+    if (!text) {
+      return;
+    }
+
+    // Preserve heading structure by converting HTML headings into markdown headings
+    if (/^h[1-6]$/.test(tagName)) {
+      const level = Number(tagName[1]);
+      blocks.push(`${"#".repeat(level)} ${text}`);
+      return;
+    }
+
+    if (tagName === "li") {
+      blocks.push(`- ${text}`);
+      return;
+    }
+
+    if (tagName === "blockquote") {
+      blocks.push(`> ${text}`);
+      return;
+    }
+
+    blocks.push(text);
+  });
+
+  return deduplicateConsecutiveBlocks(blocks).join("\n\n");
+}
+
+
+// Normalize normal inline/block text from HTML nodes
+function normalizeInlineText(text) {
+  if (!text) {
+    return "";
+  }
+
+  return text
+    .replace(/\u00a0/g, " ")   // non-breaking spaces
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
+// Normalize preformatted/code text but keep line structure
+function normalizePreformattedText(text) {
+  if (!text) {
+    return "";
+  }
+
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+
+// Remove immediately repeated blocks to reduce duplicated HTML boilerplate
+function deduplicateConsecutiveBlocks(blocks) {
+  const cleaned = [];
+
+  for (const block of blocks) {
+    const trimmed = block.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    if (cleaned.length === 0 || cleaned[cleaned.length - 1] !== trimmed) {
+      cleaned.push(trimmed);
+    }
+  }
+
+  return cleaned;
+}
+
+
+// Route content extraction by file extension
+function extractIndexableTextByExtension(rawContent, extension) {
+  if (!rawContent) {
+    return "";
+  }
+
+  if (extension === ".html" || extension === ".htm") {
+    return extractTextFromHtml(rawContent);
+  }
+
+  return rawContent;
+}
 
 // Build the effective document hash used for incremental indexing.
 //
@@ -103,6 +308,7 @@ function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8")
       }
 try {
         const rawContent = fs.readFileSync(itemPath, encoding);
+        const extractedContent = extractIndexableTextByExtension(rawContent, ext);
         const content = normalizeTextForIndexing(rawContent);
 
         files.push({
@@ -727,12 +933,12 @@ filter: {
 function fileToChunks(file) {
   let sections;
 
-  if (file.extension === ".md") {
+  if (file.extension === ".md" || file.extension === ".html" || file.extension === ".htm") {
     sections = splitMarkdownBySectionsWithMetadata(file.content);
   } else {
     const trimmed = file.content.trim();
     sections = trimmed
-      ? [{ title: "Document", content: trimmed }]
+      ? [{ title: file.filename, content: trimmed }]
       : [];
   }
 
@@ -787,7 +993,7 @@ async function indexChangedDocuments() {
   console.log("Embeddings model:", embeddingsModel.model);
   console.log(`Reading documents from: ${CONTENT_PATH}`);
 
-  const files = readTextFilesRecursively(CONTENT_PATH, [".md", ".txt"]);
+  const files = readTextFilesRecursively(CONTENT_PATH, [".md", ".txt", ".html", ".htm"]);
   console.log(`Files found: ${files.length}`);
 
   if (files.length === 0) {

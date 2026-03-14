@@ -8,6 +8,7 @@
     "@langchain/textsplitters": "^1.0.1",
     "langchain": "^1.2.7",
     "prompts": "^2.4.2",
-    "@qdrant/qdrant-js": "^1.17.0"
+    "@qdrant/qdrant-js": "^1.17.0",
+    "cheerio": "^1.2.0"
   }
 }
