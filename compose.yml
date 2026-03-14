@@ -57,11 +57,13 @@ services:
 
       # Chunking configuration
       # Each section is split into smaller chunks with overlap
-      CHUNK_SIZE: 900
-      CHUNK_OVERLAP: 150
+      CHUNK_SIZE: 600
+      CHUNK_OVERLAP: 100
 
       # Manual version lever when changing indexing, embedding, chunking
       # INDEX_SCHEMA_VERSION: "1"
+
+      MAX_EMBEDDING_CHARS: 400
 
       # -----------------------------------------------------------------------
       # LLM generation parameters
