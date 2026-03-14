@@ -147,6 +147,195 @@ function splitMarkdownBySectionsWithMetadata(markdown) {
   return sections;
 }
 
+// Split text into smaller overlapping chunks.
+// Strategy:
+// 1. Prefer paragraph boundaries
+// 2. Build chunks up to CHUNK_SIZE
+// 3. Add overlap between adjacent chunks
+function splitTextIntoOverlappingChunks(text, chunkSize = CHUNK_SIZE, chunkOverlap = CHUNK_OVERLAP) {
+  if (!text || text.trim() === "") {
+    return [];
+  }
+
+  const normalizedText = text.replace(/\r\n/g, "\n").trim();
+
+  // First split by paragraph boundaries
+  const paragraphs = normalizedText
+    .split(/\n\s*\n/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  // Fallback if paragraph splitting produces nothing useful
+  if (paragraphs.length === 0) {
+    return splitLongTextWithOverlap(normalizedText, chunkSize, chunkOverlap);
+  }
+
+  const chunks = [];
+  let currentChunk = "";
+
+  for (const paragraph of paragraphs) {
+    const candidate = currentChunk
+      ? `${currentChunk}\n\n${paragraph}`
+      : paragraph;
+
+    // If paragraph fits into current chunk, keep adding
+    if (candidate.length <= chunkSize) {
+      currentChunk = candidate;
+      continue;
+    }
+
+    // Flush current chunk first
+    if (currentChunk) {
+      chunks.push(currentChunk);
+    }
+
+    // If a single paragraph is too long, split it further
+    if (paragraph.length > chunkSize) {
+      const splitParagraphChunks = splitLongTextWithOverlap(
+        paragraph,
+        chunkSize,
+        chunkOverlap
+      );
+
+      // Add all long paragraph chunks except the last one directly
+      for (let i = 0; i < splitParagraphChunks.length - 1; i++) {
+        chunks.push(splitParagraphChunks[i]);
+      }
+
+      // Keep the last chunk open so next paragraph can still attach if possible
+      currentChunk = splitParagraphChunks[splitParagraphChunks.length - 1] || "";
+    } else {
+      currentChunk = paragraph;
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  // Add overlap between adjacent chunks
+  return addOverlapToChunks(chunks, chunkOverlap);
+}
+
+
+// Split a long text purely by character window with soft boundary preference.
+// Tries to cut near a sentence end or whitespace when possible.
+function splitLongTextWithOverlap(text, chunkSize, chunkOverlap) {
+  const chunks = [];
+  const normalized = text.trim();
+
+  if (!normalized) {
+    return chunks;
+  }
+
+  let start = 0;
+
+  while (start < normalized.length) {
+    let end = Math.min(start + chunkSize, normalized.length);
+
+    // Try to move end backward to a nicer boundary if possible
+    if (end < normalized.length) {
+      const window = normalized.slice(start, end);
+      const boundaryCandidates = [
+        window.lastIndexOf("\n"),
+        window.lastIndexOf(". "),
+        window.lastIndexOf("! "),
+        window.lastIndexOf("? "),
+        window.lastIndexOf(" "),
+      ];
+
+      const bestBoundary = Math.max(...boundaryCandidates);
+
+      // Only use the boundary if it is not too far back
+      if (bestBoundary > Math.floor(chunkSize * 0.6)) {
+        end = start + bestBoundary + 1;
+      }
+    }
+
+    const chunk = normalized.slice(start, end).trim();
+    if (chunk) {
+      chunks.push(chunk);
+    }
+
+    if (end >= normalized.length) {
+      break;
+    }
+
+    start = Math.max(end - chunkOverlap, start + 1);
+  }
+
+  return chunks;
+}
+
+
+// Adds overlap by prepending tail text from previous chunk.
+// Keeps current chunk content primary, but provides continuity.
+function addOverlapToChunks(chunks, chunkOverlap) {
+  if (!chunks || chunks.length <= 1 || chunkOverlap <= 0) {
+    return chunks;
+  }
+
+  const overlappedChunks = [chunks[0]];
+
+  for (let i = 1; i < chunks.length; i++) {
+    const previousChunk = chunks[i - 1];
+    const currentChunk = chunks[i];
+
+    const overlapText = previousChunk.slice(-chunkOverlap).trim();
+    const mergedChunk = overlapText
+      ? `${overlapText}\n\n${currentChunk}`
+      : currentChunk;
+
+    overlappedChunks.push(mergedChunk);
+  }
+
+  return overlappedChunks;
+}
+
+function validateRetrievalConfig() {
+  if (!Number.isInteger(MAX_SIMILARITIES) || MAX_SIMILARITIES < 1) {
+    throw new Error(
+      `Invalid MAX_SIMILARITIES: ${MAX_SIMILARITIES}. It must be an integer >= 1.`
+    );
+  }
+
+  if (!Number.isInteger(MIN_SIMILARITIES) || MIN_SIMILARITIES < 0) {
+    throw new Error(
+      `Invalid MIN_SIMILARITIES: ${MIN_SIMILARITIES}. It must be an integer >= 0.`
+    );
+  }
+
+  if (MIN_SIMILARITIES > MAX_SIMILARITIES) {
+    throw new Error(
+      `Invalid retrieval config: MIN_SIMILARITIES (${MIN_SIMILARITIES}) must be <= MAX_SIMILARITIES (${MAX_SIMILARITIES}).`
+    );
+  }
+
+  if (Number.isNaN(COSINE_LIMIT)) {
+    throw new Error(
+      `Invalid COSINE_LIMIT: ${COSINE_LIMIT}. It must be a valid number.`
+    );
+  }
+
+  if (!Number.isInteger(CHUNK_SIZE) || CHUNK_SIZE < 100) {
+    throw new Error(
+      `Invalid CHUNK_SIZE: ${CHUNK_SIZE}. It must be an integer >= 100.`
+    );
+  }
+
+  if (!Number.isInteger(CHUNK_OVERLAP) || CHUNK_OVERLAP < 0) {
+    throw new Error(
+      `Invalid CHUNK_OVERLAP: ${CHUNK_OVERLAP}. It must be an integer >= 0.`
+    );
+  }
+
+  if (CHUNK_OVERLAP >= CHUNK_SIZE) {
+    throw new Error(
+      `Invalid chunk config: CHUNK_OVERLAP (${CHUNK_OVERLAP}) must be smaller than CHUNK_SIZE (${CHUNK_SIZE}).`
+    );
+  }
+}
+
 // --------------------------------------------------------
 // CONFIG
 // --------------------------------------------------------
@@ -176,6 +365,11 @@ const COSINE_LIMIT = parseFloat(process.env.COSINE_LIMIT || "0.45");
 const INDEX_STATE_FILE =
   process.env.INDEX_STATE_FILE || path.resolve("./.index-state.json");
 
+// Chunking configuration
+// CHUNK_SIZE = target size of each chunk in characters
+// CHUNK_OVERLAP = number of overlapping characters between adjacent chunks
+const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE || "1200", 10);
+const CHUNK_OVERLAP = parseInt(process.env.CHUNK_OVERLAP || "400", 10);
 
 // --------------------------------------------------------
 // LLM CHAT MODEL
@@ -520,18 +714,45 @@ function fileToChunks(file) {
       : [];
   }
 
-  return sections.map((section, index) => ({
-    id: randomUUID(),
-    text: section.content,
-    title: section.title,
-    chunkIndex: index,
-    source: file.relativePath,
-    filename: file.filename,
-    extension: file.extension,
-    documentHash: file.hash,
-  }));
-}
+  const chunkRecords = [];
+  let globalChunkIndex = 0;
 
+  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+    const section = sections[sectionIndex];
+
+    // Break each section into smaller overlapping subchunks
+    const subchunks = splitTextIntoOverlappingChunks(
+      section.content,
+      CHUNK_SIZE,
+      CHUNK_OVERLAP
+    );
+
+    for (let subchunkIndex = 0; subchunkIndex < subchunks.length; subchunkIndex++) {
+      const subchunkText = subchunks[subchunkIndex]?.trim();
+
+      if (!subchunkText) {
+        continue;
+      }
+
+      chunkRecords.push({
+        id: randomUUID(),
+        text: subchunkText,
+        title: section.title,
+        chunkIndex: globalChunkIndex,
+        sectionIndex,
+        subchunkIndex,
+        source: file.relativePath,
+        filename: file.filename,
+        extension: file.extension,
+        documentHash: file.hash,
+      });
+
+      globalChunkIndex++;
+    }
+  }
+
+  return chunkRecords;
+}
 
 // --------------------------------------------------------
 // INDEXING PIPELINE
@@ -611,6 +832,8 @@ async function indexChangedDocuments() {
           filename: chunk.filename,
           extension: chunk.extension,
           chunkIndex: chunk.chunkIndex,
+          sectionIndex: chunk.sectionIndex,
+          subchunkIndex: chunk.subchunkIndex,
           documentHash: chunk.documentHash,
         },
       }));
@@ -621,8 +844,10 @@ async function indexChangedDocuments() {
       });
 
       indexState[file.relativePath] = file.hash;
-      console.log(`Indexed ${points.length} chunks from ${file.relativePath}`);
-    } catch (error) {
+      console.log(
+        `Prepared ${chunkRecords.length} chunks from ${file.relativePath} (chunk size: ${CHUNK_SIZE}, overlap: ${CHUNK_OVERLAP})`
+       );
+      } catch (error) {
       console.error(`Error indexing ${file.relativePath}: ${error.message}`);
     }
   }

@@ -56,6 +56,11 @@ services:
       # Only chunks above this similarity score are considered relevant
       COSINE_LIMIT: 0.7
 
+      # Chunking configuration
+      # Each section is split into smaller chunks with overlap
+      CHUNK_SIZE: 1200
+      CHUNK_OVERLAP: 400
+
       # -----------------------------------------------------------------------
       # LLM generation parameters
       # These influence how the chat model generates answers
