@@ -164,6 +164,11 @@ const HISTORY_MESSAGES = parseInt(process.env.HISTORY_MESSAGES || "10", 10);
 // number of similarity results retrieved from vector DB
 const MAX_SIMILARITIES = parseInt(process.env.MAX_SIMILARITIES || "4", 10);
 
+// Minimum number of acceptable similarities required before retrieval
+// is treated as sufficiently strong.
+// Important: this is checked AFTER filtering by score threshold.
+const MIN_SIMILARITIES = parseInt(process.env.MIN_SIMILARITIES || "1", 10);
+
 // minimum similarity score required
 const COSINE_LIMIT = parseFloat(process.env.COSINE_LIMIT || "0.45");
 
@@ -233,25 +238,29 @@ function getEvidenceQuality(results) {
     return "weak";
   }
 
+  // First check sufficiency based on filtered acceptable results
+  if (results.length < MIN_SIMILARITIES) {
+    return "weak";
+  }
+
   const scores = results.map((result) => result.score ?? 0);
   const maxScore = Math.max(...scores);
   const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
 
   // Simple first version:
-  // - strong   -> multiple decent matches
-  // - moderate -> at least one usable match
-  // - weak     -> very limited / low-confidence evidence
-  if (results.length >= 2 && avgScore >= 0.7) {
+  // - strong   -> enough acceptable results and overall good scores
+  // - moderate -> enough acceptable results but not very strong overall
+  // - weak     -> not enough acceptable results
+  if (results.length >= MIN_SIMILARITIES && results.length >= 2 && avgScore >= 0.7) {
     return "strong";
   }
 
-  if (maxScore >= 0.55) {
+  if (results.length >= MIN_SIMILARITIES && maxScore >= COSINE_LIMIT) {
     return "moderate";
   }
 
   return "weak";
 }
-
 
 // Formats one evidence entry for Option 2
 function formatEvidenceEntry(result, index) {
@@ -285,6 +294,7 @@ Use the retrieved content as the primary basis for your answer.
 EVIDENCE SUMMARY
 Retrieved entries: ${results.length}
 Evidence quality assessment: ${evidenceQuality}
+Minimum acceptable evidence required: ${MIN_SIMILARITIES}
 
 INTERPRETATION GUIDE
 - Prefer evidence that is most relevant to the user's question.
@@ -357,6 +367,31 @@ function saveIndexState(state) {
   }
 }
 
+function validateRetrievalConfig() {
+  if (!Number.isInteger(MAX_SIMILARITIES) || MAX_SIMILARITIES < 1) {
+    throw new Error(
+      `Invalid MAX_SIMILARITIES: ${MAX_SIMILARITIES}. It must be an integer >= 1.`
+    );
+  }
+
+  if (!Number.isInteger(MIN_SIMILARITIES) || MIN_SIMILARITIES < 0) {
+    throw new Error(
+      `Invalid MIN_SIMILARITIES: ${MIN_SIMILARITIES}. It must be an integer >= 0.`
+    );
+  }
+
+  if (MIN_SIMILARITIES > MAX_SIMILARITIES) {
+    throw new Error(
+      `Invalid retrieval config: MIN_SIMILARITIES (${MIN_SIMILARITIES}) must be <= MAX_SIMILARITIES (${MAX_SIMILARITIES}).`
+    );
+  }
+
+  if (Number.isNaN(COSINE_LIMIT)) {
+    throw new Error(
+      `Invalid COSINE_LIMIT: ${COSINE_LIMIT}. It must be a valid number.`
+    );
+  }
+}
 
 // --------------------------------------------------------
 // QDRANT HELPERS
@@ -615,6 +650,7 @@ async function searchKnowledgeBase(userMessage) {
 
   const filteredResults = results.filter((result) => result.score >= COSINE_LIMIT);
 
+  const hasSufficientEvidence = filteredResults.length >= MIN_SIMILARITIES;
   const evidenceQuality = getEvidenceQuality(filteredResults);
 
   for (const result of filteredResults) {
@@ -632,7 +668,10 @@ async function searchKnowledgeBase(userMessage) {
     );
   }
 
-  console.log(`Similarities found: ${filteredResults.length}`);
+  console.log(`Retrieved from Qdrant: ${results.length}`);
+  console.log(`Passed threshold (${COSINE_LIMIT}): ${filteredResults.length}`);
+  console.log(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
+  console.log(`Sufficient evidence: ${hasSufficientEvidence ? "yes" : "no"}`);
   console.log(`Evidence quality: ${evidenceQuality}`);
   console.log("========================================================");
   console.log();
@@ -646,6 +685,7 @@ async function searchKnowledgeBase(userMessage) {
   return {
     results: filteredResults,
     evidenceQuality,
+    hasSufficientEvidence,
     ragContextPackage,
   };
 }
@@ -655,6 +695,9 @@ async function searchKnowledgeBase(userMessage) {
 // --------------------------------------------------------
 
 let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
+
+// validate retrieval-related configuration before startup
+validateRetrievalConfig();
 
 // index documents before chat starts
 await indexChangedDocuments();
