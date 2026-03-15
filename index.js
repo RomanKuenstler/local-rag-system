@@ -29,6 +29,17 @@ import {
 import { createUi } from "./src/ui.js";
 import { enforceEmbeddingSizeLimit, splitMarkdownBySectionsWithMetadata, splitTextIntoOverlappingChunks } from "./src/chunking.js";
 import { readTextFilesRecursively } from "./src/document-processing.js";
+import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
+import {
+  buildActiveConfigMessage,
+  buildEmbedSummaryMessage,
+  buildHelpMessage,
+  buildRagContextPackage,
+  buildSystemInfoMessage,
+  createSimilarityDetails,
+  formatBytes,
+  getEvidenceQuality,
+} from "./src/messages.js";
 
 function colorEvidenceQuality(q) {
   if (q === "strong") return chalk.green(q);
@@ -75,329 +86,37 @@ const ui = createUi({
   contentPath: CONTENT_PATH,
 });
 
-const runtimeConfig = {
-  historyMessages: HISTORY_MESSAGES,
-  maxSimilarities: MAX_SIMILARITIES,
-  minSimilarities: MIN_SIMILARITIES,
-  cosineLimit: COSINE_LIMIT,
-};
+const conversationMemory = new Map();
+
+function getConversationHistory(sessionId) {
+  if (!conversationMemory.has(sessionId)) {
+    conversationMemory.set(sessionId, []);
+  }
+  return conversationMemory.get(sessionId);
+}
+
+function trimConversationHistory(historyMessages) {
+  const maxHistoryEntries = historyMessages * 2;
+  for (const history of conversationMemory.values()) {
+    if (history.length > maxHistoryEntries) {
+      history.splice(0, history.length - maxHistoryEntries);
+    }
+  }
+}
+
+const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager(
+  {
+    historyMessages: HISTORY_MESSAGES,
+    maxSimilarities: MAX_SIMILARITIES,
+    minSimilarities: MIN_SIMILARITIES,
+    cosineLimit: COSINE_LIMIT,
+  },
+  trimConversationHistory
+);
 
 const DEFAULT_SESSION_ID = "default-session-id";
 const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
-
-const runtimeConfigSchema = {
-  "history messages": {
-    key: "historyMessages",
-    parse: parseIntegerConfig,
-    validate: (value) => {
-      if (!Number.isInteger(value) || value < 1) {
-        return "must be an integer >= 1";
-      }
-      return null;
-    },
-  },
-  "max similarities": {
-    key: "maxSimilarities",
-    parse: parseIntegerConfig,
-    validate: (value, config) => {
-      if (!Number.isInteger(value) || value < 1) {
-        return "must be an integer >= 1";
-      }
-      if (value < config.minSimilarities) {
-        return `must be >= min similarities (${config.minSimilarities})`;
-      }
-      return null;
-    },
-  },
-  "min similarities": {
-    key: "minSimilarities",
-    parse: parseIntegerConfig,
-    validate: (value, config) => {
-      if (!Number.isInteger(value) || value < 0) {
-        return "must be an integer >= 0";
-      }
-      if (value > config.maxSimilarities) {
-        return `must be <= max similarities (${config.maxSimilarities})`;
-      }
-      return null;
-    },
-  },
-  "cosine limit": {
-    key: "cosineLimit",
-    parse: parseFloatConfig,
-    validate: (value) => {
-      if (!Number.isFinite(value)) {
-        return "must be a valid number";
-      }
-      if (value < 0 || value > 1) {
-        return "must be between 0 and 1";
-      }
-      return null;
-    },
-  },
-};
-
-function parseIntegerConfig(rawValue) {
-  const parsed = Number.parseInt(String(rawValue), 10);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function parseFloatConfig(rawValue) {
-  const parsed = Number.parseFloat(String(rawValue));
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function getConfigFieldMetadata(name) {
-  const normalized = String(name || "")
-    .trim()
-    .toLowerCase()
-    .replace(/["']/g, "")
-    .replace(/\s+/g, " ");
-
-  return runtimeConfigSchema[normalized] || null;
-}
-
-function parseConfigSetCommand(input) {
-  const trimmed = String(input || "").trim();
-  const noPrefix = trimmed.replace(/^\/config\s+set\s+/i, "").trim();
-
-  const quotedMatch = noPrefix.match(/^['"](.+?)['"]\s*(?:=|\s+)\s*(.+)$/);
-  if (quotedMatch) {
-    return {
-      configName: quotedMatch[1],
-      rawValue: quotedMatch[2],
-    };
-  }
-
-  const parts = noPrefix.split(/\s*=\s*|\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return {
-      configName: parts.slice(0, -1).join(" "),
-      rawValue: parts[parts.length - 1],
-    };
-  }
-
-  return null;
-}
-
-function setRuntimeConfigValue(configName, rawValue) {
-  const field = getConfigFieldMetadata(configName);
-
-  if (!field) {
-    return {
-      ok: false,
-      message:
-        `Unknown config \"${configName}\". Changeable keys: ` +
-        `${Object.keys(runtimeConfigSchema).join(", ")}.`,
-    };
-  }
-
-  const parsedValue = field.parse(rawValue);
-  if (parsedValue === null) {
-    return {
-      ok: false,
-      message: `Invalid value \"${rawValue}\" for ${configName}.`,
-    };
-  }
-
-  const candidate = {
-    ...runtimeConfig,
-    [field.key]: parsedValue,
-  };
-  const validationError = field.validate(parsedValue, candidate);
-
-  if (validationError) {
-    return {
-      ok: false,
-      message: `Invalid ${configName}: ${validationError}.`,
-    };
-  }
-
-  const previousValue = runtimeConfig[field.key];
-  runtimeConfig[field.key] = parsedValue;
-
-  if (field.key === "historyMessages") {
-    const maxHistoryEntries = runtimeConfig.historyMessages * 2;
-    for (const history of conversationMemory.values()) {
-      if (history.length > maxHistoryEntries) {
-        history.splice(0, history.length - maxHistoryEntries);
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    message: `Updated ${configName}: ${previousValue} -> ${parsedValue}`,
-  };
-}
-
-function getEvidenceQuality(results) {
-  if (!results || results.length === 0 || results.length < runtimeConfig.minSimilarities) {
-    return "weak";
-  }
-
-  const scores = results.map((result) => result.score ?? 0);
-  const maxScore = Math.max(...scores);
-  const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-
-  if (maxScore >= 0.82 && avgScore >= 0.72) {
-    return "strong";
-  }
-  if (maxScore >= 0.62 && avgScore >= 0.55) {
-    return "moderate";
-  }
-
-  return "weak";
-}
-
-function formatEvidenceEntry(result, index) {
-  const payload = result.payload || {};
-
-  return [
-    `EVIDENCE #${index + 1}`,
-    `score: ${result.score?.toFixed(4) ?? "n/a"}`,
-    `source: ${payload.source || "unknown"}`,
-    `title: ${payload.title || "Untitled"}`,
-    "content:",
-    `${payload.text || ""}`,
-  ].join("\n");
-}
-
-function createSimilarityDetails(results) {
-  return {
-    requestedLimit: runtimeConfig.maxSimilarities,
-    cosineLimit: runtimeConfig.cosineLimit,
-    matches: results.map((result, index) => {
-      const payload = result.payload || {};
-      const preview = String(payload.text || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 180);
-
-      return {
-        rank: index + 1,
-        score: result.score,
-        source: payload.source || "unknown",
-        title: payload.title || "",
-        preview,
-      };
-    }),
-  };
-}
-
-function buildRagContextPackage({ results, userMessage, evidenceQuality }) {
-  const evidenceBlock = results.map((result, index) => formatEvidenceEntry(result, index)).join("\n\n---\n\n");
-
-  return `RETRIEVAL RESULT
-Evidence quality: ${evidenceQuality}
-Evidence quality meaning: strong|moderate|weak
-
-${evidenceBlock || "No evidence retrieved."}
-
-INSTRUCTIONS FOR THIS TASK
-- Answer the user's question using the retrieved knowledge as the primary source.
-- If the evidence is partial, answer only what is supported and clearly indicate what is missing.
-- If the evidence is insufficient, say that the knowledge base does not contain enough information.
-- If you provide additional general knowledge, clearly label it as general knowledge and not as knowledge-base content.
-
-USER QUESTION
-${userMessage}`;
-}
-
-function buildSystemInfoMessage() {
-  return [
-    "System info:",
-    `- app: ${APP_NAME} ${APP_VERSION}`,
-    `- ui mode: ${ui.getTuiMode()}`,
-    `- chat model: ${chatModel.model || "unknown"}`,
-    `- embedding model: ${embeddingsModel.model || "unknown"}`,
-    `- vector db: qdrant (${QDRANT_URL})`,
-    `- collection: ${COLLECTION_NAME}`,
-    `- content path: ${CONTENT_PATH}`,
-    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
-    `- chat history dir: ${CHAT_HISTORY_DIR}`,
-  ].join("\n");
-}
-
-function buildActiveConfigMessage() {
-  const runtimeChangeableLabel = chalk.green("runtime-changeable");
-  const restartOnlyLabel = chalk.yellow("requires restart");
-
-  return [
-    "Active configuration:",
-    "",
-    chalk.bold("Retrieval"),
-    `  - history messages: ${runtimeConfig.historyMessages} (${runtimeChangeableLabel})`,
-    `  - max similarities: ${runtimeConfig.maxSimilarities} (${runtimeChangeableLabel})`,
-    `  - min similarities: ${runtimeConfig.minSimilarities} (${runtimeChangeableLabel})`,
-    `  - cosine limit: ${runtimeConfig.cosineLimit} (${runtimeChangeableLabel})`,
-    "",
-    chalk.bold("Chunking / Indexing"),
-    `  - chunk size: ${CHUNK_SIZE} (${restartOnlyLabel})`,
-    `  - chunk overlap: ${CHUNK_OVERLAP} (${restartOnlyLabel})`,
-    `  - max embedding chars: ${MAX_EMBEDDING_CHARS} (${restartOnlyLabel})`,
-    `  - pdf min extracted chars: ${PDF_MIN_EXTRACTED_CHARS} (${restartOnlyLabel})`,
-    `  - index schema version: ${INDEX_SCHEMA_VERSION} (${restartOnlyLabel})`,
-    `  - index state file: ${INDEX_STATE_FILE} (${restartOnlyLabel})`,
-    `  - chat history dir: ${CHAT_HISTORY_DIR} (${restartOnlyLabel})`,
-    "",
-    chalk.bold("Generation"),
-    `  - temperature: ${process.env.OPTION_TEMPERATURE || "0.0"} (${restartOnlyLabel})`,
-    `  - top_p: ${process.env.OPTION_TOP_P || "0.5"} (${restartOnlyLabel})`,
-    `  - presence penalty: ${process.env.OPTION_PRESENCE_PENALTY || "2.2"} (${restartOnlyLabel})`,
-    "",
-    "Tip: use /config set <name> <value>, e.g. /config set 'min similarities' 3",
-  ].join("\n");
-}
-
-function buildHelpMessage() {
-  return [
-    "Quick help",
-    "",
-    "Ask any question about your indexed documents in natural language.",
-    "The assistant retrieves matching context from the knowledge base before answering.",
-    "",
-    "Commands:",
-    "- /help or ?       Show this help overview",
-    "- /info            Show system details (models, DB, paths)",
-    "- /lib             Show indexed library files and chunk counts",
-    "- /config          Show active retrieval/runtime configuration",
-    "- /config set ...  Update a runtime setting",
-    "                  Example: /config set 'min similarities' 3",
-    "- /mode clean      Switch to clean chat-focused UI",
-    "- /mode rag        Switch to debug RAG UI with similarity details",
-    "- /embed           Re-index only new/changed/removed files in ./data",
-    "- /yes             Show pending weak-evidence answer",
-    "- /no | /skip      Hide pending weak-evidence answer",
-    "- /bye | /exit | /quit  Exit the application",
-    "",
-    "Tips:",
-    "- Ask precise questions for better retrieval.",
-    "- Use /mode rag to inspect evidence quality and matching chunks.",
-  ].join("\n");
-}
-
-function formatBytes(sizeInBytes) {
-  if (!Number.isFinite(sizeInBytes) || sizeInBytes < 0) {
-    return "n/a";
-  }
-
-  if (sizeInBytes < 1024) {
-    return `${sizeInBytes} B`;
-  }
-
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = sizeInBytes / 1024;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex++;
-  }
-
-  return `${value.toFixed(2)} ${units[unitIndex]}`;
-}
 
 async function buildLibraryInfoMessage() {
   const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
@@ -405,8 +124,8 @@ async function buildLibraryInfoMessage() {
   if (files.length === 0) {
     return [
       "Library info:",
-      `- content path: ${CONTENT_PATH}`,
-      `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
+      `- content path: ${CONTENT_PATH}` ,
+      `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}` ,
       "- files: 0",
       "- total chunks: 0",
     ].join("\n");
@@ -424,8 +143,8 @@ async function buildLibraryInfoMessage() {
 
   const lines = [
     "Library info:",
-    `- content path: ${CONTENT_PATH}`,
-    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
+    `- content path: ${CONTENT_PATH}` ,
+    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}` ,
     `- files: ${perFile.length}`,
     `- total chunks: ${totalChunks}`,
     "",
@@ -444,15 +163,6 @@ async function buildLibraryInfoMessage() {
   }
 
   return lines.join("\n");
-}
-
-const conversationMemory = new Map();
-
-function getConversationHistory(sessionId) {
-  if (!conversationMemory.has(sessionId)) {
-    conversationMemory.set(sessionId, []);
-  }
-  return conversationMemory.get(sessionId);
 }
 
 function addToHistory(sessionId, role, content) {
@@ -748,29 +458,6 @@ async function indexChangedDocuments() {
   };
 }
 
-function buildEmbedSummaryMessage(summary) {
-  if (!summary) {
-    return "Embedding finished, but no summary is available.";
-  }
-
-  if (summary.filesFound === 0) {
-    return "No embeddable files found in ./data. Nothing to index.";
-  }
-
-  if (summary.skipped) {
-    return "No new, changed, or removed files detected in ./data. Index is already up to date.";
-  }
-
-  return [
-    "Embedding finished.",
-    `- Files scanned: ${summary.filesFound}`,
-    `- New/changed files detected: ${summary.changedFiles.length}`,
-    `- Removed files detected: ${summary.removedFiles.length}`,
-    `- Files embedded: ${summary.indexedCount}`,
-    `- Files removed from index: ${summary.removedCount}`,
-  ].join("\n");
-}
-
 async function searchKnowledgeBase(userMessage) {
   const userQuestionEmbedding = await embeddingsModel.embedQuery(userMessage);
 
@@ -782,7 +469,7 @@ async function searchKnowledgeBase(userMessage) {
 
   const filteredResults = results.filter((result) => result.score >= runtimeConfig.cosineLimit);
   const hasSufficientEvidence = filteredResults.length >= runtimeConfig.minSimilarities;
-  const evidenceQuality = getEvidenceQuality(filteredResults);
+  const evidenceQuality = getEvidenceQuality(filteredResults, runtimeConfig.minSimilarities);
 
   for (const result of filteredResults) {
     const payload = result.payload || {};
@@ -880,7 +567,18 @@ while (!exit) {
   }
 
   if (normalizedUserMessage === "/info") {
-    ui.printAssistantMessage(buildSystemInfoMessage());
+    ui.printAssistantMessage(buildSystemInfoMessage({
+      appName: APP_NAME,
+      appVersion: APP_VERSION,
+      uiMode: ui.getTuiMode(),
+      chatModelName: chatModel.model,
+      embeddingModelName: embeddingsModel.model,
+      qdrantUrl: QDRANT_URL,
+      collectionName: COLLECTION_NAME,
+      contentPath: CONTENT_PATH,
+      embeddableExtensions: EMBEDDABLE_EXTENSIONS,
+      chatHistoryDir: CHAT_HISTORY_DIR,
+    }));
     continue;
   }
 
@@ -907,7 +605,18 @@ while (!exit) {
   }
 
   if (normalizedUserMessage === "/config") {
-    ui.printAssistantMessage(buildActiveConfigMessage());
+    ui.printAssistantMessage(buildActiveConfigMessage(runtimeConfig, {
+      chunkSize: CHUNK_SIZE,
+      chunkOverlap: CHUNK_OVERLAP,
+      maxEmbeddingChars: MAX_EMBEDDING_CHARS,
+      pdfMinExtractedChars: PDF_MIN_EXTRACTED_CHARS,
+      indexSchemaVersion: INDEX_SCHEMA_VERSION,
+      indexStateFile: INDEX_STATE_FILE,
+      chatHistoryDir: CHAT_HISTORY_DIR,
+      temperature: process.env.OPTION_TEMPERATURE || "0.0",
+      topP: process.env.OPTION_TOP_P || "0.5",
+      presencePenalty: process.env.OPTION_PRESENCE_PENALTY || "2.2",
+    }));
     continue;
   }
 
@@ -931,7 +640,7 @@ while (!exit) {
 
   const history = getConversationHistory(DEFAULT_SESSION_ID);
   const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(userMessage);
-  ui.setPendingSimilarityDetails(createSimilarityDetails(results));
+  ui.setPendingSimilarityDetails(createSimilarityDetails(results, runtimeConfig));
   ui.setPendingStatus("Generating answer...");
 
   const messages = [
