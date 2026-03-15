@@ -4,6 +4,7 @@ export const COLLECTION_NAME = process.env.QDRANT_COLLECTION || "knowledge_base"
 export const QDRANT_URL = process.env.QDRANT_URL || "http://qdrant:6333";
 export const QDRANT_API_KEY = process.env.QDRANT_API_KEY || undefined;
 export const CONTENT_PATH = process.env.CONTENT_PATH || "./data";
+export const EMBEDDABLE_EXTENSIONS = [".md", ".txt", ".html", ".htm", ".pdf"];
 
 export const HISTORY_MESSAGES = parseInt(process.env.HISTORY_MESSAGES || "10", 10);
 export const MAX_SIMILARITIES = parseInt(process.env.MAX_SIMILARITIES || "4", 10);
