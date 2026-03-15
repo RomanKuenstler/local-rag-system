@@ -24,6 +24,10 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     return true;
   }
 
+  function getTuiMode() {
+    return mode;
+  }
+
   function dim(text) {
     return chalk.dim(text);
   }
@@ -460,6 +464,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
   return {
     isCleanMode,
     isRagMode,
+    getTuiMode,
     setTuiMode,
     renderStartupScreen,
     renderLoadingScreen,
