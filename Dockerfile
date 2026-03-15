@@ -51,11 +51,11 @@ RUN npm install
 # ------------------------------------------------------------------------------
 # Copy application source files
 #
-# Copies all JavaScript files (for example index.js) into the container.
-#
-# The application logic (retriever + embedding pipeline) lives here.
+# The refactoring moved reusable modules into ./src.
+# Copy the main entrypoint and source directory so runtime imports resolve.
 # ------------------------------------------------------------------------------
-COPY *.js .
+COPY index.js ./
+COPY src ./src
 
 
 # ------------------------------------------------------------------------------
@@ -94,3 +94,11 @@ RUN chown -R ai:nodejs /app
 # This improves security and follows container best practices.
 # ------------------------------------------------------------------------------
 USER ai
+
+
+# ------------------------------------------------------------------------------
+# Start command
+#
+# Run the CLI entrypoint when the container starts.
+# ------------------------------------------------------------------------------
+CMD ["node", "index.js"]
