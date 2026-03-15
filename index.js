@@ -1,827 +1,52 @@
-// -----------------------------------------------------------------------------
-// IMPORTS
-// -----------------------------------------------------------------------------
-// Node.js and external libraries used by the RAG system
+import fs from "fs";
+import path from "path";
+import { randomUUID } from "crypto";
+import prompts from "prompts";
+import chalk from "chalk";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { QdrantClient } from "@qdrant/js-client-rest";
+import {
+  APP_NAME,
+  APP_VERSION,
+  CHUNK_OVERLAP,
+  CHUNK_SIZE,
+  CHAT_HISTORY_DIR,
+  COLLECTION_NAME,
+  CONTENT_PATH,
+  COSINE_LIMIT,
+  EMBEDDABLE_EXTENSIONS,
+  HISTORY_MESSAGES,
+  INDEX_STATE_FILE,
+  INDEX_SCHEMA_VERSION,
+  MAX_EMBEDDING_CHARS,
+  PDF_MIN_EXTRACTED_CHARS,
+  MAX_SIMILARITIES,
+  MIN_SIMILARITIES,
+  QDRANT_API_KEY,
+  QDRANT_URL,
+  validateRetrievalConfig,
+} from "./src/config.js";
+import { createUi } from "./src/ui.js";
+import { enforceEmbeddingSizeLimit, splitMarkdownBySectionsWithMetadata, splitTextIntoOverlappingChunks } from "./src/chunking.js";
+import { readTextFilesRecursively } from "./src/document-processing.js";
+import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
+import {
+  buildActiveConfigMessage,
+  buildEmbedSummaryMessage,
+  buildHelpMessage,
+  buildRagContextPackage,
+  buildSystemInfoMessage,
+  createSimilarityDetails,
+  formatBytes,
+  getEvidenceQuality,
+} from "./src/messages.js";
 
-import crypto from "crypto"; // used for SHA256 hashing (file change detection)
-import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai"; // LLM + embedding model
-import { QdrantClient } from "@qdrant/js-client-rest"; // vector database client
-import prompts from "prompts"; // CLI interaction library
-import fs from "fs"; // filesystem access
-import path from "path"; // filesystem path utilities
-import { randomUUID } from "crypto"; // generate unique IDs for vector DB records
-import * as cheerio from "cheerio";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
-
-// ------
-// HELPER
-// ------
-// Global SHA256 helper
-function sha256(content) {
-  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+function colorEvidenceQuality(q) {
+  if (q === "strong") return chalk.green(q);
+  if (q === "moderate") return chalk.yellow(q);
+  if (q === "weak") return chalk.red(q);
+  return q;
 }
-
-function enforceEmbeddingSizeLimit(chunks, maxChars = MAX_EMBEDDING_CHARS) {
-  const safeChunks = [];
-
-  for (const chunk of chunks) {
-    const splitChunks = splitChunkRecursivelyToSafeSize(chunk, maxChars);
-    safeChunks.push(...splitChunks);
-  }
-
-  return safeChunks;
-}
-
-
-function splitChunkRecursivelyToSafeSize(chunk, maxChars) {
-  if (!chunk.text || chunk.text.length <= maxChars) {
-    return [chunk];
-  }
-
-  const overlap = Math.min(CHUNK_OVERLAP, Math.floor(maxChars / 6));
-
-  const splitTexts = splitLongTextWithOverlap(chunk.text, maxChars, overlap);
-
-  // Safety fallback: if splitting failed for some reason, hard-cut
-  if (splitTexts.length <= 1 && chunk.text.length > maxChars) {
-    const hardSplitTexts = hardSplitText(chunk.text, maxChars, overlap);
-
-    return hardSplitTexts.flatMap((text, index) =>
-      splitChunkRecursivelyToSafeSize(
-        {
-          ...chunk,
-          id: randomUUID(),
-          text,
-          subchunkIndex: formatSubchunkIndex(chunk.subchunkIndex, index),
-        },
-        maxChars
-      )
-    );
-  }
-
-  return splitTexts.flatMap((text, index) =>
-    splitChunkRecursivelyToSafeSize(
-      {
-        ...chunk,
-        id: randomUUID(),
-        text: text.trim(),
-        subchunkIndex: formatSubchunkIndex(chunk.subchunkIndex, index),
-      },
-      maxChars
-    )
-  );
-}
-
-
-function hardSplitText(text, maxChars, overlap) {
-  const chunks = [];
-  let start = 0;
-
-  while (start < text.length) {
-    const end = Math.min(start + maxChars, text.length);
-    const piece = text.slice(start, end).trim();
-
-    if (piece) {
-      chunks.push(piece);
-    }
-
-    if (end >= text.length) {
-      break;
-    }
-
-    start = Math.max(end - overlap, start + 1);
-  }
-
-  return chunks;
-}
-
-
-function formatSubchunkIndex(baseIndex, index) {
-  if (baseIndex === undefined || baseIndex === null) {
-    return `${index}`;
-  }
-
-  return `${baseIndex}.${index}`;
-}
-
-// Normalize text before chunking/embedding.
-// Goal: make indexing input more stable and cleaner.
-function normalizeTextForIndexing(text) {
-  if (!text) {
-    return "";
-  }
-
-  text = text.normalize("NFKC");
-
-  return text
-    .replace(/\r\n/g, "\n")          // Windows -> Unix line endings
-    .replace(/\r/g, "\n")            // old Mac line endings -> Unix
-    .replace(/\t/g, "    ")          // tabs -> spaces
-    .replace(/[ \t]+$/gm, "")        // remove trailing spaces at line ends
-    .replace(/\n{3,}/g, "\n\n")      // collapse 3+ blank lines into 2
-    .trim();
-}
-
-// Extract readable structured text from HTML.
-// Goal:
-// - keep meaningful document content
-// - remove obvious layout/UI junk
-// - preserve headings so we can reuse markdown-style section splitting
-function extractTextFromHtml(html) {
-  if (!html || html.trim() === "") {
-    return "";
-  }
-
-  const $ = cheerio.load(html);
-
-  // Remove obvious non-content / UI / boilerplate elements
-  $(
-    [
-      "script",
-      "style",
-      "noscript",
-      "svg",
-      "canvas",
-      "iframe",
-      "nav",
-      "footer",
-      "aside",
-      "form",
-      "button",
-      "input",
-      "select",
-      "textarea",
-      "img",
-      "picture",
-      "video",
-      "audio",
-      "source",
-      "meta",
-      "link",
-      "object",
-      "embed",
-      "advertisement",
-    ].join(", ")
-  ).remove();
-
-  // Prefer the semantically most relevant root
-  const root =
-    $("main").first().length > 0
-      ? $("main").first()
-      : $("article").first().length > 0
-        ? $("article").first()
-        : $('[role="main"]').first().length > 0
-          ? $('[role="main"]').first()
-          : $("body").first().length > 0
-            ? $("body").first()
-            : $.root();
-
-  const blocks = [];
-  const selectors = [
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "p",
-    "li",
-    "blockquote",
-    "pre",
-    "table",
-  ].join(", ");
-
-  root.find(selectors).each((_, element) => {
-    const $el = $(element);
-    const tagName = (element.tagName || "").toLowerCase();
-
-    if (!tagName) {
-      return;
-    }
-
-    // Skip elements inside removed/non-content zones if they somehow remain
-    if (
-      $el.closest("nav, footer, aside, form, script, style, noscript").length > 0
-    ) {
-      return;
-    }
-
-    let text = "";
-
-    if (tagName === "table") {
-      const rows = [];
-
-      $el.find("tr").each((_, row) => {
-        const cells = [];
-        $(row)
-          .find("th, td")
-          .each((_, cell) => {
-            const cellText = normalizeInlineText($(cell).text());
-            if (cellText) {
-              cells.push(cellText);
-            }
-          });
-
-        if (cells.length > 0) {
-          rows.push(cells.join(" | "));
-        }
-      });
-
-      if (rows.length > 0) {
-        text = rows.join("\n");
-      }
-    } else if (tagName === "pre") {
-      text = normalizePreformattedText($el.text());
-      if (text) {
-        text = `\`\`\`\n${text}\n\`\`\``;
-      }
-    } else {
-      text = normalizeInlineText($el.text());
-    }
-
-    if (!text) {
-      return;
-    }
-
-    // Preserve heading structure by converting HTML headings into markdown headings
-    if (/^h[1-6]$/.test(tagName)) {
-      const level = Number(tagName[1]);
-      blocks.push(`${"#".repeat(level)} ${text}`);
-      return;
-    }
-
-    if (tagName === "li") {
-      blocks.push(`- ${text}`);
-      return;
-    }
-
-    if (tagName === "blockquote") {
-      blocks.push(`> ${text}`);
-      return;
-    }
-
-    blocks.push(text);
-  });
-
-  return deduplicateConsecutiveBlocks(blocks).join("\n\n");
-}
-
-
-// Normalize normal inline/block text from HTML nodes
-function normalizeInlineText(text) {
-  if (!text) {
-    return "";
-  }
-
-  return text
-    .replace(/\u00a0/g, " ")   // non-breaking spaces
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-// Extract readable text from a PDF page-by-page.
-// v1 design:
-// - text-based PDFs only
-// - no OCR
-// - page-aware structure
-// - light cleanup
-async function extractTextFromPdf(filePath) {
-  const loadingTask = pdfjsLib.getDocument(filePath);
-  const pdf = await loadingTask.promise;
-
-  const pageSections = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-
-    // Extract text items in order
-    const rawItems = textContent.items
-      .map((item) => ("str" in item ? item.str : ""))
-      .map((text) => text.trim())
-      .filter(Boolean);
-
-    if (rawItems.length === 0) {
-      continue;
-    }
-
-    // Light first-pass line reconstruction.
-    // v1 keeps this intentionally simple.
-    const pageText = normalizePdfPageText(rawItems.join("\n"));
-
-    if (!pageText || pageText.length < PDF_MIN_EXTRACTED_CHARS) {
-      continue;
-    }
-
-    // Label each page as a markdown section so your existing
-    // markdown-style section splitter can reuse it.
-    pageSections.push(`## PDF Page ${pageNumber}\n\n${pageText}`);
-  }
-
-  const combined = pageSections.join("\n\n");
-
-  return combined.trim();
-}
-
-
-// Light cleanup specific to PDF-extracted page text.
-// Keep it conservative so we do not destroy useful technical content.
-function normalizePdfPageText(text) {
-  if (!text) {
-    return "";
-  }
-
-  let cleaned = text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+$/gm, "")
-    .replace(/\u00a0/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  // Optional tiny improvement:
-  // remove lines that are only page numbers
-  cleaned = cleaned
-    .split("\n")
-    .filter((line) => !/^\s*\d+\s*$/.test(line))
-    .join("\n")
-    .trim();
-
-  return cleaned;
-}
-
-// Normalize preformatted/code text but keep line structure
-function normalizePreformattedText(text) {
-  if (!text) {
-    return "";
-  }
-
-  return text
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+$/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-
-// Remove immediately repeated blocks to reduce duplicated HTML boilerplate
-function deduplicateConsecutiveBlocks(blocks) {
-  const cleaned = [];
-
-  for (const block of blocks) {
-    const trimmed = block.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    if (cleaned.length === 0 || cleaned[cleaned.length - 1] !== trimmed) {
-      cleaned.push(trimmed);
-    }
-  }
-
-  return cleaned;
-}
-
-
-// Route content extraction by file extension
-function extractIndexableTextByExtension(rawContent, extension) {
-  if (!rawContent) {
-    return "";
-  }
-
-  if (extension === ".html" || extension === ".htm") {
-    return extractTextFromHtml(rawContent);
-  }
-
-  return rawContent;
-}
-
-// Build the effective document hash used for incremental indexing.
-//
-// Important:
-// This hash depends on:
-// - normalized text
-// - chunking config
-// - indexing schema version
-//
-// Result:
-// - changing chunking settings forces re-indexing
-// - changing normalization logic can be versioned
-function buildIndexRelevantHash(content) {
-  const normalizedContent = normalizeTextForIndexing(content);
-
-  return sha256(
-    JSON.stringify({
-      normalizedContent,
-      chunkSize: CHUNK_SIZE,
-      chunkOverlap: CHUNK_OVERLAP,
-      indexSchemaVersion: INDEX_SCHEMA_VERSION,
-    })
-  );
-}
-// Recursively reads files from a directory and returns file metadata + content
-// Used to load knowledge base files from the ./data directory
-async function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8") {
-  dirPath = path.resolve(dirPath);
-
-  // normalize extension input
-  if (!Array.isArray(allowedExtensions)) {
-    allowedExtensions = [allowedExtensions];
-  }
-
-  allowedExtensions = allowedExtensions.map((ext) =>
-    ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`
-  );
-
-  const files = [];
-
-  // recursive directory scanner
-  async function scanDirectory(currentPath) {
-    const items = fs.readdirSync(currentPath);
-
-    for (const item of items) {
-      const itemPath = path.join(currentPath, item);
-      const stats = fs.statSync(itemPath);
-
-      // recurse into directories
-      if (stats.isDirectory()) {
-        scanDirectory(itemPath);
-        continue;
-      }
-
-      if (!stats.isFile()) {
-        continue;
-      }
-
-      // only process allowed file extensions
-      const ext = path.extname(item).toLowerCase();
-      if (!allowedExtensions.includes(ext)) {
-        continue;
-      }
-      try {
-        let extractedContent = "";
-
-        if (ext === ".pdf") {
-          extractedContent = await extractTextFromPdf(itemPath);
-        } else {
-          const rawContent = fs.readFileSync(itemPath, encoding);
-          extractedContent = extractIndexableTextByExtension(rawContent, ext);
-        }
-
-        const content = normalizeTextForIndexing(extractedContent);
-
-        if (!content || content.length === 0) {
-          console.log(`Skipping file with no indexable text: ${itemPath}`);
-          continue;
-        }
-
-        files.push({
-          path: itemPath,
-          relativePath: path.relative(dirPath, itemPath),
-          filename: path.basename(itemPath),
-          extension: ext,
-          content,
-          hash: buildIndexRelevantHash(extractedContent),
-        });
-      } catch (error) {
-        console.error(`Error reading file ${itemPath}: ${error.message}`);
-      }
-    }
-  }
-
-  try {
-    await scanDirectory(dirPath);
-  } catch (error) {
-    console.error(`Error accessing directory ${dirPath}: ${error.message}`);
-  }
-
-  return files;
-}
-
-// --------------
-// CHUNKS
-// --------------
-// Splits markdown files into logical sections based on headers (#, ##, ###)
-// Smaller chunks improve retrieval quality in RAG systems
-function splitMarkdownBySectionsWithMetadata(markdown) {
-  if (!markdown || markdown === "") {
-    return [];
-  }
-
-  const headerRegex = /^\s*(#+)\s+(.*)$/gm;
-  const headerMatches = [];
-  let match;
-
-  // detect markdown headers
-  while ((match = headerRegex.exec(markdown)) !== null) {
-    headerMatches.push({
-      start: match.index,
-      end: match.index + match[0].length,
-      title: match[2].trim(),
-    });
-  }
-
-  // if no headers exist treat entire file as one chunk
-  if (headerMatches.length === 0) {
-    const trimmed = markdown.trim();
-    return trimmed ? [{ title: "Document", content: trimmed }] : [];
-  }
-
-  const sections = [];
-
-  // capture text before first header
-  if (headerMatches[0].start > 0) {
-    const preHeader = markdown.substring(0, headerMatches[0].start).trim();
-    if (preHeader !== "") {
-      sections.push({
-        title: "Introduction",
-        content: preHeader,
-      });
-    }
-  }
-
-  // create chunks between headers
-  for (let i = 0; i < headerMatches.length; i++) {
-    const start = headerMatches[i].start;
-    const end =
-      i < headerMatches.length - 1
-        ? headerMatches[i + 1].start
-        : markdown.length;
-
-    const section = markdown.substring(start, end).trim();
-    if (section !== "") {
-      sections.push({
-        title: headerMatches[i].title || "Section",
-        content: section,
-      });
- }
-  }
-
-  return sections;
-}
-
-// Split text into smaller overlapping chunks.
-// Strategy:
-// 1. Prefer paragraph boundaries
-// 2. Build chunks up to CHUNK_SIZE
-// 3. Add overlap between adjacent chunks
-function splitTextIntoOverlappingChunks(text, chunkSize = CHUNK_SIZE, chunkOverlap = CHUNK_OVERLAP) {
-  if (!text || text.trim() === "") {
-    return [];
-  }
-
-  const normalizedText = text.replace(/\r\n/g, "\n").trim();
-
-  // First split by paragraph boundaries
-  const paragraphs = normalizedText
-    .split(/\n\s*\n/g)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  // Fallback if paragraph splitting produces nothing useful
-  if (paragraphs.length === 0) {
-    return splitLongTextWithOverlap(normalizedText, chunkSize, chunkOverlap);
-  }
-
-  const chunks = [];
-  let currentChunk = "";
-
-  for (const paragraph of paragraphs) {
-    const candidate = currentChunk
-      ? `${currentChunk}\n\n${paragraph}`
-      : paragraph;
-
-    // If paragraph fits into current chunk, keep adding
-    if (candidate.length <= chunkSize) {
-      currentChunk = candidate;
-      continue;
-    }
-
-    // Flush current chunk first
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-
-    // If a single paragraph is too long, split it further
-    if (paragraph.length > chunkSize) {
-      const splitParagraphChunks = splitLongTextWithOverlap(
-        paragraph,
-        chunkSize,
-        chunkOverlap
-      );
-
-      // Add all long paragraph chunks except the last one directly
-      for (let i = 0; i < splitParagraphChunks.length - 1; i++) {
-        chunks.push(splitParagraphChunks[i]);
-      }
-
-      // Keep the last chunk open so next paragraph can still attach if possible
-      currentChunk = splitParagraphChunks[splitParagraphChunks.length - 1] || "";
-    } else {
-      currentChunk = paragraph;
-    }
-  }
-
-  if (currentChunk) {
-    chunks.push(currentChunk);
-  }
-
-  // Add overlap between adjacent chunks
-  return addOverlapToChunks(chunks, chunkOverlap);
-}
-
-
-// Split a long text purely by character window with soft boundary preference.
-// Tries to cut near a sentence end or whitespace when possible.
-function splitLongTextWithOverlap(text, chunkSize, chunkOverlap) {
-  const chunks = [];
-  const normalized = text.trim();
-
-  if (!normalized) {
-    return chunks;
-  }
-
-  let start = 0;
-
-  while (start < normalized.length) {
-    let end = Math.min(start + chunkSize, normalized.length);
-
-    // Try to move end backward to a nicer boundary if possible
-    if (end < normalized.length) {
-      const window = normalized.slice(start, end);
-      const boundaryCandidates = [
-        window.lastIndexOf("\n"),
-        window.lastIndexOf(". "),
-        window.lastIndexOf("! "),
-        window.lastIndexOf("? "),
-        window.lastIndexOf(" "),
-      ];
-
-      const bestBoundary = Math.max(...boundaryCandidates);
-
-      // Only use the boundary if it is not too far back
-      if (bestBoundary > Math.floor(chunkSize * 0.6)) {
-        end = start + bestBoundary + 1;
-      }
-    }
-
-    const chunk = normalized.slice(start, end).trim();
-    if (chunk) {
-      chunks.push(chunk);
-    }
-
-    if (end >= normalized.length) {
-      break;
-    }
-
-    start = Math.max(end - chunkOverlap, start + 1);
-  }
-
-  return chunks;
-}
-
-
-// Adds overlap by prepending tail text from previous chunk.
-// Keeps current chunk content primary, but provides continuity.
-function addOverlapToChunks(chunks, chunkOverlap) {
-  if (!chunks || chunks.length <= 1 || chunkOverlap <= 0) {
-    return chunks;
-  }
-
-  const overlappedChunks = [chunks[0]];
-
-  for (let i = 1; i < chunks.length; i++) {
-    const previousChunk = chunks[i - 1];
-    const currentChunk = chunks[i];
-
-    const overlapText = previousChunk.slice(-chunkOverlap).trim();
-    const mergedChunk = overlapText
-      ? `${overlapText}\n\n${currentChunk}`
-      : currentChunk;
-
-    overlappedChunks.push(mergedChunk);
-  }
-
-  return overlappedChunks;
-}
-
-function validateRetrievalConfig() {
-  if (!Number.isInteger(MAX_SIMILARITIES) || MAX_SIMILARITIES < 1) {
-    throw new Error(
-      `Invalid MAX_SIMILARITIES: ${MAX_SIMILARITIES}. It must be an integer >= 1.`
-    );
-  }
-
-  if (!Number.isInteger(MIN_SIMILARITIES) || MIN_SIMILARITIES < 0) {
-    throw new Error(
-      `Invalid MIN_SIMILARITIES: ${MIN_SIMILARITIES}. It must be an integer >= 0.`
-    );
-  }
-
-  if (MIN_SIMILARITIES > MAX_SIMILARITIES) {
-    throw new Error(
-      `Invalid retrieval config: MIN_SIMILARITIES (${MIN_SIMILARITIES}) must be <= MAX_SIMILARITIES (${MAX_SIMILARITIES}).`
-    );
-  }
-
-  if (Number.isNaN(COSINE_LIMIT)) {
-    throw new Error(
-      `Invalid COSINE_LIMIT: ${COSINE_LIMIT}. It must be a valid number.`
-    );
-  }
-
-  if (!Number.isInteger(CHUNK_SIZE) || CHUNK_SIZE < 100) {
-    throw new Error(
-      `Invalid CHUNK_SIZE: ${CHUNK_SIZE}. It must be an integer >= 100.`
-    );
-  }
-
-  if (!Number.isInteger(CHUNK_OVERLAP) || CHUNK_OVERLAP < 0) {
-    throw new Error(
-      `Invalid CHUNK_OVERLAP: ${CHUNK_OVERLAP}. It must be an integer >= 0.`
-    );
-  }
-
-  if (CHUNK_OVERLAP >= CHUNK_SIZE) {
-    throw new Error(
-      `Invalid chunk config: CHUNK_OVERLAP (${CHUNK_OVERLAP}) must be smaller than CHUNK_SIZE (${CHUNK_SIZE}).`
-    );
-  }
-}
-
-// --------------------------------------------------------
-// CONFIG
-// --------------------------------------------------------
-// Configuration mostly comes from environment variables
-// (configured in docker-compose.yml)
-
-const COLLECTION_NAME = process.env.QDRANT_COLLECTION || "knowledge_base";
-const QDRANT_URL = process.env.QDRANT_URL || "http://qdrant:6333";
-const QDRANT_API_KEY = process.env.QDRANT_API_KEY || undefined;
-const CONTENT_PATH = process.env.CONTENT_PATH || "./data";
-
-// number of previous messages remembered in conversation
-const HISTORY_MESSAGES = parseInt(process.env.HISTORY_MESSAGES || "10", 10);
-
-// number of similarity results retrieved from vector DB
-const MAX_SIMILARITIES = parseInt(process.env.MAX_SIMILARITIES || "4", 10);
-
-// Minimum number of acceptable similarities required before retrieval
-// is treated as sufficiently strong.
-// Important: this is checked AFTER filtering by score threshold.
-const MIN_SIMILARITIES = parseInt(process.env.MIN_SIMILARITIES || "1", 10);
-
-// minimum similarity score required
-const COSINE_LIMIT = parseFloat(process.env.COSINE_LIMIT || "0.45");
-
-// local file tracking indexing state
-const INDEX_STATE_FILE =
-  process.env.INDEX_STATE_FILE || path.resolve("./.index-state.json");
-
-// Chunking configuration
-// CHUNK_SIZE = target size of each chunk in characters
-// CHUNK_OVERLAP = number of overlapping characters between adjacent chunks
-const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE || "1200", 10);
-const CHUNK_OVERLAP = parseInt(process.env.CHUNK_OVERLAP || "400", 10);
-
-// Version for indexing/chunking strategy.
-// Bump this manually when you make major indexing changes and want to force
-// a full re-embedding of all documents.
-const INDEX_SCHEMA_VERSION = process.env.INDEX_SCHEMA_VERSION || "1";
-
-// Max embedding chars to decrease input tokens for embedding model
-const MAX_EMBEDDING_CHARS = parseInt(
-  process.env.MAX_EMBEDDING_CHARS || "400",
-  10
-);
-
-if (!Number.isInteger(MAX_EMBEDDING_CHARS) || MAX_EMBEDDING_CHARS < 200) {
-  throw new Error(
-    `Invalid MAX_EMBEDDING_CHARS: ${MAX_EMBEDDING_CHARS}. It must be an integer >= 200.`
-  );
-}
-
-// PDF extraction configuration
-// Minimum amount of extracted text required before we treat a PDF as useful.
-const PDF_MIN_EXTRACTED_CHARS = parseInt(
-  process.env.PDF_MIN_EXTRACTED_CHARS || "80",
-  10
-);
-
-  if (
-    !Number.isInteger(PDF_MIN_EXTRACTED_CHARS) ||
-    PDF_MIN_EXTRACTED_CHARS < 0
-  ) {
-    throw new Error(
-      `Invalid PDF_MIN_EXTRACTED_CHARS: ${PDF_MIN_EXTRACTED_CHARS}. It must be an integer >= 0.`
-    );
-  }
-
-// --------------------------------------------------------
-// LLM CHAT MODEL
-// --------------------------------------------------------
-// Uses Docker Model Runner with an OpenAI-compatible API
 
 const chatModel = new ChatOpenAI({
   model:
@@ -833,18 +58,10 @@ const chatModel = new ChatOpenAI({
       process.env.MODEL_RUNNER_BASE_URL ||
       "http://localhost:12434/engines/llama.cpp/v1/",
   },
-
-  // generation parameters
   temperature: parseFloat(process.env.OPTION_TEMPERATURE || "0.0"),
   top_p: parseFloat(process.env.OPTION_TOP_P || "0.5"),
   presencePenalty: parseFloat(process.env.OPTION_PRESENCE_PENALTY || "2.2"),
 });
-
-
-// --------------------------------------------------------
-// EMBEDDINGS MODEL
-// --------------------------------------------------------
-// Converts text into vectors used for similarity search
 
 const embeddingsModel = new OpenAIEmbeddings({
   model: process.env.MODEL_RUNNER_LLM_EMBEDDING || "ai/embeddinggemma:latest",
@@ -856,112 +73,18 @@ const embeddingsModel = new OpenAIEmbeddings({
   },
 });
 
-
-// --------------------------------------------------------
-// QDRANT CLIENT
-// --------------------------------------------------------
-// Vector database used for storing embeddings
-
 const qdrant = new QdrantClient({
   url: QDRANT_URL,
   apiKey: QDRANT_API_KEY,
   checkCompatibility: false,
 });
 
-// --------------------------------------------------------
-// RAG MESSAGE PACKAGE HELPERS
-// --------------------------------------------------------
-
-// Simple evidence-quality assessment.
-// This is intentionally lightweight for now and can be improved later.
-function getEvidenceQuality(results) {
-  if (!results || results.length === 0) {
-    return "weak";
-  }
-
-  // First check sufficiency based on filtered acceptable results
-  if (results.length < MIN_SIMILARITIES) {
-    return "weak";
-  }
-
-  const scores = results.map((result) => result.score ?? 0);
-  const maxScore = Math.max(...scores);
-  const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-
-  // Simple first version:
-  // - strong   -> enough acceptable results and overall good scores
-  // - moderate -> enough acceptable results but not very strong overall
-  // - weak     -> not enough acceptable results
-  if (results.length >= MIN_SIMILARITIES && results.length >= 2 && avgScore >= 0.7) {
-    return "strong";
-  }
-
-  if (results.length >= MIN_SIMILARITIES && maxScore >= COSINE_LIMIT) {
-    return "moderate";
-  }
-
-  return "weak";
-}
-
-// Formats one evidence entry for Option 2
-function formatEvidenceEntry(result, index) {
-  const payload = result.payload || {};
-  const source = payload.source || "unknown";
-  const section = payload.title || "Untitled";
-  const score =
-    typeof result.score === "number" ? result.score.toFixed(4) : "n/a";
-  const content = payload.text || "";
-
-  return `[Evidence ${index}]
-Source file: ${source}
-Section: ${section}
-Retrieval score: ${score}
-
-${content}`;
-}
-
-function buildRagContextPackage({ results, userMessage, evidenceQuality }) {
-  const evidenceBlock =
-    results.length > 0
-      ? results.map((result, index) => formatEvidenceEntry(result, index + 1)).join("\n\n")
-      : "No relevant evidence was retrieved from the knowledge base.";
-
-  return `RAG CONTEXT PACKAGE
-
-You are given retrieved knowledge from the knowledge base.
-Some retrieved entries may be more relevant than others.
-Use the retrieved content as the primary basis for your answer.
-
-EVIDENCE SUMMARY
-Retrieved entries: ${results.length}
-Evidence quality assessment: ${evidenceQuality}
-Minimum acceptable evidence required: ${MIN_SIMILARITIES}
-
-INTERPRETATION GUIDE
-- Prefer evidence that is most relevant to the user's question.
-- Use metadata such as source, section, and retrieval score as helpful hints, but rely mainly on the content itself.
-- Ignore retrieved entries that are clearly irrelevant.
-- Do not invent unsupported facts.
-- If multiple entries support the same answer, combine them into one coherent explanation.
-
-RETRIEVED EVIDENCE
-
-${evidenceBlock}
-
-ANSWERING TASK
-- Answer the user's question using the retrieved knowledge as the primary source.
-- If the evidence is partial, answer only what is supported and clearly indicate what is missing.
-- If the evidence is insufficient, say that the knowledge base does not contain enough information.
-- If you provide additional general knowledge, clearly label it as general knowledge and not as knowledge-base content.
-
-USER QUESTION
-${userMessage}`;
-}
-
-// --------------------------------------------------------
-// HISTORY
-// --------------------------------------------------------
-// Stores limited conversation history for contextual chat
+const ui = createUi({
+  appName: APP_NAME,
+  appVersion: APP_VERSION,
+  chatModel,
+  contentPath: CONTENT_PATH,
+});
 
 const conversationMemory = new Map();
 
@@ -972,27 +95,114 @@ function getConversationHistory(sessionId) {
   return conversationMemory.get(sessionId);
 }
 
+function trimConversationHistory(historyMessages) {
+  const maxHistoryEntries = historyMessages * 2;
+  for (const history of conversationMemory.values()) {
+    if (history.length > maxHistoryEntries) {
+      history.splice(0, history.length - maxHistoryEntries);
+    }
+  }
+}
+
+const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager(
+  {
+    historyMessages: HISTORY_MESSAGES,
+    maxSimilarities: MAX_SIMILARITIES,
+    minSimilarities: MIN_SIMILARITIES,
+    cosineLimit: COSINE_LIMIT,
+  },
+  trimConversationHistory
+);
+
+const DEFAULT_SESSION_ID = "default-session-id";
+const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
+const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
+
+async function buildLibraryInfoMessage() {
+  const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+
+  if (files.length === 0) {
+    return [
+      "Library info:",
+      `- content path: ${CONTENT_PATH}` ,
+      `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}` ,
+      "- files: 0",
+      "- total chunks: 0",
+    ].join("\n");
+  }
+
+  const perFile = files.map((file) => {
+    const chunks = fileToChunks(file);
+    return {
+      ...file,
+      chunkCount: chunks.length,
+    };
+  });
+
+  const totalChunks = perFile.reduce((sum, file) => sum + file.chunkCount, 0);
+
+  const lines = [
+    "Library info:",
+    `- content path: ${CONTENT_PATH}` ,
+    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}` ,
+    `- files: ${perFile.length}`,
+    `- total chunks: ${totalChunks}`,
+    "",
+    "Embedded files:",
+  ];
+
+  for (const file of perFile) {
+    const modifiedAt = file.lastModified ? new Date(file.lastModified).toISOString() : "n/a";
+
+    lines.push(`- ${file.relativePath}`);
+    lines.push(`  size: ${formatBytes(file.size)} (${file.size} bytes)`);
+    lines.push(`  chunks: ${file.chunkCount}`);
+    lines.push(`  extension: ${file.extension}`);
+    lines.push(`  hash: ${file.hash}`);
+    lines.push(`  modified: ${modifiedAt}`);
+  }
+
+  return lines.join("\n");
+}
+
 function addToHistory(sessionId, role, content) {
   const history = getConversationHistory(sessionId);
   history.push([role, content]);
 
-  // keep only last N messages
-  if (history.length > HISTORY_MESSAGES * 2) {
-    history.splice(0, 2);
+  const maxHistoryEntries = runtimeConfig.historyMessages * 2;
+  if (history.length > maxHistoryEntries) {
+    history.splice(0, history.length - maxHistoryEntries);
   }
 }
 
+function ensureParentDirectory(filePath) {
+  const parent = path.dirname(filePath);
+  fs.mkdirSync(parent, { recursive: true });
+}
 
-// --------------------------------------------------------
-// INDEX STATE
-// --------------------------------------------------------
-// Keeps track of file hashes so only changed files are re-embedded
+function writeFileAtomic(filePath, content) {
+  ensureParentDirectory(filePath);
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, content, "utf8");
+  fs.renameSync(tmpPath, filePath);
+}
+
+function appendSessionHistoryEntry(entry) {
+  try {
+    ensureParentDirectory(CHAT_HISTORY_FILE);
+    const line = `${JSON.stringify(entry)}\n`;
+    fs.appendFileSync(CHAT_HISTORY_FILE, line, { encoding: "utf8", mode: 0o600 });
+  } catch (error) {
+    console.error(`Failed to append chat history entry: ${error.message}`);
+  }
+}
 
 function loadIndexState() {
   try {
     if (!fs.existsSync(INDEX_STATE_FILE)) {
       return {};
     }
+
     return JSON.parse(fs.readFileSync(INDEX_STATE_FILE, "utf8"));
   } catch (error) {
     console.error(`Failed to load index state: ${error.message}`);
@@ -1002,24 +212,17 @@ function loadIndexState() {
 
 function saveIndexState(state) {
   try {
-    fs.writeFileSync(INDEX_STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+    writeFileAtomic(INDEX_STATE_FILE, JSON.stringify(state, null, 2));
   } catch (error) {
     console.error(`Failed to save index state: ${error.message}`);
   }
 }
 
-// --------------------------------------------------------
-// QDRANT HELPERS
-// --------------------------------------------------------
-// Utility functions for managing the vector database
-
 async function collectionExists(collectionName) {
   const collections = await qdrant.getCollections();
-  return collections.collections.some((c) => c.name === collectionName);
+  return collections.collections.some((collection) => collection.name === collectionName);
 }
 
-
-// ensure the vector collection exists and matches embedding dimension
 async function ensureCollection(vectorSize) {
   const exists = await collectionExists(COLLECTION_NAME);
 
@@ -1031,84 +234,50 @@ async function ensureCollection(vectorSize) {
       },
     });
 
-    // create indexes for faster filtering
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "source",
-      field_schema: "keyword",
-    });
+    for (const field of ["source", "filename", "extension", "documentHash"]) {
+      await qdrant.createPayloadIndex(COLLECTION_NAME, {
+        field_name: field,
+        field_schema: "keyword",
+      });
+    }
 
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "filename",
-      field_schema: "keyword",
-    });
-
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "extension",
-      field_schema: "keyword",
-    });
-
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "documentHash",
-      field_schema: "keyword",
-    });
-
-    console.log(`✅ Qdrant collection "${COLLECTION_NAME}" created`);
+    console.log(`Qdrant collection "${COLLECTION_NAME}" created`);
     return;
   }
 
   const info = await qdrant.getCollection(COLLECTION_NAME);
-  let currentSize = null;
+  const currentSize =
+    info?.config?.params?.vectors && !Array.isArray(info.config.params.vectors)
+      ? info.config.params.vectors.size
+      : null;
 
-  if (
-    info?.config?.params?.vectors &&
-    !Array.isArray(info.config.params.vectors)
-  ) {
-    currentSize = info.config.params.vectors.size;
+  if (currentSize === vectorSize) {
+    return;
   }
 
-if (currentSize !== vectorSize) {
-    console.log(
-      `⚠️ Vector size changed (${currentSize} -> ${vectorSize}), recreating collection...`
-    );
+  console.log(`Vector size changed (${currentSize} -> ${vectorSize}), recreating collection...`);
+  await qdrant.deleteCollection(COLLECTION_NAME);
+  await qdrant.createCollection(COLLECTION_NAME, {
+    vectors: {
+      size: vectorSize,
+      distance: "Cosine",
+    },
+  });
 
-    await qdrant.deleteCollection(COLLECTION_NAME);
-    await qdrant.createCollection(COLLECTION_NAME, {
-      vectors: {
-        size: vectorSize,
-        distance: "Cosine",
-      },
-    });
-
+  for (const field of ["source", "filename", "extension", "documentHash"]) {
     await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "source",
+      field_name: field,
       field_schema: "keyword",
     });
-
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "filename",
-      field_schema: "keyword",
-    });
-
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "extension",
-      field_schema: "keyword",
-    });
-
-    await qdrant.createPayloadIndex(COLLECTION_NAME, {
-      field_name: "documentHash",
-      field_schema: "keyword",
-    });
-
-    console.log(`✅ Qdrant collection "${COLLECTION_NAME}" recreated`);
   }
+
+  console.log(`Qdrant collection "${COLLECTION_NAME}" recreated`);
 }
 
-
-// delete all chunks belonging to a specific source file
 async function deletePointsBySource(relativePath) {
   await qdrant.delete(COLLECTION_NAME, {
     wait: true,
-filter: {
+    filter: {
       must: [
         {
           key: "source",
@@ -1121,23 +290,14 @@ filter: {
   });
 }
 
-
-// convert file → chunk records
 function fileToChunks(file) {
   let sections;
 
-  if (
-    file.extension === ".md" ||
-    file.extension === ".html" ||
-    file.extension === ".htm" ||
-    file.extension === ".pdf"
-  ) {
+  if ([".md", ".html", ".htm", ".pdf"].includes(file.extension)) {
     sections = splitMarkdownBySectionsWithMetadata(file.content);
   } else {
     const trimmed = file.content.trim();
-    sections = trimmed
-      ? [{ title: file.filename, content: trimmed }]
-      : [];
+    sections = trimmed ? [{ title: file.filename, content: trimmed }] : [];
   }
 
   const chunkRecords = [];
@@ -1145,17 +305,10 @@ function fileToChunks(file) {
 
   for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
     const section = sections[sectionIndex];
-
-    // Break each section into smaller overlapping subchunks
-    const subchunks = splitTextIntoOverlappingChunks(
-      section.content,
-      CHUNK_SIZE,
-      CHUNK_OVERLAP
-    );
+    const subchunks = splitTextIntoOverlappingChunks(section.content, CHUNK_SIZE, CHUNK_OVERLAP);
 
     for (let subchunkIndex = 0; subchunkIndex < subchunks.length; subchunkIndex++) {
       const subchunkText = subchunks[subchunkIndex]?.trim();
-
       if (!subchunkText) {
         continue;
       }
@@ -1180,92 +333,92 @@ function fileToChunks(file) {
   return enforceEmbeddingSizeLimit(chunkRecords);
 }
 
-// --------------------------------------------------------
-// INDEXING PIPELINE
-// --------------------------------------------------------
-// Reads files, creates embeddings, and stores them in Qdrant
-
 async function indexChangedDocuments() {
+  const startupLog = (...args) => ui.uiLog(...args);
 
-  console.log("========================================================");
-  console.log("Embeddings model:", embeddingsModel.model);
-  console.log(`Reading documents from: ${CONTENT_PATH}`);
+  startupLog("_______________________________________________________");
+  startupLog("Embeddings model:", embeddingsModel.model);
+  startupLog(`Reading documents from: ${CONTENT_PATH}`);
 
-  const files = await readTextFilesRecursively(CONTENT_PATH, [
-    ".md",
-    ".txt",
-    ".html",
-    ".htm",
-    ".pdf",
-  ]);
-  console.log(`Files found: ${files.length}`);
+  const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+  startupLog(`Files found: ${files.length}`);
 
   if (files.length === 0) {
-    console.log("⚠️ No files found to index.");
-    console.log("========================================================");
-    return;
+    startupLog("No files found to index.");
+    startupLog("_______________________________________________________");
+    return {
+      filesFound: 0,
+      changedFiles: [],
+      removedFiles: [],
+      indexedCount: 0,
+      removedCount: 0,
+      skipped: true,
+    };
   }
 
   const indexState = loadIndexState();
-
   const changedFiles = files.filter((file) => indexState[file.relativePath] !== file.hash);
   const removedFiles = Object.keys(indexState).filter(
     (relativePath) => !files.some((file) => file.relativePath === relativePath)
   );
 
-  console.log(`Changed/new files: ${changedFiles.length}`);
-  console.log(`Removed files: ${removedFiles.length}`);
+  startupLog(`Changed/new files: ${changedFiles.length}`);
+  startupLog(`Removed files: ${removedFiles.length}`);
 
   if (changedFiles.length === 0 && removedFiles.length === 0) {
-    console.log("No indexing needed.");
-    console.log("========================================================");
-    return;
+    startupLog("No indexing needed.");
+    startupLog("_______________________________________________________");
+    return {
+      filesFound: files.length,
+      changedFiles,
+      removedFiles,
+      indexedCount: 0,
+      removedCount: 0,
+      skipped: true,
+    };
   }
 
   const probeEmbedding = await embeddingsModel.embedQuery("dimension probe");
   await ensureCollection(probeEmbedding.length);
 
-  // remove deleted files
+  let removedCount = 0;
   for (const removedFile of removedFiles) {
     try {
-      console.log(`Removing deleted file from index: ${removedFile}`);
+      startupLog(`Removing deleted file from index: ${removedFile}`);
       await deletePointsBySource(removedFile);
       delete indexState[removedFile];
+      removedCount++;
     } catch (error) {
       console.error(`Failed removing ${removedFile}: ${error.message}`);
     }
   }
 
-  // index changed files
+  let indexedCount = 0;
   for (const file of changedFiles) {
     try {
-      console.log(`Indexing file: ${file.relativePath}`);
-
+      startupLog(`Indexing file: ${file.relativePath}`);
       await deletePointsBySource(file.relativePath);
 
       const chunkRecords = fileToChunks(file).filter((chunk) => chunk.text?.trim());
       if (chunkRecords.length === 0) {
-        console.log(`No chunks for file: ${file.relativePath}`);
+        startupLog(`No chunks for file: ${file.relativePath}`);
         indexState[file.relativePath] = file.hash;
         continue;
-}
+      }
 
       const chunkLengths = chunkRecords.map((chunk) => chunk.text.length);
       const maxChunkLength = chunkLengths.length > 0 ? Math.max(...chunkLengths) : 0;
       const avgChunkLength =
         chunkLengths.length > 0
-          ? Math.round(chunkLengths.reduce((a, b) => a + b, 0) / chunkLengths.length)
+          ? Math.round(chunkLengths.reduce((total, length) => total + length, 0) / chunkLengths.length)
           : 0;
 
-       console.log(
+      startupLog(
         `Prepared ${chunkRecords.length} chunks from ${file.relativePath} ` +
-        `(avg chars: ${avgChunkLength}, max chars: ${maxChunkLength})`
+          `(avg chars: ${avgChunkLength}, max chars: ${maxChunkLength})`
       );
 
-      const embeddings = await embeddingsModel.embedDocuments(
-        chunkRecords.map((chunk) => chunk.text)
-      );
-
+      const embeddings = await embeddingsModel.embedDocuments(chunkRecords.map((chunk) => chunk.text));
       const points = chunkRecords.map((chunk, index) => ({
         id: chunk.id,
         vector: embeddings[index],
@@ -1282,124 +435,214 @@ async function indexChangedDocuments() {
         },
       }));
 
-      await qdrant.upsert(COLLECTION_NAME, {
-        wait: true,
-        points,
-      });
-
+      await qdrant.upsert(COLLECTION_NAME, { wait: true, points });
       indexState[file.relativePath] = file.hash;
-      console.log(
-        `Prepared ${chunkRecords.length} chunks from ${file.relativePath} (chunk size: ${CHUNK_SIZE}, overlap: ${CHUNK_OVERLAP})`
-       );
-      } catch (error) {
+      indexedCount++;
+    } catch (error) {
       console.error(`Error indexing ${file.relativePath}: ${error.message}`);
     }
   }
 
   saveIndexState(indexState);
-  console.log("Index state saved");
-  console.log("========================================================");
-  console.log();
+  startupLog("Index state saved");
+  startupLog("_______________________________________________________");
+  startupLog();
+
+  return {
+    filesFound: files.length,
+    changedFiles,
+    removedFiles,
+    indexedCount,
+    removedCount,
+    skipped: false,
+  };
 }
-
-
-// --------------------------------------------------------
-// RETRIEVAL
-// --------------------------------------------------------
-// Performs similarity search in the vector database
 
 async function searchKnowledgeBase(userMessage) {
   const userQuestionEmbedding = await embeddingsModel.embedQuery(userMessage);
 
   const results = await qdrant.search(COLLECTION_NAME, {
     vector: userQuestionEmbedding,
-    limit: MAX_SIMILARITIES,
+    limit: runtimeConfig.maxSimilarities,
     with_payload: true,
   });
 
-  const filteredResults = results.filter((result) => result.score >= COSINE_LIMIT);
-
-  const hasSufficientEvidence = filteredResults.length >= MIN_SIMILARITIES;
-  const evidenceQuality = getEvidenceQuality(filteredResults);
+  const filteredResults = results.filter((result) => result.score >= runtimeConfig.cosineLimit);
+  const hasSufficientEvidence = filteredResults.length >= runtimeConfig.minSimilarities;
+  const evidenceQuality = getEvidenceQuality(filteredResults, runtimeConfig.minSimilarities);
 
   for (const result of filteredResults) {
     const payload = result.payload || {};
-    const source = payload.source || "unknown";
-    const title = payload.title || "Untitled";
-
-    console.log(
-      "Score:",
-      result.score,
-      "Source:",
-      source,
-      "Title:",
-      title
-    );
+    ui.uiLog("Score:", result.score, "Source:", payload.source || "unknown", "Title:", payload.title || "Untitled");
   }
 
-  console.log(`Retrieved from Qdrant: ${results.length}`);
-  console.log(`Passed threshold (${COSINE_LIMIT}): ${filteredResults.length}`);
-  console.log(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
-  console.log(`Sufficient evidence: ${hasSufficientEvidence ? "yes" : "no"}`);
-  console.log(`Evidence quality: ${evidenceQuality}`);
-  console.log("========================================================");
-  console.log();
-
-  const ragContextPackage = buildRagContextPackage({
-    results: filteredResults,
-    userMessage,
-    evidenceQuality,
-  });
+  ui.uiLog(`Retrieved from Qdrant: ${results.length}`);
+  ui.uiLog(`Passed threshold (${runtimeConfig.cosineLimit}): ${filteredResults.length}`);
+  ui.uiLog(`MIN_SIMILARITIES required: ${runtimeConfig.minSimilarities}`);
+  ui.uiLog(`Sufficient evidence: ${hasSufficientEvidence ? chalk.green("YES") : chalk.red("NO")}`);
+  ui.uiLog(`Evidence quality: ${colorEvidenceQuality(evidenceQuality)}`);
+  ui.uiLog("_______________________________________________________");
+  ui.uiLog();
 
   return {
     results: filteredResults,
     evidenceQuality,
     hasSufficientEvidence,
-    ragContextPackage,
+    ragContextPackage: buildRagContextPackage({
+      results: filteredResults,
+      userMessage,
+      evidenceQuality,
+    }),
   };
 }
 
-// --------------------------------------------------------
-// MAIN PROGRAM
-// --------------------------------------------------------
-
 let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
 
-// validate retrieval-related configuration before startup
 validateRetrievalConfig();
-
-// index documents before chat starts
+ui.renderLoadingScreen();
 await indexChangedDocuments();
+ui.printAssistantMessage("Knowledge base is ready. Indexing completed successfully.");
+ui.printAssistantMessage("How can I help you today?");
+ui.uiLog(`Chat history file: ${CHAT_HISTORY_FILE}`);
 
 let exit = false;
+let pendingWeakAnswer = null;
 while (!exit) {
   const response = await prompts({
     type: "text",
     name: "userMessage",
-    message: `Your question (${chatModel.model}): `,
-    validate: (value) => (value ? true : "Question cannot be empty"),
+    message: ui.promptColor(">"),
   });
 
   const userMessage = response.userMessage;
-
   if (!userMessage) {
     continue;
   }
 
-  // exit command
-  if (userMessage === "/bye") {
+  const normalizedUserMessage = String(userMessage).trim().toLowerCase();
+  ui.resetConversationView();
+
+  if (pendingWeakAnswer) {
+    if (["/bye", "/exit", "/quit"].includes(normalizedUserMessage)) {
+      console.log("See you later!");
+      exit = true;
+      continue;
+    }
+
+    if (["/yes", "/y"].includes(normalizedUserMessage)) {
+      ui.printAssistantMessage(pendingWeakAnswer.assistantResponse);
+      ui.printEvidenceQuality(pendingWeakAnswer.evidenceQuality);
+      pendingWeakAnswer = null;
+      continue;
+    }
+
+    if (["/no", "/skip"].includes(normalizedUserMessage)) {
+      ui.printAssistantMessage(
+        "Okay, skipped displaying the weak-evidence answer. Your question and generated answer were still saved to chat history."
+      );
+      pendingWeakAnswer = null;
+      continue;
+    }
+
+    ui.printAssistantMessage("Please confirm with /yes to show the answer, or /no (or /skip) to hide it.");
+    continue;
+  }
+
+  if (["/bye", "/exit", "/quit"].includes(normalizedUserMessage)) {
     console.log("See you later!");
     exit = true;
     continue;
   }
 
-  const history = getConversationHistory("default-session-id");
+  if (normalizedUserMessage === "/mode clean") {
+    ui.setTuiMode("clean");
+    ui.renderModeChanged("clean");
+    continue;
+  }
 
-  // retrieve relevant knowledge
-  const { ragContextPackage, evidenceQuality, results } =
-  await searchKnowledgeBase(userMessage);
+  if (normalizedUserMessage === "/mode rag") {
+    ui.setTuiMode("rag");
+    ui.renderModeChanged("rag");
+    continue;
+  }
 
-  // build final prompt
+  if (normalizedUserMessage === "/info") {
+    ui.printAssistantMessage(buildSystemInfoMessage({
+      appName: APP_NAME,
+      appVersion: APP_VERSION,
+      uiMode: ui.getTuiMode(),
+      chatModelName: chatModel.model,
+      embeddingModelName: embeddingsModel.model,
+      qdrantUrl: QDRANT_URL,
+      collectionName: COLLECTION_NAME,
+      contentPath: CONTENT_PATH,
+      embeddableExtensions: EMBEDDABLE_EXTENSIONS,
+      chatHistoryDir: CHAT_HISTORY_DIR,
+    }));
+    continue;
+  }
+
+  if (normalizedUserMessage === "/help" || normalizedUserMessage === "?") {
+    ui.printAssistantMessage(buildHelpMessage());
+    continue;
+  }
+
+  if (normalizedUserMessage === "/embed") {
+    ui.renderLoadingScreen("Embedding knowledge base...");
+    ui.setPendingStatus("Checking for new/changed documents in ./data...");
+    const summary = await indexChangedDocuments();
+    ui.setPendingStatus(null);
+    ui.printAssistantMessage(buildEmbedSummaryMessage(summary));
+    continue;
+  }
+
+  if (normalizedUserMessage === "/lib") {
+    ui.setPendingStatus("Collecting library metadata...");
+    const libraryInfoMessage = await buildLibraryInfoMessage();
+    ui.setPendingStatus(null);
+    ui.printAssistantMessage(libraryInfoMessage);
+    continue;
+  }
+
+  if (normalizedUserMessage === "/config") {
+    ui.printAssistantMessage(buildActiveConfigMessage(runtimeConfig, {
+      chunkSize: CHUNK_SIZE,
+      chunkOverlap: CHUNK_OVERLAP,
+      maxEmbeddingChars: MAX_EMBEDDING_CHARS,
+      pdfMinExtractedChars: PDF_MIN_EXTRACTED_CHARS,
+      indexSchemaVersion: INDEX_SCHEMA_VERSION,
+      indexStateFile: INDEX_STATE_FILE,
+      chatHistoryDir: CHAT_HISTORY_DIR,
+      temperature: process.env.OPTION_TEMPERATURE || "0.0",
+      topP: process.env.OPTION_TOP_P || "0.5",
+      presencePenalty: process.env.OPTION_PRESENCE_PENALTY || "2.2",
+    }));
+    continue;
+  }
+
+  if (normalizedUserMessage.startsWith("/config set ")) {
+    const parsed = parseConfigSetCommand(userMessage);
+
+    if (!parsed) {
+      ui.printAssistantMessage(
+        "Invalid format. Use: /config set <name> <value> or /config set '<name>'=<value>"
+      );
+      continue;
+    }
+
+    const update = setRuntimeConfigValue(parsed.configName, parsed.rawValue);
+    ui.printAssistantMessage(update.message);
+    continue;
+  }
+
+  ui.printUserMessage(userMessage);
+  ui.setPendingStatus("Searching knowledge base...");
+
+  const history = getConversationHistory(DEFAULT_SESSION_ID);
+  const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(userMessage);
+  ui.setPendingSimilarityDetails(createSimilarityDetails(results, runtimeConfig));
+  ui.setPendingStatus("Generating answer...");
+
   const messages = [
     ["system", systemInstructions],
     ["system", ragContextPackage],
@@ -1408,17 +651,36 @@ while (!exit) {
   ];
 
   let assistantResponse = "";
-
-  // stream response from LLM
   const stream = await chatModel.stream(messages);
   for await (const chunk of stream) {
     assistantResponse += chunk.content;
-    process.stdout.write(chunk.content);
   }
 
-  console.log("\n");
+  ui.setPendingStatus(null);
 
-  // update conversation history
-  addToHistory("default-session-id", "user", userMessage);
-  addToHistory("default-session-id", "assistant", assistantResponse);
+  if (evidenceQuality === "weak") {
+    pendingWeakAnswer = {
+      assistantResponse,
+      evidenceQuality,
+    };
+
+    ui.printAssistantMessage(
+      "Evidence quality is WEAK for this topic. The generated answer may be unreliable. " +
+        "Do you still want to display it? Use /yes to show it, or /no or /skip to hide it."
+    );
+  } else {
+    ui.printAssistantMessage(assistantResponse);
+    ui.printEvidenceQuality(evidenceQuality);
+  }
+
+  addToHistory(DEFAULT_SESSION_ID, "user", userMessage);
+  addToHistory(DEFAULT_SESSION_ID, "assistant", assistantResponse);
+
+  appendSessionHistoryEntry({
+    timestamp: new Date().toISOString(),
+    sessionId: DEFAULT_SESSION_ID,
+    user: userMessage,
+    assistant: assistantResponse,
+    evidenceQuality,
+  });
 }

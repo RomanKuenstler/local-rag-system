@@ -34,6 +34,9 @@ services:
     environment:
       # Terminal compatibility for interactive usage
       TERM: xterm-256color
+      
+      # Terminal user interface MODE
+      # TUI_MODE: clean
 
       # -----------------------------------------------------------------------
       # Conversation settings

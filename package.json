@@ -10,6 +10,10 @@
     "prompts": "^2.4.2",
     "@qdrant/qdrant-js": "^1.17.0",
     "cheerio": "^1.2.0",
-    "pdfjs-dist": "^5.5.207"
+    "pdfjs-dist": "^5.5.207",
+    "chalk": "^5.6.2"
+  },
+  "scripts": {
+    "lint": "node --check index.js src/*.js"
   }
 }
