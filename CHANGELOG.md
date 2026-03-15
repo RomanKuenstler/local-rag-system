@@ -1,7 +1,5 @@
 # CHANGELOG
 
-## smallimpr1
-
 ### Added
 - Added a dedicated RAG TUI mode with similarity insights in responses.
 - Added `/info` command for system details and then streamlined its output.
