@@ -142,6 +142,19 @@ USER QUESTION
 ${userMessage}`;
 }
 
+function buildSystemInfoMessage() {
+  return [
+    "System info:",
+    `- app: ${APP_NAME} ${APP_VERSION}`,
+    `- ui mode: ${ui.getTuiMode()}`,
+    `- chat model: ${chatModel.model || "unknown"}`,
+    `- embedding model: ${embeddingsModel.model || "unknown"}`,
+    `- vector db: qdrant (${QDRANT_URL})`,
+    `- collection: ${COLLECTION_NAME}`,
+    `- content path: ${CONTENT_PATH}`,
+  ].join("\n");
+}
+
 const conversationMemory = new Map();
 
 function getConversationHistory(sessionId) {
@@ -467,6 +480,11 @@ while (!exit) {
   if (userMessage === "/mode rag") {
     ui.setTuiMode("rag");
     ui.renderModeChanged("rag");
+    continue;
+  }
+
+  if (userMessage === "/info") {
+    ui.printAssistantMessage(buildSystemInfoMessage());
     continue;
   }
 
