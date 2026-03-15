@@ -3,6 +3,7 @@ import chalk from "chalk";
 export function createUi({ appName, appVersion, chatModel, contentPath }) {
   let mode = (process.env.TUI_MODE || "clean").toLowerCase();
   let cleanUiMessages = [];
+  let pendingStatus = null;
 
   function isCleanMode() {
     return mode === "clean";
@@ -153,6 +154,11 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       conversationLines.push("");
     }
 
+    if (pendingStatus) {
+      conversationLines.push(chalk.cyan(`⏳ ${pendingStatus}`));
+      conversationLines.push("");
+    }
+
     for (const line of conversationLines) {
       console.log(line);
     }
@@ -162,6 +168,13 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
     repeatBlankLines(blankLines);
     renderFooter();
+  }
+
+  function setPendingStatus(statusText) {
+    pendingStatus = statusText ? String(statusText) : null;
+    if (isCleanMode()) {
+      renderCleanScreen();
+    }
   }
 
   function renderStartupScreen() {
@@ -233,6 +246,20 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     console.log("");
   }
 
+  function printEvidenceQuality(evidenceQuality) {
+    const label = String(evidenceQuality || "unknown").toLowerCase();
+    const qualityColor =
+      label === "strong" ? chalk.green : label === "moderate" ? chalk.yellow : label === "weak" ? chalk.red : chalk.white;
+
+    if (isCleanMode()) {
+      cleanUiMessages.push({ role: "assistant", text: `Evidence strength: ${label}` });
+      renderCleanScreen();
+      return;
+    }
+
+    console.log(chalk.dim("Evidence strength:"), qualityColor(label));
+  }
+
   function uiLog(...args) {
     if (isRagMode()) {
       console.log(...args);
@@ -248,6 +275,8 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     renderModeChanged,
     printUserMessage,
     printAssistantMessage,
+    printEvidenceQuality,
+    setPendingStatus,
     uiLog,
     promptColor,
     renderFooter,
