@@ -367,6 +367,9 @@ function buildHelpMessage() {
     "                  Example: /config set 'min similarities' 3",
     "- /mode clean      Switch to clean chat-focused UI",
     "- /mode rag        Switch to debug RAG UI with similarity details",
+    "- /embed           Re-index only new/changed/removed files in ./data",
+    "- /yes             Show pending weak-evidence answer",
+    "- /no | /skip      Hide pending weak-evidence answer",
     "- /bye | /exit | /quit  Exit the application",
     "",
     "Tips:",
@@ -633,7 +636,14 @@ async function indexChangedDocuments() {
   if (files.length === 0) {
     startupLog("No files found to index.");
     startupLog("_______________________________________________________");
-    return;
+    return {
+      filesFound: 0,
+      changedFiles: [],
+      removedFiles: [],
+      indexedCount: 0,
+      removedCount: 0,
+      skipped: true,
+    };
   }
 
   const indexState = loadIndexState();
@@ -648,22 +658,32 @@ async function indexChangedDocuments() {
   if (changedFiles.length === 0 && removedFiles.length === 0) {
     startupLog("No indexing needed.");
     startupLog("_______________________________________________________");
-    return;
+    return {
+      filesFound: files.length,
+      changedFiles,
+      removedFiles,
+      indexedCount: 0,
+      removedCount: 0,
+      skipped: true,
+    };
   }
 
   const probeEmbedding = await embeddingsModel.embedQuery("dimension probe");
   await ensureCollection(probeEmbedding.length);
 
+  let removedCount = 0;
   for (const removedFile of removedFiles) {
     try {
       startupLog(`Removing deleted file from index: ${removedFile}`);
       await deletePointsBySource(removedFile);
       delete indexState[removedFile];
+      removedCount++;
     } catch (error) {
       console.error(`Failed removing ${removedFile}: ${error.message}`);
     }
   }
 
+  let indexedCount = 0;
   for (const file of changedFiles) {
     try {
       startupLog(`Indexing file: ${file.relativePath}`);
@@ -707,6 +727,7 @@ async function indexChangedDocuments() {
 
       await qdrant.upsert(COLLECTION_NAME, { wait: true, points });
       indexState[file.relativePath] = file.hash;
+      indexedCount++;
     } catch (error) {
       console.error(`Error indexing ${file.relativePath}: ${error.message}`);
     }
@@ -716,6 +737,38 @@ async function indexChangedDocuments() {
   startupLog("Index state saved");
   startupLog("_______________________________________________________");
   startupLog();
+
+  return {
+    filesFound: files.length,
+    changedFiles,
+    removedFiles,
+    indexedCount,
+    removedCount,
+    skipped: false,
+  };
+}
+
+function buildEmbedSummaryMessage(summary) {
+  if (!summary) {
+    return "Embedding finished, but no summary is available.";
+  }
+
+  if (summary.filesFound === 0) {
+    return "No embeddable files found in ./data. Nothing to index.";
+  }
+
+  if (summary.skipped) {
+    return "No new, changed, or removed files detected in ./data. Index is already up to date.";
+  }
+
+  return [
+    "Embedding finished.",
+    `- Files scanned: ${summary.filesFound}`,
+    `- New/changed files detected: ${summary.changedFiles.length}`,
+    `- Removed files detected: ${summary.removedFiles.length}`,
+    `- Files embedded: ${summary.indexedCount}`,
+    `- Files removed from index: ${summary.removedCount}`,
+  ].join("\n");
 }
 
 async function searchKnowledgeBase(userMessage) {
@@ -766,6 +819,7 @@ ui.printAssistantMessage("How can I help you today?");
 ui.uiLog(`Chat history file: ${CHAT_HISTORY_FILE}`);
 
 let exit = false;
+let pendingWeakAnswer = null;
 while (!exit) {
   const response = await prompts({
     type: "text",
@@ -780,6 +834,32 @@ while (!exit) {
 
   const normalizedUserMessage = String(userMessage).trim().toLowerCase();
   ui.resetConversationView();
+
+  if (pendingWeakAnswer) {
+    if (["/bye", "/exit", "/quit"].includes(normalizedUserMessage)) {
+      console.log("See you later!");
+      exit = true;
+      continue;
+    }
+
+    if (["/yes", "/y"].includes(normalizedUserMessage)) {
+      ui.printAssistantMessage(pendingWeakAnswer.assistantResponse);
+      ui.printEvidenceQuality(pendingWeakAnswer.evidenceQuality);
+      pendingWeakAnswer = null;
+      continue;
+    }
+
+    if (["/no", "/skip"].includes(normalizedUserMessage)) {
+      ui.printAssistantMessage(
+        "Okay, skipped displaying the weak-evidence answer. Your question and generated answer were still saved to chat history."
+      );
+      pendingWeakAnswer = null;
+      continue;
+    }
+
+    ui.printAssistantMessage("Please confirm with /yes to show the answer, or /no (or /skip) to hide it.");
+    continue;
+  }
 
   if (["/bye", "/exit", "/quit"].includes(normalizedUserMessage)) {
     console.log("See you later!");
@@ -806,6 +886,15 @@ while (!exit) {
 
   if (normalizedUserMessage === "/help" || normalizedUserMessage === "?") {
     ui.printAssistantMessage(buildHelpMessage());
+    continue;
+  }
+
+  if (normalizedUserMessage === "/embed") {
+    ui.renderLoadingScreen("Embedding knowledge base...");
+    ui.setPendingStatus("Checking for new/changed documents in ./data...");
+    const summary = await indexChangedDocuments();
+    ui.setPendingStatus(null);
+    ui.printAssistantMessage(buildEmbedSummaryMessage(summary));
     continue;
   }
 
@@ -859,8 +948,22 @@ while (!exit) {
   }
 
   ui.setPendingStatus(null);
-  ui.printAssistantMessage(assistantResponse);
-  ui.printEvidenceQuality(evidenceQuality);
+
+  if (evidenceQuality === "weak") {
+    pendingWeakAnswer = {
+      assistantResponse,
+      evidenceQuality,
+    };
+
+    ui.printAssistantMessage(
+      "Evidence quality is WEAK for this topic. The generated answer may be unreliable. " +
+        "Do you still want to display it? Use /yes to show it, or /no or /skip to hide it."
+    );
+  } else {
+    ui.printAssistantMessage(assistantResponse);
+    ui.printEvidenceQuality(evidenceQuality);
+  }
+
   addToHistory(DEFAULT_SESSION_ID, "user", userMessage);
   addToHistory(DEFAULT_SESSION_ID, "assistant", assistantResponse);
 
