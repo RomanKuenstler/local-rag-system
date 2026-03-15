@@ -419,15 +419,10 @@ ui.renderStartupScreen();
 
 let exit = false;
 while (!exit) {
-  if (ui.isCleanMode()) {
-    console.log("");
-  }
-
   const response = await prompts({
     type: "text",
     name: "userMessage",
     message: ui.isCleanMode() ? ui.promptColor(">") : `Your question (${chatModel.model}): `,
-    validate: (value) => (value ? true : "Question cannot be empty"),
   });
 
   const userMessage = response.userMessage;
@@ -476,11 +471,6 @@ while (!exit) {
   ui.setPendingStatus(null);
   ui.printAssistantMessage(assistantResponse);
   ui.printEvidenceQuality(evidenceQuality);
-  if (ui.isCleanMode()) {
-    ui.renderFooter();
-  }
-
-  console.log("\n");
   addToHistory("default-session-id", "user", userMessage);
   addToHistory("default-session-id", "assistant", assistantResponse);
 }
