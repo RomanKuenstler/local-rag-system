@@ -73,8 +73,161 @@ const ui = createUi({
   contentPath: CONTENT_PATH,
 });
 
+const runtimeConfig = {
+  historyMessages: HISTORY_MESSAGES,
+  maxSimilarities: MAX_SIMILARITIES,
+  minSimilarities: MIN_SIMILARITIES,
+  cosineLimit: COSINE_LIMIT,
+};
+
+const runtimeConfigSchema = {
+  "history messages": {
+    key: "historyMessages",
+    parse: parseIntegerConfig,
+    validate: (value) => {
+      if (!Number.isInteger(value) || value < 1) {
+        return "must be an integer >= 1";
+      }
+      return null;
+    },
+  },
+  "max similarities": {
+    key: "maxSimilarities",
+    parse: parseIntegerConfig,
+    validate: (value, config) => {
+      if (!Number.isInteger(value) || value < 1) {
+        return "must be an integer >= 1";
+      }
+      if (value < config.minSimilarities) {
+        return `must be >= min similarities (${config.minSimilarities})`;
+      }
+      return null;
+    },
+  },
+  "min similarities": {
+    key: "minSimilarities",
+    parse: parseIntegerConfig,
+    validate: (value, config) => {
+      if (!Number.isInteger(value) || value < 0) {
+        return "must be an integer >= 0";
+      }
+      if (value > config.maxSimilarities) {
+        return `must be <= max similarities (${config.maxSimilarities})`;
+      }
+      return null;
+    },
+  },
+  "cosine limit": {
+    key: "cosineLimit",
+    parse: parseFloatConfig,
+    validate: (value) => {
+      if (!Number.isFinite(value)) {
+        return "must be a valid number";
+      }
+      if (value < 0 || value > 1) {
+        return "must be between 0 and 1";
+      }
+      return null;
+    },
+  },
+};
+
+function parseIntegerConfig(rawValue) {
+  const parsed = Number.parseInt(String(rawValue), 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function parseFloatConfig(rawValue) {
+  const parsed = Number.parseFloat(String(rawValue));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getConfigFieldMetadata(name) {
+  const normalized = String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/["']/g, "")
+    .replace(/\s+/g, " ");
+
+  return runtimeConfigSchema[normalized] || null;
+}
+
+function parseConfigSetCommand(input) {
+  const trimmed = String(input || "").trim();
+  const noPrefix = trimmed.replace(/^\/config\s+set\s+/i, "").trim();
+
+  const quotedMatch = noPrefix.match(/^['"](.+?)['"]\s*(?:=|\s+)\s*(.+)$/);
+  if (quotedMatch) {
+    return {
+      configName: quotedMatch[1],
+      rawValue: quotedMatch[2],
+    };
+  }
+
+  const parts = noPrefix.split(/\s*=\s*|\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return {
+      configName: parts.slice(0, -1).join(" "),
+      rawValue: parts[parts.length - 1],
+    };
+  }
+
+  return null;
+}
+
+function setRuntimeConfigValue(configName, rawValue) {
+  const field = getConfigFieldMetadata(configName);
+
+  if (!field) {
+    return {
+      ok: false,
+      message:
+        `Unknown config \"${configName}\". Changeable keys: ` +
+        `${Object.keys(runtimeConfigSchema).join(", ")}.`,
+    };
+  }
+
+  const parsedValue = field.parse(rawValue);
+  if (parsedValue === null) {
+    return {
+      ok: false,
+      message: `Invalid value \"${rawValue}\" for ${configName}.`,
+    };
+  }
+
+  const candidate = {
+    ...runtimeConfig,
+    [field.key]: parsedValue,
+  };
+  const validationError = field.validate(parsedValue, candidate);
+
+  if (validationError) {
+    return {
+      ok: false,
+      message: `Invalid ${configName}: ${validationError}.`,
+    };
+  }
+
+  const previousValue = runtimeConfig[field.key];
+  runtimeConfig[field.key] = parsedValue;
+
+  if (field.key === "historyMessages") {
+    const maxHistoryEntries = runtimeConfig.historyMessages * 2;
+    for (const history of conversationMemory.values()) {
+      if (history.length > maxHistoryEntries) {
+        history.splice(0, history.length - maxHistoryEntries);
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    message: `Updated ${configName}: ${previousValue} -> ${parsedValue}`,
+  };
+}
+
 function getEvidenceQuality(results) {
-  if (!results || results.length === 0 || results.length < MIN_SIMILARITIES) {
+  if (!results || results.length === 0 || results.length < runtimeConfig.minSimilarities) {
     return "weak";
   }
 
@@ -107,8 +260,8 @@ function formatEvidenceEntry(result, index) {
 
 function createSimilarityDetails(results) {
   return {
-    requestedLimit: MAX_SIMILARITIES,
-    cosineLimit: COSINE_LIMIT,
+    requestedLimit: runtimeConfig.maxSimilarities,
+    cosineLimit: runtimeConfig.cosineLimit,
     matches: results.map((result, index) => {
       const payload = result.payload || {};
       const preview = String(payload.text || "")
@@ -161,24 +314,29 @@ function buildSystemInfoMessage() {
 }
 
 function buildActiveConfigMessage() {
+  const runtimeChangeableLabel = chalk.green("runtime-changeable");
+  const restartOnlyLabel = chalk.yellow("requires restart");
+
   return [
     "Active configuration:",
     "- retrieval:",
-    `  - history messages: ${HISTORY_MESSAGES}`,
-    `  - max similarities: ${MAX_SIMILARITIES}`,
-    `  - min similarities: ${MIN_SIMILARITIES}`,
-    `  - cosine limit: ${COSINE_LIMIT}`,
+    `  - history messages: ${runtimeConfig.historyMessages} (${runtimeChangeableLabel})`,
+    `  - max similarities: ${runtimeConfig.maxSimilarities} (${runtimeChangeableLabel})`,
+    `  - min similarities: ${runtimeConfig.minSimilarities} (${runtimeChangeableLabel})`,
+    `  - cosine limit: ${runtimeConfig.cosineLimit} (${runtimeChangeableLabel})`,
     "- chunking/indexing:",
-    `  - chunk size: ${CHUNK_SIZE}`,
-    `  - chunk overlap: ${CHUNK_OVERLAP}`,
-    `  - max embedding chars: ${MAX_EMBEDDING_CHARS}`,
-    `  - pdf min extracted chars: ${PDF_MIN_EXTRACTED_CHARS}`,
-    `  - index schema version: ${INDEX_SCHEMA_VERSION}`,
-    `  - index state file: ${INDEX_STATE_FILE}`,
+    `  - chunk size: ${CHUNK_SIZE} (${restartOnlyLabel})`,
+    `  - chunk overlap: ${CHUNK_OVERLAP} (${restartOnlyLabel})`,
+    `  - max embedding chars: ${MAX_EMBEDDING_CHARS} (${restartOnlyLabel})`,
+    `  - pdf min extracted chars: ${PDF_MIN_EXTRACTED_CHARS} (${restartOnlyLabel})`,
+    `  - index schema version: ${INDEX_SCHEMA_VERSION} (${restartOnlyLabel})`,
+    `  - index state file: ${INDEX_STATE_FILE} (${restartOnlyLabel})`,
     "- generation:",
-    `  - temperature: ${process.env.OPTION_TEMPERATURE || "0.0"}`,
-    `  - top_p: ${process.env.OPTION_TOP_P || "0.5"}`,
-    `  - presence penalty: ${process.env.OPTION_PRESENCE_PENALTY || "2.2"}`,
+    `  - temperature: ${process.env.OPTION_TEMPERATURE || "0.0"} (${restartOnlyLabel})`,
+    `  - top_p: ${process.env.OPTION_TOP_P || "0.5"} (${restartOnlyLabel})`,
+    `  - presence penalty: ${process.env.OPTION_PRESENCE_PENALTY || "2.2"} (${restartOnlyLabel})`,
+    "",
+    "Tip: use /config set <name> <value>, e.g. /config set 'min similarities' 3",
   ].join("\n");
 }
 
@@ -263,8 +421,9 @@ function addToHistory(sessionId, role, content) {
   const history = getConversationHistory(sessionId);
   history.push([role, content]);
 
-  if (history.length > HISTORY_MESSAGES * 2) {
-    history.splice(0, 2);
+  const maxHistoryEntries = runtimeConfig.historyMessages * 2;
+  if (history.length > maxHistoryEntries) {
+    history.splice(0, history.length - maxHistoryEntries);
   }
 }
 
@@ -507,12 +666,12 @@ async function searchKnowledgeBase(userMessage) {
 
   const results = await qdrant.search(COLLECTION_NAME, {
     vector: userQuestionEmbedding,
-    limit: MAX_SIMILARITIES,
+    limit: runtimeConfig.maxSimilarities,
     with_payload: true,
   });
 
-  const filteredResults = results.filter((result) => result.score >= COSINE_LIMIT);
-  const hasSufficientEvidence = filteredResults.length >= MIN_SIMILARITIES;
+  const filteredResults = results.filter((result) => result.score >= runtimeConfig.cosineLimit);
+  const hasSufficientEvidence = filteredResults.length >= runtimeConfig.minSimilarities;
   const evidenceQuality = getEvidenceQuality(filteredResults);
 
   for (const result of filteredResults) {
@@ -521,8 +680,8 @@ async function searchKnowledgeBase(userMessage) {
   }
 
   ui.uiLog(`Retrieved from Qdrant: ${results.length}`);
-  ui.uiLog(`Passed threshold (${COSINE_LIMIT}): ${filteredResults.length}`);
-  ui.uiLog(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
+  ui.uiLog(`Passed threshold (${runtimeConfig.cosineLimit}): ${filteredResults.length}`);
+  ui.uiLog(`MIN_SIMILARITIES required: ${runtimeConfig.minSimilarities}`);
   ui.uiLog(`Sufficient evidence: ${hasSufficientEvidence ? chalk.green("YES") : chalk.red("NO")}`);
   ui.uiLog(`Evidence quality: ${colorEvidenceQuality(evidenceQuality)}`);
   ui.uiLog("_______________________________________________________");
@@ -593,6 +752,21 @@ while (!exit) {
 
   if (userMessage === "/config") {
     ui.printAssistantMessage(buildActiveConfigMessage());
+    continue;
+  }
+
+  if (userMessage.toLowerCase().startsWith("/config set ")) {
+    const parsed = parseConfigSetCommand(userMessage);
+
+    if (!parsed) {
+      ui.printAssistantMessage(
+        "Invalid format. Use: /config set <name> <value> or /config set '<name>'=<value>"
+      );
+      continue;
+    }
+
+    const update = setRuntimeConfigValue(parsed.configName, parsed.rawValue);
+    ui.printAssistantMessage(update.message);
     continue;
   }
 
