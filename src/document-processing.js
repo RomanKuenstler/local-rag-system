@@ -327,6 +327,8 @@ export async function readTextFilesRecursively(dirPath, allowedExtensions, encod
           extension: ext,
           content,
           hash: buildIndexRelevantHash(extractedContent),
+          size: stats.size,
+          lastModified: stats.mtimeMs,
         });
       } catch (error) {
         console.error(`Error reading file ${itemPath}: ${error.message}`);

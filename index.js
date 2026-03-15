@@ -12,6 +12,7 @@ import {
   COLLECTION_NAME,
   CONTENT_PATH,
   COSINE_LIMIT,
+  EMBEDDABLE_EXTENSIONS,
   HISTORY_MESSAGES,
   INDEX_STATE_FILE,
   MAX_SIMILARITIES,
@@ -152,7 +153,76 @@ function buildSystemInfoMessage() {
     `- vector db: qdrant (${QDRANT_URL})`,
     `- collection: ${COLLECTION_NAME}`,
     `- content path: ${CONTENT_PATH}`,
+    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
   ].join("\n");
+}
+
+function formatBytes(sizeInBytes) {
+  if (!Number.isFinite(sizeInBytes) || sizeInBytes < 0) {
+    return "n/a";
+  }
+
+  if (sizeInBytes < 1024) {
+    return `${sizeInBytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = sizeInBytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+
+  return `${value.toFixed(2)} ${units[unitIndex]}`;
+}
+
+async function buildLibraryInfoMessage() {
+  const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+
+  if (files.length === 0) {
+    return [
+      "Library info:",
+      `- content path: ${CONTENT_PATH}`,
+      `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
+      "- files: 0",
+      "- total chunks: 0",
+    ].join("\n");
+  }
+
+  const perFile = files.map((file) => {
+    const chunks = fileToChunks(file);
+    return {
+      ...file,
+      chunkCount: chunks.length,
+    };
+  });
+
+  const totalChunks = perFile.reduce((sum, file) => sum + file.chunkCount, 0);
+
+  const lines = [
+    "Library info:",
+    `- content path: ${CONTENT_PATH}`,
+    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
+    `- files: ${perFile.length}`,
+    `- total chunks: ${totalChunks}`,
+    "",
+    "Embedded files:",
+  ];
+
+  for (const file of perFile) {
+    const modifiedAt = file.lastModified ? new Date(file.lastModified).toISOString() : "n/a";
+
+    lines.push(`- ${file.relativePath}`);
+    lines.push(`  size: ${formatBytes(file.size)} (${file.size} bytes)`);
+    lines.push(`  chunks: ${file.chunkCount}`);
+    lines.push(`  extension: ${file.extension}`);
+    lines.push(`  hash: ${file.hash}`);
+    lines.push(`  modified: ${modifiedAt}`);
+  }
+
+  return lines.join("\n");
 }
 
 const conversationMemory = new Map();
@@ -316,7 +386,7 @@ async function indexChangedDocuments() {
   startupLog("Embeddings model:", embeddingsModel.model);
   startupLog(`Reading documents from: ${CONTENT_PATH}`);
 
-  const files = await readTextFilesRecursively(CONTENT_PATH, [".md", ".txt", ".html", ".htm", ".pdf"]);
+  const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
   startupLog(`Files found: ${files.length}`);
 
   if (files.length === 0) {
@@ -485,6 +555,14 @@ while (!exit) {
 
   if (userMessage === "/info") {
     ui.printAssistantMessage(buildSystemInfoMessage());
+    continue;
+  }
+
+  if (userMessage === "/lib") {
+    ui.setPendingStatus("Collecting library metadata...");
+    const libraryInfoMessage = await buildLibraryInfoMessage();
+    ui.setPendingStatus(null);
+    ui.printAssistantMessage(libraryInfoMessage);
     continue;
   }
 
