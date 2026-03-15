@@ -15,6 +15,9 @@ import {
   EMBEDDABLE_EXTENSIONS,
   HISTORY_MESSAGES,
   INDEX_STATE_FILE,
+  INDEX_SCHEMA_VERSION,
+  MAX_EMBEDDING_CHARS,
+  PDF_MIN_EXTRACTED_CHARS,
   MAX_SIMILARITIES,
   MIN_SIMILARITIES,
   QDRANT_API_KEY,
@@ -154,6 +157,28 @@ function buildSystemInfoMessage() {
     `- collection: ${COLLECTION_NAME}`,
     `- content path: ${CONTENT_PATH}`,
     `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
+  ].join("\n");
+}
+
+function buildActiveConfigMessage() {
+  return [
+    "Active configuration:",
+    "- retrieval:",
+    `  - history messages: ${HISTORY_MESSAGES}`,
+    `  - max similarities: ${MAX_SIMILARITIES}`,
+    `  - min similarities: ${MIN_SIMILARITIES}`,
+    `  - cosine limit: ${COSINE_LIMIT}`,
+    "- chunking/indexing:",
+    `  - chunk size: ${CHUNK_SIZE}`,
+    `  - chunk overlap: ${CHUNK_OVERLAP}`,
+    `  - max embedding chars: ${MAX_EMBEDDING_CHARS}`,
+    `  - pdf min extracted chars: ${PDF_MIN_EXTRACTED_CHARS}`,
+    `  - index schema version: ${INDEX_SCHEMA_VERSION}`,
+    `  - index state file: ${INDEX_STATE_FILE}`,
+    "- generation:",
+    `  - temperature: ${process.env.OPTION_TEMPERATURE || "0.0"}`,
+    `  - top_p: ${process.env.OPTION_TOP_P || "0.5"}`,
+    `  - presence penalty: ${process.env.OPTION_PRESENCE_PENALTY || "2.2"}`,
   ].join("\n");
 }
 
@@ -563,6 +588,11 @@ while (!exit) {
     const libraryInfoMessage = await buildLibraryInfoMessage();
     ui.setPendingStatus(null);
     ui.printAssistantMessage(libraryInfoMessage);
+    continue;
+  }
+
+  if (userMessage === "/config") {
+    ui.printAssistantMessage(buildActiveConfigMessage());
     continue;
   }
 
