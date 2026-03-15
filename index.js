@@ -101,6 +101,28 @@ function formatEvidenceEntry(result, index) {
   ].join("\n");
 }
 
+function createSimilarityDetails(results) {
+  return {
+    requestedLimit: MAX_SIMILARITIES,
+    cosineLimit: COSINE_LIMIT,
+    matches: results.map((result, index) => {
+      const payload = result.payload || {};
+      const preview = String(payload.text || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 180);
+
+      return {
+        rank: index + 1,
+        score: result.score,
+        source: payload.source || "unknown",
+        title: payload.title || "",
+        preview,
+      };
+    }),
+  };
+}
+
 function buildRagContextPackage({ results, userMessage, evidenceQuality }) {
   const evidenceBlock = results.map((result, index) => formatEvidenceEntry(result, index)).join("\n\n---\n\n");
 
@@ -452,7 +474,8 @@ while (!exit) {
   ui.setPendingStatus("Searching knowledge base...");
 
   const history = getConversationHistory("default-session-id");
-  const { ragContextPackage, evidenceQuality } = await searchKnowledgeBase(userMessage);
+  const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(userMessage);
+  ui.setPendingSimilarityDetails(createSimilarityDetails(results));
   ui.setPendingStatus("Generating answer...");
 
   const messages = [
