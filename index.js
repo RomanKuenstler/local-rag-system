@@ -444,7 +444,7 @@ while (!exit) {
   const response = await prompts({
     type: "text",
     name: "userMessage",
-    message: ui.isCleanMode() ? ui.promptColor(">") : `Your question (${chatModel.model}): `,
+    message: ui.promptColor(">"),
   });
 
   const userMessage = response.userMessage;
