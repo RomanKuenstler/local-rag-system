@@ -275,16 +275,18 @@ function fileToChunks(file) {
 }
 
 async function indexChangedDocuments() {
-  console.log("_______________________________________________________");
-  console.log("Embeddings model:", embeddingsModel.model);
-  console.log(`Reading documents from: ${CONTENT_PATH}`);
+  const startupLog = (...args) => ui.uiLog(...args);
+
+  startupLog("_______________________________________________________");
+  startupLog("Embeddings model:", embeddingsModel.model);
+  startupLog(`Reading documents from: ${CONTENT_PATH}`);
 
   const files = await readTextFilesRecursively(CONTENT_PATH, [".md", ".txt", ".html", ".htm", ".pdf"]);
-  console.log(`Files found: ${files.length}`);
+  startupLog(`Files found: ${files.length}`);
 
   if (files.length === 0) {
-    console.log("No files found to index.");
-    console.log("_______________________________________________________");
+    startupLog("No files found to index.");
+    startupLog("_______________________________________________________");
     return;
   }
 
@@ -294,12 +296,12 @@ async function indexChangedDocuments() {
     (relativePath) => !files.some((file) => file.relativePath === relativePath)
   );
 
-  console.log(`Changed/new files: ${changedFiles.length}`);
-  console.log(`Removed files: ${removedFiles.length}`);
+  startupLog(`Changed/new files: ${changedFiles.length}`);
+  startupLog(`Removed files: ${removedFiles.length}`);
 
   if (changedFiles.length === 0 && removedFiles.length === 0) {
-    console.log("No indexing needed.");
-    console.log("_______________________________________________________");
+    startupLog("No indexing needed.");
+    startupLog("_______________________________________________________");
     return;
   }
 
@@ -308,7 +310,7 @@ async function indexChangedDocuments() {
 
   for (const removedFile of removedFiles) {
     try {
-      console.log(`Removing deleted file from index: ${removedFile}`);
+      startupLog(`Removing deleted file from index: ${removedFile}`);
       await deletePointsBySource(removedFile);
       delete indexState[removedFile];
     } catch (error) {
@@ -318,12 +320,12 @@ async function indexChangedDocuments() {
 
   for (const file of changedFiles) {
     try {
-      console.log(`Indexing file: ${file.relativePath}`);
+      startupLog(`Indexing file: ${file.relativePath}`);
       await deletePointsBySource(file.relativePath);
 
       const chunkRecords = fileToChunks(file).filter((chunk) => chunk.text?.trim());
       if (chunkRecords.length === 0) {
-        console.log(`No chunks for file: ${file.relativePath}`);
+        startupLog(`No chunks for file: ${file.relativePath}`);
         indexState[file.relativePath] = file.hash;
         continue;
       }
@@ -335,7 +337,7 @@ async function indexChangedDocuments() {
           ? Math.round(chunkLengths.reduce((total, length) => total + length, 0) / chunkLengths.length)
           : 0;
 
-      console.log(
+      startupLog(
         `Prepared ${chunkRecords.length} chunks from ${file.relativePath} ` +
           `(avg chars: ${avgChunkLength}, max chars: ${maxChunkLength})`
       );
@@ -365,9 +367,9 @@ async function indexChangedDocuments() {
   }
 
   saveIndexState(indexState);
-  console.log("Index state saved");
-  console.log("_______________________________________________________");
-  console.log();
+  startupLog("Index state saved");
+  startupLog("_______________________________________________________");
+  startupLog();
 }
 
 async function searchKnowledgeBase(userMessage) {
@@ -411,6 +413,7 @@ async function searchKnowledgeBase(userMessage) {
 let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
 
 validateRetrievalConfig();
+ui.renderLoadingScreen();
 await indexChangedDocuments();
 ui.renderStartupScreen();
 
