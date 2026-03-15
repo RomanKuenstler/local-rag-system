@@ -173,6 +173,25 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     renderCleanScreen();
   }
 
+  function renderLoadingScreen(message = "Loading knowledge base...") {
+    if (!isCleanMode()) {
+      return;
+    }
+
+    const { rows } = getTerminalSize();
+    console.clear();
+    renderCleanHeader();
+    console.log("");
+    console.log(chalk.white("•") + ` ${message}`);
+    console.log(dim("  Please wait while documents are indexed."));
+
+    const usedLines = 5 + 4;
+    const reservedBottomLines = 4;
+    const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
+    repeatBlankLines(blankLines);
+    renderFooter();
+  }
+
   function renderModeChanged(nextMode) {
     if (isCleanMode()) {
       renderCleanScreen();
@@ -225,6 +244,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     isRagMode,
     setTuiMode,
     renderStartupScreen,
+    renderLoadingScreen,
     renderModeChanged,
     printUserMessage,
     printAssistantMessage,
