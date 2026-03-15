@@ -340,6 +340,30 @@ function buildActiveConfigMessage() {
   ].join("\n");
 }
 
+function buildHelpMessage() {
+  return [
+    "📘 Quick help",
+    "",
+    "Ask any question about your indexed documents in natural language.",
+    "The assistant retrieves matching context from the knowledge base before answering.",
+    "",
+    "Commands:",
+    "- /help or ?       Show this help overview",
+    "- /info            Show system details (models, DB, paths)",
+    "- /lib             Show indexed library files and chunk counts",
+    "- /config          Show active retrieval/runtime configuration",
+    "- /config set ...  Update a runtime setting",
+    "                  Example: /config set 'min similarities' 3",
+    "- /mode clean      Switch to clean chat-focused UI",
+    "- /mode rag        Switch to debug RAG UI with similarity details",
+    "- /bye             Exit the application",
+    "",
+    "Tips:",
+    "- Ask precise questions for better retrieval.",
+    "- Use /mode rag to inspect evidence quality and matching chunks.",
+  ].join("\n");
+}
+
 function formatBytes(sizeInBytes) {
   if (!Number.isFinite(sizeInBytes) || sizeInBytes < 0) {
     return "n/a";
@@ -704,7 +728,8 @@ let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
 validateRetrievalConfig();
 ui.renderLoadingScreen();
 await indexChangedDocuments();
-ui.renderStartupScreen();
+ui.printAssistantMessage("✅ Knowledge base is ready. Indexing completed successfully.");
+ui.printAssistantMessage("How can I help you today?");
 
 let exit = false;
 while (!exit) {
@@ -739,6 +764,11 @@ while (!exit) {
 
   if (userMessage === "/info") {
     ui.printAssistantMessage(buildSystemInfoMessage());
+    continue;
+  }
+
+  if (userMessage === "/help" || userMessage === "?") {
+    ui.printAssistantMessage(buildHelpMessage());
     continue;
   }
 

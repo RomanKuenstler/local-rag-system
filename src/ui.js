@@ -348,18 +348,13 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       return;
     }
 
-    const { rows } = getTerminalSize();
-    console.clear();
-    renderCleanHeader();
-    console.log("");
-    console.log(chalk.white("•") + ` ${message}`);
-    console.log(dim("  Please wait while documents are indexed."));
-
-    const usedLines = 5 + 4;
-    const reservedBottomLines = 6;
-    const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
-    repeatBlankLines(blankLines);
-    renderFooter();
+    cleanUiMessages = [
+      {
+        role: "assistant",
+        text: `${message}\nPlease wait while documents are indexed...`,
+      },
+    ];
+    renderCleanScreen();
   }
 
   function renderModeChanged(nextMode) {
