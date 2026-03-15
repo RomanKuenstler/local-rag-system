@@ -319,19 +319,22 @@ function buildActiveConfigMessage() {
 
   return [
     "Active configuration:",
-    "- retrieval:",
+    "",
+    chalk.bold("Retrieval"),
     `  - history messages: ${runtimeConfig.historyMessages} (${runtimeChangeableLabel})`,
     `  - max similarities: ${runtimeConfig.maxSimilarities} (${runtimeChangeableLabel})`,
     `  - min similarities: ${runtimeConfig.minSimilarities} (${runtimeChangeableLabel})`,
     `  - cosine limit: ${runtimeConfig.cosineLimit} (${runtimeChangeableLabel})`,
-    "- chunking/indexing:",
+    "",
+    chalk.bold("Chunking / Indexing"),
     `  - chunk size: ${CHUNK_SIZE} (${restartOnlyLabel})`,
     `  - chunk overlap: ${CHUNK_OVERLAP} (${restartOnlyLabel})`,
     `  - max embedding chars: ${MAX_EMBEDDING_CHARS} (${restartOnlyLabel})`,
     `  - pdf min extracted chars: ${PDF_MIN_EXTRACTED_CHARS} (${restartOnlyLabel})`,
     `  - index schema version: ${INDEX_SCHEMA_VERSION} (${restartOnlyLabel})`,
     `  - index state file: ${INDEX_STATE_FILE} (${restartOnlyLabel})`,
-    "- generation:",
+    "",
+    chalk.bold("Generation"),
     `  - temperature: ${process.env.OPTION_TEMPERATURE || "0.0"} (${restartOnlyLabel})`,
     `  - top_p: ${process.env.OPTION_TOP_P || "0.5"} (${restartOnlyLabel})`,
     `  - presence penalty: ${process.env.OPTION_PRESENCE_PENALTY || "2.2"} (${restartOnlyLabel})`,
@@ -356,7 +359,7 @@ function buildHelpMessage() {
     "                  Example: /config set 'min similarities' 3",
     "- /mode clean      Switch to clean chat-focused UI",
     "- /mode rag        Switch to debug RAG UI with similarity details",
-    "- /bye             Exit the application",
+    "- /bye | /exit | /quit  Exit the application",
     "",
     "Tips:",
     "- Ask precise questions for better retrieval.",
@@ -744,35 +747,38 @@ while (!exit) {
     continue;
   }
 
-  if (userMessage === "/bye") {
+  const normalizedUserMessage = String(userMessage).trim().toLowerCase();
+  ui.resetConversationView();
+
+  if (["/bye", "/exit", "/quit"].includes(normalizedUserMessage)) {
     console.log("See you later!");
     exit = true;
     continue;
   }
 
-  if (userMessage === "/mode clean") {
+  if (normalizedUserMessage === "/mode clean") {
     ui.setTuiMode("clean");
     ui.renderModeChanged("clean");
     continue;
   }
 
-  if (userMessage === "/mode rag") {
+  if (normalizedUserMessage === "/mode rag") {
     ui.setTuiMode("rag");
     ui.renderModeChanged("rag");
     continue;
   }
 
-  if (userMessage === "/info") {
+  if (normalizedUserMessage === "/info") {
     ui.printAssistantMessage(buildSystemInfoMessage());
     continue;
   }
 
-  if (userMessage === "/help" || userMessage === "?") {
+  if (normalizedUserMessage === "/help" || normalizedUserMessage === "?") {
     ui.printAssistantMessage(buildHelpMessage());
     continue;
   }
 
-  if (userMessage === "/lib") {
+  if (normalizedUserMessage === "/lib") {
     ui.setPendingStatus("Collecting library metadata...");
     const libraryInfoMessage = await buildLibraryInfoMessage();
     ui.setPendingStatus(null);
@@ -780,12 +786,12 @@ while (!exit) {
     continue;
   }
 
-  if (userMessage === "/config") {
+  if (normalizedUserMessage === "/config") {
     ui.printAssistantMessage(buildActiveConfigMessage());
     continue;
   }
 
-  if (userMessage.toLowerCase().startsWith("/config set ")) {
+  if (normalizedUserMessage.startsWith("/config set ")) {
     const parsed = parseConfigSetCommand(userMessage);
 
     if (!parsed) {

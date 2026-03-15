@@ -1,6 +1,8 @@
 import chalk from "chalk";
 
 export function createUi({ appName, appVersion, chatModel, contentPath }) {
+  const HEADER_LINES = 8;
+  const FOOTER_LINES = 3;
   let mode = (process.env.TUI_MODE || "clean").toLowerCase();
   let cleanUiMessages = [];
   let ragUiMessages = [];
@@ -195,13 +197,24 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       conversationLines.push("");
     }
 
-    for (const line of conversationLines) {
+    const latestMessageLineCount =
+      cleanUiMessages.length > 0
+        ? wrapText(cleanUiMessages[cleanUiMessages.length - 1].text, contentWidth).length + 2
+        : 0;
+
+    const availableConversationLines = Math.max(1, rows - HEADER_LINES - FOOTER_LINES);
+    const linesToRender =
+      conversationLines.length > availableConversationLines &&
+      latestMessageLineCount <= availableConversationLines
+        ? conversationLines.slice(conversationLines.length - availableConversationLines)
+        : conversationLines;
+
+    for (const line of linesToRender) {
       console.log(line);
     }
 
-    const usedLines = 5 + 1 + conversationLines.length;
-    const reservedBottomLines = 6;
-    const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
+    const usedLines = HEADER_LINES + linesToRender.length + FOOTER_LINES;
+    const blankLines = Math.max(0, rows - usedLines);
     repeatBlankLines(blankLines);
     renderFooter();
   }
@@ -309,15 +322,42 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       conversationLines.push("");
     }
 
-    for (const line of conversationLines) {
+    const latestMessageLineCount =
+      ragUiMessages.length > 0
+        ? wrapText(ragUiMessages[ragUiMessages.length - 1].text, contentWidth).length + 2
+        : 0;
+
+    const availableConversationLines = Math.max(1, rows - HEADER_LINES - FOOTER_LINES);
+    const linesToRender =
+      conversationLines.length > availableConversationLines &&
+      latestMessageLineCount <= availableConversationLines
+        ? conversationLines.slice(conversationLines.length - availableConversationLines)
+        : conversationLines;
+
+    for (const line of linesToRender) {
       console.log(line);
     }
 
-    const usedLines = 5 + 1 + conversationLines.length;
-    const reservedBottomLines = 6;
-    const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
+    const usedLines = HEADER_LINES + linesToRender.length + FOOTER_LINES;
+    const blankLines = Math.max(0, rows - usedLines);
     repeatBlankLines(blankLines);
     renderFooter();
+  }
+
+  function resetConversationView() {
+    cleanUiMessages = [];
+    ragUiMessages = [];
+    pendingStatus = null;
+    pendingSimilarityDetails = null;
+
+    if (isCleanMode()) {
+      renderCleanScreen();
+      return;
+    }
+
+    if (isRagMode()) {
+      renderRagScreen();
+    }
   }
 
   function setPendingStatus(statusText) {
@@ -469,6 +509,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     printEvidenceQuality,
     setPendingSimilarityDetails,
     setPendingStatus,
+    resetConversationView,
     uiLog,
     promptColor,
     renderFooter,
