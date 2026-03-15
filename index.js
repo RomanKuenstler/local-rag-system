@@ -759,6 +759,271 @@ function validateRetrievalConfig() {
 }
 
 // --------------------------------------------------------
+// TUI HELPERS
+// --------------------------------------------------------
+
+function isCleanMode() {
+  return TUI_MODE === "clean";
+}
+
+function isRagMode() {
+  return TUI_MODE === "rag";
+}
+
+function setTuiMode(mode) {
+  const normalized = String(mode || "").trim().toLowerCase();
+
+  if (normalized !== "clean" && normalized !== "rag") {
+    return false;
+  }
+
+  TUI_MODE = normalized;
+  return true;
+}
+
+function dim(text) {
+  return chalk.dim(text);
+}
+
+function logoColor(text) {
+  return chalk.hex('#F56F27')(text);
+}
+
+function titleColor(text) {
+  return chalk.whiteBright.bold(text);
+}
+
+function promptColor(text) {
+  return chalk.whiteBright(text);
+}
+
+function separator(width = 48) {
+  return chalk.dim("─".repeat(width));
+}
+
+function getShortModelName(model) {
+  if (!model) {
+    return "unknown-model";
+  }
+
+  // Keep the header clean by shortening very long model identifiers
+  return String(model)
+    .replace(/^hf\.co\//i, "")
+    .replace(/:.*$/, "")
+    .trim();
+}
+
+function getKnowledgeBasePathLabel(contentPath) {
+  if (!contentPath) {
+    return "./data";
+  }
+
+  if (contentPath === "/app/data") {
+    return "./data";
+  }
+
+  return contentPath;
+}
+
+function renderCleanScreen() {
+  const { rows } = getTerminalSize();
+
+  console.clear();
+
+  // Header
+  renderCleanHeader();
+
+  // Greeting / conversation block
+  const conversationLines = [];
+
+  for (const msg of cleanUiMessages) {
+    if (msg.role === "assistant") {
+      const wrapped = wrapText(msg.text, 72);
+      if (wrapped.length > 0) {
+        conversationLines.push(`• ${wrapped[0]}`);
+        for (let i = 1; i < wrapped.length; i++) {
+          conversationLines.push(`  ${wrapped[i]}`);
+        }
+      }
+    } else if (msg.role === "user") {
+      const wrapped = wrapText(msg.text, 72);
+      if (wrapped.length > 0) {
+        conversationLines.push(`> ${wrapped[0]}`);
+        for (let i = 1; i < wrapped.length; i++) {
+          conversationLines.push(`  ${wrapped[i]}`);
+        }
+      }
+    }
+
+    conversationLines.push("");
+  }
+
+  if (conversationLines.length === 0) {
+    conversationLines.push("• How can I help you today?");
+    conversationLines.push("");
+  }
+
+  for (const line of conversationLines) {
+    console.log(line);
+  }
+
+  // Reserve space for:
+  // - empty spacer area
+  // - input line
+  // - footer separator
+  // - footer hint line
+  const usedLines =
+    5 +                    // logo block height
+    1 +                    // spacing after header
+    conversationLines.length;
+
+  const reservedBottomLines = 4;
+  const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
+
+  repeatBlankLines(blankLines);
+
+  renderFooter();
+}
+
+function renderCleanHeader() {
+  const shortModel = getShortModelName(chatModel.model);
+  const knowledgeBasePath = getKnowledgeBasePathLabel(CONTENT_PATH);
+
+  const logoLines = [
+    "  ██████  █████  ██████",
+    "  ██   ██ ██   ██ ██",
+    "  ██████  ███████ ██   ███",
+    "  ██   ██ ██   ██ ██    ██",
+    "  ██   ██ ██   ██  ██████",
+  ];
+
+  const metaLines = [
+    `${titleColor(`${APP_NAME}`)} ${dim(`${APP_VERSION}`)}`,
+    `${dim(`self-hosted RAG system`)}`,
+    `${dim(`chat model: ${shortModel}`)}`,
+    `${dim(`knowledge base: ${knowledgeBasePath}`)}`,
+    "",
+    "",
+    "",
+  ];
+
+  const leftWidth = 29;
+
+  for (let i = 0; i < Math.max(logoLines.length, metaLines.length); i++) {
+    const left = logoLines[i] || "";
+    const right = metaLines[i] || "";
+    console.log(`${logoColor(left.padEnd(leftWidth, " "))}  ${right}`);
+  }
+}
+
+function renderFooter() {
+  const { columns } = getTerminalSize();
+  const lineWidth = Math.max(40, columns - 2);
+
+  // console.log(separator(lineWidth));
+
+  const left = "? for help";
+  const right = `mode: ${TUI_MODE}`;
+  const spacing = Math.max(1, lineWidth - left.length - right.length);
+
+  console.log(`${dim(left)}${" ".repeat(spacing)}${dim(right)}`);
+}
+
+function renderStartupScreen() {
+  if (!isCleanMode()) {
+    return;
+  }
+
+  cleanUiMessages = [];
+  renderCleanScreen();
+}
+
+function renderModeChanged(mode) {
+  if (isCleanMode()) {
+    renderCleanScreen();
+    return;
+  }
+
+  console.log(separator(48));
+  console.log(`mode switched to: ${mode}`);
+  console.log(separator(48));
+}
+
+function printUserMessage(message) {
+  if (isCleanMode()) {
+    cleanUiMessages.push({ role: "user", text: message });
+    renderCleanScreen();
+    return;
+  }
+
+  console.log(`${promptColor(">")} ${message}`);
+}
+
+function printAssistantMessage(message) {
+  const text = String(message || "").trim();
+
+  if (!text) {
+    return;
+  }
+
+  if (isCleanMode()) {
+    cleanUiMessages.push({ role: "assistant", text });
+    renderCleanScreen();
+    return;
+  }
+
+  const lines = text.split("\n");
+  console.log(`${chalk.white("•")} ${lines[0]}`);
+  for (let i = 1; i < lines.length; i++) {
+    console.log(`  ${lines[i]}`);
+  }
+  console.log("");
+}
+
+function uiLog(...args) {
+  if (isRagMode()) {
+    console.log(...args);
+  }
+}
+
+function getTerminalSize() {
+  return {
+    rows: process.stdout.rows || 24,
+    columns: process.stdout.columns || 80,
+  };
+}
+
+function repeatBlankLines(count) {
+  for (let i = 0; i < count; i++) {
+    console.log("");
+  }
+}
+
+function wrapText(text, width = 72) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = "";
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= width) {
+      current = candidate;
+    } else {
+      if (current) {
+        lines.push(current);
+      }
+      current = word;
+    }
+  }
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines;
+}
+
+// --------------------------------------------------------
 // CONFIG
 // --------------------------------------------------------
 // Configuration mostly comes from environment variables
@@ -825,6 +1090,14 @@ const PDF_MIN_EXTRACTED_CHARS = parseInt(
       `Invalid PDF_MIN_EXTRACTED_CHARS: ${PDF_MIN_EXTRACTED_CHARS}. It must be an integer >= 0.`
     );
   }
+
+const APP_NAME = "local RAG";
+const APP_VERSION = "v1.0.1";
+
+// Supported:
+// - clean  -> minimal Claude-like terminal UI
+// - rag    -> later mode with retrieval/evidence details
+let TUI_MODE = (process.env.TUI_MODE || "clean").toLowerCase();
 
 // --------------------------------------------------------
 // LLM CHAT MODEL
@@ -1345,11 +1618,11 @@ async function searchKnowledgeBase(userMessage) {
     );
   }
 
-  console.log(`Retrieved from Qdrant: ${results.length}`);
-  console.log(`Passed threshold (${COSINE_LIMIT}): ${filteredResults.length}`);
-  console.log(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
-  console.log(`Sufficient evidence: ${hasSufficientEvidence ? chalk.green("YES") : chalk.red("NO")}`);
-  console.log("Evidence quality: ", colorEvidenceQuality(evidenceQuality));
+  uiLog(`Retrieved from Qdrant: ${results.length}`);
+  uiLog(`Passed threshold (${COSINE_LIMIT}): ${filteredResults.length}`);
+  uiLog(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
+  uiLog(`Sufficient evidence: ${hasSufficientEvidence ? chalk.green("YES") : chalk.red("NO")}`);
+  uiLog("Evidence quality: ${colorEvidenceQuality(evidenceQuality)}");
   console.log("_______________________________________________________");
   console.log();
 
@@ -1370,7 +1643,7 @@ async function searchKnowledgeBase(userMessage) {
 // --------------------------------------------------------
 // MAIN PROGRAM
 // --------------------------------------------------------
-
+let cleanUiMessages = [];
 let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
 
 // validate retrieval-related configuration before startup
@@ -1379,12 +1652,18 @@ validateRetrievalConfig();
 // index documents before chat starts
 await indexChangedDocuments();
 
+renderStartupScreen();
+
 let exit = false;
 while (!exit) {
+  if (isCleanMode()) {
+    console.log("");
+  }
+
   const response = await prompts({
     type: "text",
     name: "userMessage",
-    message: `Your question: `,
+    message: isCleanMode() ? promptColor(">") : `Your question (${chatModel.model}): `,
     validate: (value) => (value ? true : "Question cannot be empty"),
   });
 
@@ -1400,6 +1679,20 @@ while (!exit) {
     exit = true;
     continue;
   }
+
+  if (userMessage === "/mode clean") {
+    setTuiMode("clean");
+    renderModeChanged("clean");
+    continue;
+  }
+
+  if (userMessage === "/mode rag") {
+    setTuiMode("rag");
+    renderModeChanged("rag");
+    continue;
+  }
+
+  printUserMessage(userMessage);
 
   const history = getConversationHistory("default-session-id");
 
@@ -1417,11 +1710,15 @@ while (!exit) {
 
   let assistantResponse = "";
 
-  // stream response from LLM
   const stream = await chatModel.stream(messages);
   for await (const chunk of stream) {
     assistantResponse += chunk.content;
-    process.stdout.write(chunk.content);
+  }
+
+  printAssistantMessage(assistantResponse);
+
+  if (isCleanMode()) {
+    renderFooter();
   }
 
   console.log("\n");
