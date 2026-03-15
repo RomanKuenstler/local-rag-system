@@ -67,27 +67,37 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
   }
 
   function wrapText(text, width = 72) {
-    const words = String(text || "").split(/\s+/).filter(Boolean);
+    const normalized = String(text || "").replace(/\r\n/g, "\n");
+    const paragraphs = normalized.split("\n");
     const lines = [];
-    let current = "";
 
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (candidate.length <= width) {
-        current = candidate;
-      } else {
-        if (current) {
-          lines.push(current);
+    for (const paragraph of paragraphs) {
+      if (!paragraph.trim()) {
+        lines.push("");
+        continue;
+      }
+
+      const words = paragraph.split(/\s+/).filter(Boolean);
+      let current = "";
+
+      for (const word of words) {
+        const candidate = current ? `${current} ${word}` : word;
+        if (candidate.length <= width) {
+          current = candidate;
+        } else {
+          if (current) {
+            lines.push(current);
+          }
+          current = word;
         }
-        current = word;
+      }
+
+      if (current) {
+        lines.push(current);
       }
     }
 
-    if (current) {
-      lines.push(current);
-    }
-
-    return lines;
+    return lines.length > 0 ? lines : [""];
   }
 
   function renderFooter() {
@@ -96,7 +106,20 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     const left = "? for help";
     const right = `mode: ${mode}`;
     const spacing = Math.max(1, lineWidth - left.length - right.length);
+    const separator = dim("─".repeat(lineWidth));
+
+    console.log(separator);
     console.log(`${dim(left)}${" ".repeat(spacing)}${dim(right)}`);
+    console.log(separator);
+  }
+
+  function formatEvidenceBadge(evidenceQuality) {
+    const label = String(evidenceQuality || "unknown").toLowerCase();
+
+    if (label === "strong") return chalk.bgGreen.black(" STRONG ");
+    if (label === "moderate") return chalk.bgYellow.black(" MODERATE ");
+    if (label === "weak") return chalk.bgRed.white(" WEAK ");
+    return chalk.bgWhite.black(` ${label.toUpperCase()} `);
   }
 
   function renderCleanHeader() {
@@ -137,13 +160,20 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
 
     const conversationLines = [];
 
+    const { columns } = getTerminalSize();
+    const contentWidth = Math.max(48, Math.min(110, columns - 8));
+
     for (const msg of cleanUiMessages) {
-      const wrapped = wrapText(msg.text, 72);
+      const wrapped = wrapText(msg.text, contentWidth);
       if (wrapped.length > 0) {
         const prefix = msg.role === "assistant" ? "•" : ">";
         conversationLines.push(`${prefix} ${wrapped[0]}`);
         for (let i = 1; i < wrapped.length; i++) {
           conversationLines.push(`  ${wrapped[i]}`);
+        }
+
+        if (msg.role === "assistant" && msg.evidenceQuality) {
+          conversationLines.push(`  ${dim("Evidence:")} ${formatEvidenceBadge(msg.evidenceQuality)}`);
         }
       }
       conversationLines.push("");
@@ -164,7 +194,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     }
 
     const usedLines = 5 + 1 + conversationLines.length;
-    const reservedBottomLines = 4;
+    const reservedBottomLines = 6;
     const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
     repeatBlankLines(blankLines);
     renderFooter();
@@ -199,7 +229,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     console.log(dim("  Please wait while documents are indexed."));
 
     const usedLines = 5 + 4;
-    const reservedBottomLines = 4;
+    const reservedBottomLines = 6;
     const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
     repeatBlankLines(blankLines);
     renderFooter();
@@ -252,7 +282,12 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       label === "strong" ? chalk.green : label === "moderate" ? chalk.yellow : label === "weak" ? chalk.red : chalk.white;
 
     if (isCleanMode()) {
-      cleanUiMessages.push({ role: "assistant", text: `Evidence strength: ${label}` });
+      for (let i = cleanUiMessages.length - 1; i >= 0; i--) {
+        if (cleanUiMessages[i].role === "assistant") {
+          cleanUiMessages[i].evidenceQuality = label;
+          break;
+        }
+      }
       renderCleanScreen();
       return;
     }
