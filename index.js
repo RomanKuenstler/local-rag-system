@@ -387,7 +387,7 @@ async function searchKnowledgeBase(userMessage) {
 
   for (const result of filteredResults) {
     const payload = result.payload || {};
-    console.log("Score:", result.score, "Source:", payload.source || "unknown", "Title:", payload.title || "Untitled");
+    ui.uiLog("Score:", result.score, "Source:", payload.source || "unknown", "Title:", payload.title || "Untitled");
   }
 
   ui.uiLog(`Retrieved from Qdrant: ${results.length}`);
@@ -395,8 +395,8 @@ async function searchKnowledgeBase(userMessage) {
   ui.uiLog(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
   ui.uiLog(`Sufficient evidence: ${hasSufficientEvidence ? chalk.green("YES") : chalk.red("NO")}`);
   ui.uiLog(`Evidence quality: ${colorEvidenceQuality(evidenceQuality)}`);
-  console.log("_______________________________________________________");
-  console.log();
+  ui.uiLog("_______________________________________________________");
+  ui.uiLog();
 
   return {
     results: filteredResults,
@@ -454,9 +454,11 @@ while (!exit) {
   }
 
   ui.printUserMessage(userMessage);
+  ui.setPendingStatus("Searching knowledge base...");
 
   const history = getConversationHistory("default-session-id");
-  const { ragContextPackage } = await searchKnowledgeBase(userMessage);
+  const { ragContextPackage, evidenceQuality } = await searchKnowledgeBase(userMessage);
+  ui.setPendingStatus("Generating answer...");
 
   const messages = [
     ["system", systemInstructions],
@@ -471,7 +473,9 @@ while (!exit) {
     assistantResponse += chunk.content;
   }
 
+  ui.setPendingStatus(null);
   ui.printAssistantMessage(assistantResponse);
+  ui.printEvidenceQuality(evidenceQuality);
   if (ui.isCleanMode()) {
     ui.renderFooter();
   }
