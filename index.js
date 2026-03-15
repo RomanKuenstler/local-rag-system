@@ -12,10 +12,18 @@ import path from "path"; // filesystem path utilities
 import { randomUUID } from "crypto"; // generate unique IDs for vector DB records
 import * as cheerio from "cheerio";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import chalk from "chalk";
 
 // ------
 // HELPER
 // ------
+// Colorize console log helper
+function colorEvidenceQuality(q) {
+  if (q === "strong") return chalk.green(q);
+  if (q === "moderate") return chalk.yellow(q);
+  if (q === "weak") return chalk.red(q);
+  return q;
+}
 // Global SHA256 helper
 function sha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
@@ -1052,7 +1060,7 @@ async function ensureCollection(vectorSize) {
       field_schema: "keyword",
     });
 
-    console.log(`✅ Qdrant collection "${COLLECTION_NAME}" created`);
+    console.log(`Qdrant collection "${COLLECTION_NAME}" created`);
     return;
   }
 
@@ -1068,7 +1076,7 @@ async function ensureCollection(vectorSize) {
 
 if (currentSize !== vectorSize) {
     console.log(
-      `⚠️ Vector size changed (${currentSize} -> ${vectorSize}), recreating collection...`
+      `Vector size changed (${currentSize} -> ${vectorSize}), recreating collection...`
     );
 
     await qdrant.deleteCollection(COLLECTION_NAME);
@@ -1099,7 +1107,7 @@ if (currentSize !== vectorSize) {
       field_schema: "keyword",
     });
 
-    console.log(`✅ Qdrant collection "${COLLECTION_NAME}" recreated`);
+    console.log(`Qdrant collection "${COLLECTION_NAME}" recreated`);
   }
 }
 
@@ -1187,7 +1195,7 @@ function fileToChunks(file) {
 
 async function indexChangedDocuments() {
 
-  console.log("========================================================");
+  console.log("_______________________________________________________");
   console.log("Embeddings model:", embeddingsModel.model);
   console.log(`Reading documents from: ${CONTENT_PATH}`);
 
@@ -1201,8 +1209,8 @@ async function indexChangedDocuments() {
   console.log(`Files found: ${files.length}`);
 
   if (files.length === 0) {
-    console.log("⚠️ No files found to index.");
-    console.log("========================================================");
+    console.log("No files found to index.");
+    console.log("_______________________________________________________");
     return;
   }
 
@@ -1218,7 +1226,7 @@ async function indexChangedDocuments() {
 
   if (changedFiles.length === 0 && removedFiles.length === 0) {
     console.log("No indexing needed.");
-    console.log("========================================================");
+    console.log("_______________________________________________________");
     return;
   }
 
@@ -1298,7 +1306,7 @@ async function indexChangedDocuments() {
 
   saveIndexState(indexState);
   console.log("Index state saved");
-  console.log("========================================================");
+  console.log("_______________________________________________________");
   console.log();
 }
 
@@ -1340,9 +1348,9 @@ async function searchKnowledgeBase(userMessage) {
   console.log(`Retrieved from Qdrant: ${results.length}`);
   console.log(`Passed threshold (${COSINE_LIMIT}): ${filteredResults.length}`);
   console.log(`MIN_SIMILARITIES required: ${MIN_SIMILARITIES}`);
-  console.log(`Sufficient evidence: ${hasSufficientEvidence ? "yes" : "no"}`);
-  console.log(`Evidence quality: ${evidenceQuality}`);
-  console.log("========================================================");
+  console.log(`Sufficient evidence: ${hasSufficientEvidence ? chalk.green("YES") : chalk.red("NO")}`);
+  console.log("Evidence quality: ", colorEvidenceQuality(evidenceQuality));
+  console.log("_______________________________________________________");
   console.log();
 
   const ragContextPackage = buildRagContextPackage({
@@ -1376,7 +1384,7 @@ while (!exit) {
   const response = await prompts({
     type: "text",
     name: "userMessage",
-    message: `Your question (${chatModel.model}): `,
+    message: `Your question: `,
     validate: (value) => (value ? true : "Question cannot be empty"),
   });
 
