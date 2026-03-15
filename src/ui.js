@@ -3,7 +3,9 @@ import chalk from "chalk";
 export function createUi({ appName, appVersion, chatModel, contentPath }) {
   let mode = (process.env.TUI_MODE || "clean").toLowerCase();
   let cleanUiMessages = [];
+  let ragUiMessages = [];
   let pendingStatus = null;
+  let pendingSimilarityDetails = null;
 
   function isCleanMode() {
     return mode === "clean";
@@ -200,20 +202,141 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     renderFooter();
   }
 
+  function formatScore(score) {
+    if (typeof score !== "number" || Number.isNaN(score)) {
+      return "n/a";
+    }
+
+    return score.toFixed(3);
+  }
+
+  function getScoreMeter(score) {
+    if (typeof score !== "number" || Number.isNaN(score)) {
+      return dim("░░░░░░");
+    }
+
+    const clamped = Math.max(0, Math.min(1, score));
+    const blocks = 6;
+    const filled = Math.round(clamped * blocks);
+    const bar = `${"█".repeat(filled)}${"░".repeat(blocks - filled)}`;
+
+    if (score >= 0.82) {
+      return chalk.green(bar);
+    }
+    if (score >= 0.62) {
+      return chalk.yellow(bar);
+    }
+    return chalk.red(bar);
+  }
+
+  function renderSimilarityDetails(details, contentWidth) {
+    const rows = [];
+    if (!details || !Array.isArray(details.matches) || details.matches.length === 0) {
+      rows.push(`  ${dim("Similarity matches:")} ${chalk.red("none above threshold")}`);
+      return rows;
+    }
+
+    const thresholdLabel =
+      typeof details.cosineLimit === "number" ? details.cosineLimit.toFixed(2) : "n/a";
+    rows.push(
+      `  ${dim("Similarity matches:")} ${details.matches.length}/${details.requestedLimit} ` +
+        dim(`(threshold ≥ ${thresholdLabel})`)
+    );
+
+    for (const match of details.matches) {
+      const heading = `  #${match.rank} ${getScoreMeter(match.score)} ${dim(`score ${formatScore(match.score)}`)}`;
+      rows.push(heading);
+
+      const sourceLine = `     ${match.source || "unknown source"}`;
+      rows.push(sourceLine);
+
+      if (match.title) {
+        rows.push(`     ${dim(`title: ${match.title}`)}`);
+      }
+
+      if (match.preview) {
+        const wrappedPreview = wrapText(match.preview, Math.max(36, contentWidth - 8));
+        rows.push(`     ${dim(`preview: ${wrappedPreview[0]}`)}`);
+        for (let i = 1; i < Math.min(3, wrappedPreview.length); i++) {
+          rows.push(`              ${dim(wrappedPreview[i])}`);
+        }
+      }
+    }
+
+    return rows;
+  }
+
+  function renderRagScreen() {
+    const { rows, columns } = getTerminalSize();
+    const contentWidth = Math.max(48, Math.min(110, columns - 8));
+
+    console.clear();
+    renderCleanHeader();
+
+    const conversationLines = [];
+
+    for (const msg of ragUiMessages) {
+      if (msg.role === "assistant" && msg.similarityDetails) {
+        conversationLines.push(...renderSimilarityDetails(msg.similarityDetails, contentWidth));
+        conversationLines.push("");
+      }
+
+      const wrapped = wrapText(msg.text, contentWidth);
+      const prefix = msg.role === "assistant" ? "•" : ">";
+      conversationLines.push(`${prefix} ${wrapped[0]}`);
+      for (let i = 1; i < wrapped.length; i++) {
+        conversationLines.push(`  ${wrapped[i]}`);
+      }
+
+      if (msg.role === "assistant" && msg.evidenceQuality) {
+        conversationLines.push(`  ${dim("Evidence:")} ${formatEvidenceBadge(msg.evidenceQuality)}`);
+      }
+
+      conversationLines.push("");
+    }
+
+    if (conversationLines.length === 0) {
+      conversationLines.push("• How can I help you today?");
+      conversationLines.push("");
+    }
+
+    if (pendingStatus) {
+      conversationLines.push(chalk.cyan(`⏳ ${pendingStatus}`));
+      conversationLines.push("");
+    }
+
+    for (const line of conversationLines) {
+      console.log(line);
+    }
+
+    const usedLines = 5 + 1 + conversationLines.length;
+    const reservedBottomLines = 6;
+    const blankLines = Math.max(1, rows - usedLines - reservedBottomLines);
+    repeatBlankLines(blankLines);
+    renderFooter();
+  }
+
   function setPendingStatus(statusText) {
     pendingStatus = statusText ? String(statusText) : null;
     if (isCleanMode()) {
       renderCleanScreen();
+      return;
+    }
+
+    if (isRagMode()) {
+      renderRagScreen();
     }
   }
 
   function renderStartupScreen() {
-    if (!isCleanMode()) {
+    if (isCleanMode()) {
+      cleanUiMessages = [];
+      renderCleanScreen();
       return;
     }
 
-    cleanUiMessages = [];
-    renderCleanScreen();
+    ragUiMessages = [];
+    renderRagScreen();
   }
 
   function renderLoadingScreen(message = "Loading knowledge base...") {
@@ -241,6 +364,11 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       return;
     }
 
+    if (isRagMode()) {
+      renderRagScreen();
+      return;
+    }
+
     console.log(chalk.dim("─".repeat(48)));
     console.log(`mode switched to: ${nextMode}`);
     console.log(chalk.dim("─".repeat(48)));
@@ -250,6 +378,12 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     if (isCleanMode()) {
       cleanUiMessages.push({ role: "user", text: message });
       renderCleanScreen();
+      return;
+    }
+
+    if (isRagMode()) {
+      ragUiMessages.push({ role: "user", text: message });
+      renderRagScreen();
       return;
     }
 
@@ -265,6 +399,13 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     if (isCleanMode()) {
       cleanUiMessages.push({ role: "assistant", text });
       renderCleanScreen();
+      return;
+    }
+
+    if (isRagMode()) {
+      ragUiMessages.push({ role: "assistant", text, similarityDetails: pendingSimilarityDetails });
+      pendingSimilarityDetails = null;
+      renderRagScreen();
       return;
     }
 
@@ -292,6 +433,17 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       return;
     }
 
+    if (isRagMode()) {
+      for (let i = ragUiMessages.length - 1; i >= 0; i--) {
+        if (ragUiMessages[i].role === "assistant") {
+          ragUiMessages[i].evidenceQuality = label;
+          break;
+        }
+      }
+      renderRagScreen();
+      return;
+    }
+
     console.log(chalk.dim("Evidence strength:"), qualityColor(label));
   }
 
@@ -299,6 +451,10 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     if (isRagMode()) {
       console.log(...args);
     }
+  }
+
+  function setPendingSimilarityDetails(details) {
+    pendingSimilarityDetails = details || null;
   }
 
   return {
@@ -311,6 +467,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     printUserMessage,
     printAssistantMessage,
     printEvidenceQuality,
+    setPendingSimilarityDetails,
     setPendingStatus,
     uiLog,
     promptColor,
