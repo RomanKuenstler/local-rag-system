@@ -136,7 +136,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
 
     const metaLines = [
       `${titleColor(`${appName}`)} ${dim(`${appVersion}`)}`,
-      `${dim("self-hosted RAG system")}`,
+      `${dim("small local Retrieval Augmented Generation (RAG) AI system")}`,
       `${dim(`chat model: ${shortModel}`)}`,
       `${dim(`knowledge base: ${knowledgeBasePath}`)}`,
       "",
