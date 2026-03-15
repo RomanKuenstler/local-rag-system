@@ -1,7 +1,7 @@
 import chalk from "chalk";
 
 export function createUi({ appName, appVersion, chatModel, contentPath }) {
-  const HEADER_LINES = 8;
+  const HEADER_LINES = 7;
   const FOOTER_LINES = 3;
   let mode = (process.env.TUI_MODE || "clean").toLowerCase();
   let cleanUiMessages = [];
@@ -174,7 +174,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     for (const msg of cleanUiMessages) {
       const wrapped = wrapText(msg.text, contentWidth);
       if (wrapped.length > 0) {
-        const prefix = msg.role === "assistant" ? "•" : ">";
+        const prefix = msg.role === "assistant" ? "-" : ">";
         conversationLines.push(`${prefix} ${wrapped[0]}`);
         for (let i = 1; i < wrapped.length; i++) {
           conversationLines.push(`  ${wrapped[i]}`);
@@ -188,12 +188,12 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     }
 
     if (conversationLines.length === 0) {
-      conversationLines.push("• How can I help you today?");
+      conversationLines.push("- How can I help you today?");
       conversationLines.push("");
     }
 
     if (pendingStatus) {
-      conversationLines.push(chalk.cyan(`⏳ ${pendingStatus}`));
+      conversationLines.push(chalk.cyan(`[pending] ${pendingStatus}`));
       conversationLines.push("");
     }
 
@@ -299,7 +299,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
       }
 
       const wrapped = wrapText(msg.text, contentWidth);
-      const prefix = msg.role === "assistant" ? "•" : ">";
+      const prefix = msg.role === "assistant" ? "-" : ">";
       conversationLines.push(`${prefix} ${wrapped[0]}`);
       for (let i = 1; i < wrapped.length; i++) {
         conversationLines.push(`  ${wrapped[i]}`);
@@ -313,12 +313,12 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     }
 
     if (conversationLines.length === 0) {
-      conversationLines.push("• How can I help you today?");
+      conversationLines.push("- How can I help you today?");
       conversationLines.push("");
     }
 
     if (pendingStatus) {
-      conversationLines.push(chalk.cyan(`⏳ ${pendingStatus}`));
+      conversationLines.push(chalk.cyan(`[pending] ${pendingStatus}`));
       conversationLines.push("");
     }
 
@@ -449,7 +449,7 @@ export function createUi({ appName, appVersion, chatModel, contentPath }) {
     }
 
     const lines = text.split("\n");
-    console.log(`${chalk.white("•")} ${lines[0]}`);
+    console.log(`${chalk.white("-")} ${lines[0]}`);
     for (let i = 1; i < lines.length; i++) {
       console.log(`  ${lines[i]}`);
     }
