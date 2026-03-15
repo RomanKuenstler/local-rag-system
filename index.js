@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 import { randomUUID } from "crypto";
 import prompts from "prompts";
 import chalk from "chalk";
@@ -9,6 +10,7 @@ import {
   APP_VERSION,
   CHUNK_OVERLAP,
   CHUNK_SIZE,
+  CHAT_HISTORY_DIR,
   COLLECTION_NAME,
   CONTENT_PATH,
   COSINE_LIMIT,
@@ -79,6 +81,10 @@ const runtimeConfig = {
   minSimilarities: MIN_SIMILARITIES,
   cosineLimit: COSINE_LIMIT,
 };
+
+const DEFAULT_SESSION_ID = "default-session-id";
+const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
+const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
 
 const runtimeConfigSchema = {
   "history messages": {
@@ -310,6 +316,7 @@ function buildSystemInfoMessage() {
     `- collection: ${COLLECTION_NAME}`,
     `- content path: ${CONTENT_PATH}`,
     `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}`,
+    `- chat history dir: ${CHAT_HISTORY_DIR}`,
   ].join("\n");
 }
 
@@ -333,6 +340,7 @@ function buildActiveConfigMessage() {
     `  - pdf min extracted chars: ${PDF_MIN_EXTRACTED_CHARS} (${restartOnlyLabel})`,
     `  - index schema version: ${INDEX_SCHEMA_VERSION} (${restartOnlyLabel})`,
     `  - index state file: ${INDEX_STATE_FILE} (${restartOnlyLabel})`,
+    `  - chat history dir: ${CHAT_HISTORY_DIR} (${restartOnlyLabel})`,
     "",
     chalk.bold("Generation"),
     `  - temperature: ${process.env.OPTION_TEMPERATURE || "0.0"} (${restartOnlyLabel})`,
@@ -345,7 +353,7 @@ function buildActiveConfigMessage() {
 
 function buildHelpMessage() {
   return [
-    "📘 Quick help",
+    "Quick help",
     "",
     "Ask any question about your indexed documents in natural language.",
     "The assistant retrieves matching context from the knowledge base before answering.",
@@ -454,6 +462,28 @@ function addToHistory(sessionId, role, content) {
   }
 }
 
+function ensureParentDirectory(filePath) {
+  const parent = path.dirname(filePath);
+  fs.mkdirSync(parent, { recursive: true });
+}
+
+function writeFileAtomic(filePath, content) {
+  ensureParentDirectory(filePath);
+  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmpPath, content, "utf8");
+  fs.renameSync(tmpPath, filePath);
+}
+
+function appendSessionHistoryEntry(entry) {
+  try {
+    ensureParentDirectory(CHAT_HISTORY_FILE);
+    const line = `${JSON.stringify(entry)}\n`;
+    fs.appendFileSync(CHAT_HISTORY_FILE, line, { encoding: "utf8", mode: 0o600 });
+  } catch (error) {
+    console.error(`Failed to append chat history entry: ${error.message}`);
+  }
+}
+
 function loadIndexState() {
   try {
     if (!fs.existsSync(INDEX_STATE_FILE)) {
@@ -469,7 +499,7 @@ function loadIndexState() {
 
 function saveIndexState(state) {
   try {
-    fs.writeFileSync(INDEX_STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+    writeFileAtomic(INDEX_STATE_FILE, JSON.stringify(state, null, 2));
   } catch (error) {
     console.error(`Failed to save index state: ${error.message}`);
   }
@@ -731,8 +761,9 @@ let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
 validateRetrievalConfig();
 ui.renderLoadingScreen();
 await indexChangedDocuments();
-ui.printAssistantMessage("✅ Knowledge base is ready. Indexing completed successfully.");
+ui.printAssistantMessage("Knowledge base is ready. Indexing completed successfully.");
 ui.printAssistantMessage("How can I help you today?");
+ui.uiLog(`Chat history file: ${CHAT_HISTORY_FILE}`);
 
 let exit = false;
 while (!exit) {
@@ -809,7 +840,7 @@ while (!exit) {
   ui.printUserMessage(userMessage);
   ui.setPendingStatus("Searching knowledge base...");
 
-  const history = getConversationHistory("default-session-id");
+  const history = getConversationHistory(DEFAULT_SESSION_ID);
   const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(userMessage);
   ui.setPendingSimilarityDetails(createSimilarityDetails(results));
   ui.setPendingStatus("Generating answer...");
@@ -830,6 +861,14 @@ while (!exit) {
   ui.setPendingStatus(null);
   ui.printAssistantMessage(assistantResponse);
   ui.printEvidenceQuality(evidenceQuality);
-  addToHistory("default-session-id", "user", userMessage);
-  addToHistory("default-session-id", "assistant", assistantResponse);
+  addToHistory(DEFAULT_SESSION_ID, "user", userMessage);
+  addToHistory(DEFAULT_SESSION_ID, "assistant", assistantResponse);
+
+  appendSessionHistoryEntry({
+    timestamp: new Date().toISOString(),
+    sessionId: DEFAULT_SESSION_ID,
+    user: userMessage,
+    assistant: assistantResponse,
+    evidenceQuality,
+  });
 }

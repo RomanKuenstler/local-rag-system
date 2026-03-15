@@ -14,6 +14,9 @@ export const COSINE_LIMIT = parseFloat(process.env.COSINE_LIMIT || "0.45");
 export const INDEX_STATE_FILE =
   process.env.INDEX_STATE_FILE || path.resolve("./.index-state.json");
 
+export const CHAT_HISTORY_DIR =
+  process.env.CHAT_HISTORY_DIR || path.resolve("./chat-history");
+
 export const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE || "1200", 10);
 export const CHUNK_OVERLAP = parseInt(process.env.CHUNK_OVERLAP || "400", 10);
 export const INDEX_SCHEMA_VERSION = process.env.INDEX_SCHEMA_VERSION || "1";
