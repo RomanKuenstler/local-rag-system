@@ -88,6 +88,7 @@ Your personal files become the **knowledge base** of the system.
 ├── package.json       # Node.js dependencies
 │
 ├── data/              # Knowledge base (files to embed into the vector DB)
+├── upload/            # One-time prompt uploads consumed via /upload
 │
 ├── README.md          # Project documentation
 ├── NEXTSTEPS.md       # Ideas and roadmap for improving the system
@@ -276,6 +277,18 @@ data/
   networking.md
   rag_notes.txt
 ```
+
+Optional one-time upload files (used only with `/upload <prompt>`):
+
+```
+upload/
+  incident-notes.md
+  todo.txt
+```
+
+After `/upload` is used, consumed `.md` and `.txt` files are removed from `upload/`.
+
+Because `./upload` is bind-mounted into the retriever container as `/app/upload`, users can drop files in from the host machine directly.
 
 ---
 

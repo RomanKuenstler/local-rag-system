@@ -112,6 +112,44 @@ const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager(
 const DEFAULT_SESSION_ID = "default-session-id";
 const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
+const UPLOAD_PATH = path.resolve(process.cwd(), "upload");
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt"]);
+
+function ensureUploadDirectory() {
+  fs.mkdirSync(UPLOAD_PATH, { recursive: true });
+}
+
+function consumeUploadFiles() {
+  ensureUploadDirectory();
+
+  const entries = fs.readdirSync(UPLOAD_PATH, { withFileTypes: true });
+  const files = entries.filter((entry) => entry.isFile());
+  const uploadedFiles = [];
+  const skippedFiles = [];
+
+  for (const file of files) {
+    const extension = path.extname(file.name).toLowerCase();
+    const fullPath = path.join(UPLOAD_PATH, file.name);
+
+    if (!UPLOADABLE_EXTENSIONS.has(extension)) {
+      skippedFiles.push(file.name);
+      continue;
+    }
+
+    const content = fs.readFileSync(fullPath, "utf8");
+    uploadedFiles.push({
+      name: file.name,
+      content,
+    });
+
+    fs.unlinkSync(fullPath);
+  }
+
+  return {
+    uploadedFiles,
+    skippedFiles,
+  };
+}
 
 async function buildLibraryInfoMessage() {
   const files = await readEmbeddableFiles();
@@ -232,6 +270,7 @@ ui.renderLoadingScreen();
 ui.printAssistantMessage("Retriever service is ready.");
 ui.printAssistantMessage("Embedding runs in a separate embedder container.");
 ui.printAssistantMessage("How can I help you today?");
+ensureUploadDirectory();
 ui.uiLog(`Chat history file: ${CHAT_HISTORY_FILE}`);
 
 let exit = false;
@@ -435,11 +474,49 @@ while (!exit) {
     continue;
   }
 
+  let promptForRetrieval = userMessage;
+  let promptForAssistant = userMessage;
+
+  if (normalizedUserMessage === "/upload" || normalizedUserMessage.startsWith("/upload ")) {
+    const promptAfterUpload = userMessage.slice("/upload".length).trim();
+
+    if (!promptAfterUpload) {
+      ui.printAssistantMessage("Use /upload <your prompt>. Example: /upload summarize these notes.");
+      continue;
+    }
+
+    const { uploadedFiles, skippedFiles } = consumeUploadFiles();
+
+    if (uploadedFiles.length === 0) {
+      const reason =
+        skippedFiles.length > 0
+          ? `Found unsupported file types in ./upload (${skippedFiles.join(", ")}). Only .md and .txt are allowed.`
+          : "No files found in ./upload.";
+
+      ui.printAssistantMessage(`Nothing was uploaded. ${reason}`);
+      continue;
+    }
+
+    const uploadedContext = uploadedFiles
+      .map((file) => [`UPLOAD FILE: ${file.name}`, file.content.trim()].join("\n"))
+      .join("\n\n---\n\n");
+
+    const skippedNotice =
+      skippedFiles.length > 0
+        ? `\n\nUnsupported files were ignored and kept in ./upload: ${skippedFiles.join(", ")}`
+        : "";
+
+    promptForRetrieval = promptAfterUpload;
+    promptForAssistant = `${promptAfterUpload}\n\nONE-TIME UPLOADED FILE CONTEXT\n${uploadedContext}${skippedNotice}`;
+
+    ui.printAssistantMessage(`Uploaded ${uploadedFiles.length} file(s) from ./upload for this prompt only.`);
+  }
+
   ui.printUserMessage(userMessage);
   ui.setPendingStatus("Searching knowledge base...");
 
   const history = getConversationHistory(DEFAULT_SESSION_ID);
-  const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(userMessage);
+  const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(promptForRetrieval);
   ui.setPendingSimilarityDetails(createSimilarityDetails(results, runtimeConfig));
   ui.setPendingStatus("Generating answer...");
 
@@ -451,7 +528,7 @@ while (!exit) {
       profileId,
     }),
     ...history,
-    ["user", userMessage],
+    ["user", promptForAssistant],
   ];
 
   let assistantResponse = "";
