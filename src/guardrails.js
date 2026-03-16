@@ -1,5 +1,6 @@
 import fs from "fs";
 import { buildAssistantModeSystemLayer } from "./assistant-modes.js";
+import { buildProfileSystemLayer } from "./profiles.js";
 
 export const GUARDRAILS_PATH = "/app/guardrails.md";
 
@@ -35,13 +36,14 @@ export function loadGuardrails(filePath = GUARDRAILS_PATH) {
   }
 }
 
-export function buildSystemPromptLayers({ guardrailsText, ragContextPackage, assistantMode }) {
+export function buildSystemPromptLayers({ guardrailsText, ragContextPackage, assistantMode, profileId }) {
   return [
     [
       "system",
       [`[SYSTEM LAYER: GLOBAL_GUARDRAILS - ALWAYS ACTIVE]`, normalizeGuardrails(guardrailsText)].join("\n\n"),
     ],
     buildAssistantModeSystemLayer(assistantMode),
+    buildProfileSystemLayer(profileId),
     ["system", `[SYSTEM LAYER: RAG_TASK_CONTEXT - TURN_INPUT]\n\n${ragContextPackage}`],
   ];
 }
