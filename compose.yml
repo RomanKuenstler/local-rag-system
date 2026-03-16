@@ -22,6 +22,7 @@ services:
       CHAT_HISTORY_DIR: /app/state/chat-history
     volumes:
       - ./data:/app/data
+      - ./upload:/app/upload
       - rag_state:/app/state
     stdin_open: true
     tty: true

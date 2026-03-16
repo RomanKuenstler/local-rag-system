@@ -10,6 +10,8 @@
 - Added `/embed` command for embedding newly added files.
 - Added weak-evidence confirmation flow to improve answer reliability.
 - Added session chat-history logging support.
+- Added `/upload <prompt>` command for one-time prompt attachments from `./upload` with `.md`/`.txt` validation and auto-consume behavior after use.
+- Mapped `./upload` into the retriever container (`/app/upload`) so host-side files are immediately available to `/upload`.
 
 ### Changed
 - Refined clean TUI layout, evidence rendering, and loading feedback.
