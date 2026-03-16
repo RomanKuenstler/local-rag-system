@@ -135,7 +135,7 @@ export function buildHelpMessage() {
     "                  Example: /config set 'min similarities' 3",
     "- /mode clean      Switch to clean chat-focused UI",
     "- /mode rag        Switch to debug RAG UI with similarity details",
-    "- /embed           Re-index only new/changed/removed files in ./data",
+    "- /embed           Show embedder-container status hint",
     "- /yes             Show pending weak-evidence answer",
     "- /no | /skip      Hide pending weak-evidence answer",
     "- /bye | /exit | /quit  Exit the application",

@@ -51,7 +51,8 @@ The goal of this project is **simplicity and transparency**, so you can easily u
 │                                            └─────────┘                        │
 │                                                                               │
 │  Docker Containers                                                            │
-│  ├─ expert container  → retriever + embedding logic                           │
+│  ├─ retriever container → chat + retrieval                                    │
+│  ├─ embedder container  → indexing + embeddings                               │
 │  └─ qdrant container  → vector database                                       │
 │                                                                               │
 └───────────────────────────────────────────────────────────────────────────────┘
@@ -81,8 +82,9 @@ Your personal files become the **knowledge base** of the system.
 ```
 .
 ├── compose.yml        # Docker Compose configuration (containers, models, configs)
-├── Dockerfile         # Build instructions for the "expert" container
-├── index.js           # Main application (retriever + embedding logic)
+├── Dockerfile         # Build instructions for retriever/embedder containers
+├── index.js           # Retriever application (chat + retrieval)
+├── embedder.js        # Embedder service (background indexing loop)
 ├── package.json       # Node.js dependencies
 │
 ├── data/              # Knowledge base (files to embed into the vector DB)
@@ -216,7 +218,8 @@ Containers used:
 
 | Container | Purpose                                            |
 | --------- | -------------------------------------------------- |
-| `expert`  | The main application (retriever + embedding logic) |
+| `retriever` | Interactive assistant (retrieval + answering) |
+| `embedder`  | Background indexing and embedding worker |
 | `qdrant`  | Vector database                                    |
 
 Docker also runs the **LLM models** through Docker Model Runner.
@@ -344,19 +347,25 @@ docker compose build --no-cache
 
 ## Use the AI System
 
-Open the application container:
+Start both services:
 
 ```
-docker compose exec expert /bin/bash
+docker compose up -d retriever embedder qdrant
 ```
 
-Start the AI:
+Open the interactive retriever shell:
 
 ```
-node index.js
+docker compose exec retriever /bin/bash
 ```
 
-You can now interact with the system.
+Monitor background embedding:
+
+```
+docker compose logs -f embedder
+```
+
+You can now interact with the retriever.
 
 Example:
 
