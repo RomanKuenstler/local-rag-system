@@ -63,21 +63,16 @@ Evidence quality meaning: strong|moderate|weak
 
 ${evidenceBlock || "No evidence retrieved."}
 
-INSTRUCTIONS FOR THIS TASK
-- Answer the user's question using the retrieved knowledge as the primary source.
-- If the evidence is partial, answer only what is supported and clearly indicate what is missing.
-- If the evidence is insufficient, say that the knowledge base does not contain enough information.
-- If you provide additional general knowledge, clearly label it as general knowledge and not as knowledge-base content.
-
 USER QUESTION
 ${userMessage}`;
 }
 
-export function buildSystemInfoMessage({ appName, appVersion, uiMode, chatModelName, embeddingModelName, qdrantUrl, collectionName, contentPath, embeddableExtensions, chatHistoryDir }) {
+export function buildSystemInfoMessage({ appName, appVersion, uiMode, assistantMode, chatModelName, embeddingModelName, qdrantUrl, collectionName, contentPath, embeddableExtensions, chatHistoryDir }) {
   return [
     "System info:",
     `- app: ${appName} ${appVersion}`,
     `- ui mode: ${uiMode}`,
+    `- assistant mode: ${assistantMode || "unknown"}`,
     `- chat model: ${chatModelName || "unknown"}`,
     `- embedding model: ${embeddingModelName || "unknown"}`,
     `- vector db: qdrant (${qdrantUrl})`,
