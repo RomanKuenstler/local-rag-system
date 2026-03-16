@@ -130,6 +130,8 @@ export function buildHelpMessage() {
     "                  Example: /config set 'min similarities' 3",
     "- /mode clean      Switch to clean chat-focused UI",
     "- /mode rag        Switch to debug RAG UI with similarity details",
+    "- /assistant       List assistant modes and current mode",
+    "- /assistant <mode> Switch assistant mode (e.g. learning, normal)",
     "- /embed           Show embedder-container status hint",
     "- /yes             Show pending weak-evidence answer",
     "- /no | /skip      Hide pending weak-evidence answer",

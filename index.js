@@ -26,7 +26,11 @@ import {
 } from "./src/config.js";
 import { createUi } from "./src/ui.js";
 import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
-import { DEFAULT_ASSISTANT_MODE, normalizeAssistantMode } from "./src/assistant-modes.js";
+import {
+  DEFAULT_ASSISTANT_MODE,
+  listAssistantModes,
+  normalizeAssistantMode,
+} from "./src/assistant-modes.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
 import {
   buildActiveConfigMessage,
@@ -214,7 +218,7 @@ async function searchKnowledgeBase(userMessage) {
 }
 
 const guardrailsText = loadGuardrails();
-const assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
+let assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
 
 validateRetrievalConfig();
 ui.renderLoadingScreen();
@@ -281,6 +285,42 @@ while (!exit) {
   if (normalizedUserMessage === "/mode rag") {
     ui.setTuiMode("rag");
     ui.renderModeChanged("rag");
+    continue;
+  }
+
+  if (normalizedUserMessage === "/assistant") {
+    const modeList = listAssistantModes()
+      .map((mode) => `- ${mode.id}: ${mode.description}`)
+      .join("\n");
+
+    ui.printAssistantMessage(
+      [
+        "Assistant modes:",
+        "",
+        "In this system, assistant mode defines the system-level response behavior profile used to generate answers.",
+        "",
+        modeList,
+        "",
+        `Current mode: ${assistantMode}`,
+        "Use /assistant <mode>, e.g. /assistant learning or /assistant normal.",
+      ].join("\n")
+    );
+    continue;
+  }
+
+  if (normalizedUserMessage.startsWith("/assistant ")) {
+    const requestedMode = normalizedUserMessage.slice("/assistant ".length).trim();
+    const nextMode = normalizeAssistantMode(requestedMode);
+
+    if (nextMode !== requestedMode) {
+      ui.printAssistantMessage(
+        `Unsupported assistant mode: ${requestedMode}. Use /assistant to see available modes.`
+      );
+      continue;
+    }
+
+    assistantMode = nextMode;
+    ui.printAssistantMessage(`Assistant mode changed to: ${assistantMode}`);
     continue;
   }
 
