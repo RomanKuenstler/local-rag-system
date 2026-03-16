@@ -26,6 +26,7 @@ import {
 } from "./src/config.js";
 import { createUi } from "./src/ui.js";
 import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
+import { DEFAULT_ASSISTANT_MODE, normalizeAssistantMode } from "./src/assistant-modes.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
 import {
   buildActiveConfigMessage,
@@ -213,6 +214,7 @@ async function searchKnowledgeBase(userMessage) {
 }
 
 const guardrailsText = loadGuardrails();
+const assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
 
 validateRetrievalConfig();
 ui.renderLoadingScreen();
@@ -287,6 +289,7 @@ while (!exit) {
       appName: APP_NAME,
       appVersion: APP_VERSION,
       uiMode: ui.getTuiMode(),
+      assistantMode,
       chatModelName: chatModel.model,
       embeddingModelName: embeddingsModel.model,
       qdrantUrl: QDRANT_URL,
@@ -361,6 +364,7 @@ while (!exit) {
     ...buildSystemPromptLayers({
       guardrailsText,
       ragContextPackage,
+      assistantMode,
     }),
     ...history,
     ["user", userMessage],
