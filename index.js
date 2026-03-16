@@ -126,6 +126,7 @@ function consumeUploadFiles() {
   const files = entries.filter((entry) => entry.isFile());
   const uploadedFiles = [];
   const skippedFiles = [];
+  const retainedFiles = [];
 
   for (const file of files) {
     const extension = path.extname(file.name).toLowerCase();
@@ -142,12 +143,22 @@ function consumeUploadFiles() {
       content,
     });
 
-    fs.unlinkSync(fullPath);
+    try {
+      fs.unlinkSync(fullPath);
+    } catch (error) {
+      if (error?.code === "EACCES" || error?.code === "EPERM") {
+        retainedFiles.push(file.name);
+        continue;
+      }
+
+      throw error;
+    }
   }
 
   return {
     uploadedFiles,
     skippedFiles,
+    retainedFiles,
   };
 }
 
@@ -485,7 +496,7 @@ while (!exit) {
       continue;
     }
 
-    const { uploadedFiles, skippedFiles } = consumeUploadFiles();
+    const { uploadedFiles, skippedFiles, retainedFiles } = consumeUploadFiles();
 
     if (uploadedFiles.length === 0) {
       const reason =
@@ -506,8 +517,13 @@ while (!exit) {
         ? `\n\nUnsupported files were ignored and kept in ./upload: ${skippedFiles.join(", ")}`
         : "";
 
+    const retainedNotice =
+      retainedFiles.length > 0
+        ? `\n\nSome uploaded files could not be deleted due to permissions and were kept in ./upload: ${retainedFiles.join(", ")}`
+        : "";
+
     promptForRetrieval = promptAfterUpload;
-    promptForAssistant = `${promptAfterUpload}\n\nONE-TIME UPLOADED FILE CONTEXT\n${uploadedContext}${skippedNotice}`;
+    promptForAssistant = `${promptAfterUpload}\n\nONE-TIME UPLOADED FILE CONTEXT\n${uploadedContext}${skippedNotice}${retainedNotice}`;
 
     ui.printAssistantMessage(`Uploaded ${uploadedFiles.length} file(s) from ./upload for this prompt only.`);
   }
