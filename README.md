@@ -428,16 +428,16 @@ These influence the LLM behavior.
 
 ---
 
-### System Prompt
+### Global Guardrails
 
 Located in:
 
 ```
 compose.yml
-system.instructions.md
+guardrails.md
 ```
 
-This prompt controls how the AI answers.
+These guardrails are always active system rules for retrieval behavior and cannot be overridden by user prompts.
 
 ---
 
