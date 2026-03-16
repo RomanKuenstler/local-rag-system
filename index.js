@@ -25,6 +25,7 @@ import {
   validateRetrievalConfig,
 } from "./src/config.js";
 import { createUi } from "./src/ui.js";
+import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
 import {
   buildActiveConfigMessage,
@@ -211,7 +212,7 @@ async function searchKnowledgeBase(userMessage) {
   };
 }
 
-let systemInstructions = fs.readFileSync("/app/system.instructions.md", "utf8");
+const guardrailsText = loadGuardrails();
 
 validateRetrievalConfig();
 ui.renderLoadingScreen();
@@ -357,8 +358,10 @@ while (!exit) {
   ui.setPendingStatus("Generating answer...");
 
   const messages = [
-    ["system", systemInstructions],
-    ["system", ragContextPackage],
+    ...buildSystemPromptLayers({
+      guardrailsText,
+      ragContextPackage,
+    }),
     ...history,
     ["user", userMessage],
   ];
