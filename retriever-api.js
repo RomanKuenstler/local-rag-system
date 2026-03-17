@@ -24,10 +24,14 @@ import {
 import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
 import {
   DEFAULT_ASSISTANT_MODE,
+  isAssistantModeSupported,
+  listAssistantModes,
   normalizeAssistantMode,
 } from "./src/assistant-modes.js";
 import {
   DEFAULT_PROFILE,
+  isProfileSupported,
+  listProfiles,
   normalizeProfile,
 } from "./src/profiles.js";
 import {
@@ -51,8 +55,8 @@ validateRetrievalConfig();
 
 const PORT = parseInt(process.env.RETRIEVER_API_PORT || "3000", 10);
 const HOST = process.env.RETRIEVER_API_HOST || "0.0.0.0";
-const assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
-const profileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
+let assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
+let profileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
 const guardrailsText = loadGuardrails();
 
 const chatModel = new ChatOpenAI({
@@ -240,6 +244,97 @@ function handlePromptCommand(prompt, sessionId) {
         evidenceSeverity: null,
         responseType: "library_info",
         deferredCommand: "library_info",
+      },
+    };
+  }
+
+
+  if (normalizedPrompt === "/assistant") {
+    const modes = listAssistantModes();
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: [
+          "Assistant modes:",
+          ...modes.map((mode) => `- ${mode.id}: ${mode.description}`),
+          `Current mode: ${assistantMode}`
+        ].join("\n"),
+        evidenceSeverity: null,
+        responseType: "assistant_mode",
+      },
+    };
+  }
+
+  if (normalizedPrompt.startsWith("/assistant ")) {
+    const requestedMode = prompt.slice("/assistant ".length).trim().toLowerCase();
+
+    if (!isAssistantModeSupported(requestedMode)) {
+      return {
+        statusCode: 400,
+        payload: {
+          sessionId,
+          error: `Unsupported assistant mode: ${requestedMode}`,
+          answer: `Unsupported assistant mode: ${requestedMode}. Use /assistant to list available modes.`,
+          evidenceSeverity: "warn",
+        },
+      };
+    }
+
+    assistantMode = normalizeAssistantMode(requestedMode);
+
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: `Assistant mode changed to: ${assistantMode}` ,
+        evidenceSeverity: "ok",
+        responseType: "assistant_mode",
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/profile") {
+    const profiles = listProfiles();
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: [
+          "Profiles:",
+          ...profiles.map((profile) => `- ${profile.id}: ${profile.description}`),
+          `Current profile: ${profileId}`
+        ].join("\n"),
+        evidenceSeverity: null,
+        responseType: "profile",
+      },
+    };
+  }
+
+  if (normalizedPrompt.startsWith("/profile ")) {
+    const requestedProfile = prompt.slice("/profile ".length).trim().toLowerCase();
+
+    if (!isProfileSupported(requestedProfile)) {
+      return {
+        statusCode: 400,
+        payload: {
+          sessionId,
+          error: `Unsupported profile: ${requestedProfile}`,
+          answer: `Unsupported profile: ${requestedProfile}. Use /profile to list available profiles.`,
+          evidenceSeverity: "warn",
+        },
+      };
+    }
+
+    profileId = normalizeProfile(requestedProfile);
+
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: `Profile changed to: ${profileId}` ,
+        evidenceSeverity: "ok",
+        responseType: "profile",
       },
     };
   }
@@ -498,6 +593,8 @@ async function handleStatus(_req, res) {
     assistant: {
       mode: assistantMode,
       profile: profileId,
+      availableModes: listAssistantModes().map((mode) => ({ id: mode.id, label: mode.label })),
+      availableProfiles: listProfiles().map((profile) => ({ id: profile.id, label: profile.label })),
     },
     retrieval: {
       collection: COLLECTION_NAME,
