@@ -136,7 +136,7 @@ export function buildHelpMessage() {
     "- /profile         List profiles and current profile",
     "- /profile <name>  Switch profile (e.g. default, alice)",
     "- /embed           Show embedder-container status hint",
-    "- /upload <prompt> Attach one-time files from ./upload (.md/.txt only)",
+    "- /upload <prompt> Attach one-time files from ./upload (.md/.txt/.html/.htm)",
     "- /yes             Show pending weak-evidence answer",
     "- /no | /skip      Hide pending weak-evidence answer",
     "- /bye | /exit | /quit  Exit the application",
