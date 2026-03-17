@@ -48,7 +48,7 @@ import {
   getEvidenceQuality,
 } from "./src/messages.js";
 import { createEmbeddingsModel, createQdrantClient, fileToChunks, readEmbeddableFiles } from "./src/embedding-service.js";
-import { normalizeIndexableTextByExtension } from "./src/document-processing.js";
+import { normalizeIndexableFileByExtension } from "./src/document-processing.js";
 
 function colorEvidenceQuality(q) {
   if (q === "strong") return chalk.green(q);
@@ -114,13 +114,13 @@ const DEFAULT_SESSION_ID = "default-session-id";
 const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
 const UPLOAD_PATH = path.resolve(process.cwd(), "upload");
-const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm"]);
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
 
 function ensureUploadDirectory() {
   fs.mkdirSync(UPLOAD_PATH, { recursive: true });
 }
 
-function consumeUploadFiles() {
+async function consumeUploadFiles() {
   ensureUploadDirectory();
 
   const entries = fs.readdirSync(UPLOAD_PATH, { withFileTypes: true });
@@ -138,8 +138,7 @@ function consumeUploadFiles() {
       continue;
     }
 
-    const rawContent = fs.readFileSync(fullPath, "utf8");
-    const content = normalizeIndexableTextByExtension(rawContent, extension);
+    const content = await normalizeIndexableFileByExtension(fullPath, extension);
 
     if (!content) {
       skippedFiles.push(file.name);
@@ -504,12 +503,12 @@ while (!exit) {
       continue;
     }
 
-    const { uploadedFiles, skippedFiles, retainedFiles } = consumeUploadFiles();
+    const { uploadedFiles, skippedFiles, retainedFiles } = await consumeUploadFiles();
 
     if (uploadedFiles.length === 0) {
       const reason =
         skippedFiles.length > 0
-          ? `Found unsupported or empty file types in ./upload (${skippedFiles.join(", ")}). Only .md, .txt, .html, and .htm with indexable text are allowed.`
+          ? `Found unsupported or empty file types in ./upload (${skippedFiles.join(", ")}). Only .md, .txt, .html, .htm, and .pdf with indexable text are allowed.`
           : "No files found in ./upload.";
 
       ui.printAssistantMessage(`Nothing was uploaded. ${reason}`);
