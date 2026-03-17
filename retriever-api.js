@@ -4,14 +4,21 @@ import { ChatOpenAI } from "@langchain/openai";
 import {
   APP_NAME,
   APP_VERSION,
+  CHUNK_OVERLAP,
+  CHUNK_SIZE,
   COLLECTION_NAME,
   CONTENT_PATH,
   COSINE_LIMIT,
+  EMBEDDABLE_EXTENSIONS,
   HISTORY_MESSAGES,
   INDEX_STATE_FILE,
+  INDEX_SCHEMA_VERSION,
   MAX_SIMILARITIES,
+  MAX_EMBEDDING_CHARS,
   MIN_SIMILARITIES,
+  PDF_MIN_EXTRACTED_CHARS,
   QDRANT_URL,
+  CHAT_HISTORY_DIR,
   validateRetrievalConfig,
 } from "./src/config.js";
 import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
@@ -24,8 +31,12 @@ import {
   normalizeProfile,
 } from "./src/profiles.js";
 import {
+  buildActiveConfigMessage,
+  buildHelpMessage,
+  buildSystemInfoMessage,
   buildRagContextPackage,
   createSimilarityDetails,
+  formatBytes,
   getEvidenceQuality,
 } from "./src/messages.js";
 import {
@@ -62,6 +73,11 @@ const chatModel = new ChatOpenAI({
 const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
 const sessionMemory = new Map();
+const pendingWeakAnswers = new Map();
+
+function stripAnsi(text) {
+  return String(text || "").replace(/\u001b\[[0-9;]*m/g, "");
+}
 
 function getSessionHistory(sessionId) {
   if (!sessionMemory.has(sessionId)) {
@@ -79,6 +95,195 @@ function appendHistory(sessionId, role, content) {
   if (history.length > maxHistoryEntries) {
     history.splice(0, history.length - maxHistoryEntries);
   }
+}
+
+function normalizePrompt(input) {
+  return String(input || "").trim();
+}
+
+
+
+async function buildLibraryInfoMessage() {
+  const files = await readEmbeddableFiles();
+
+  if (files.length === 0) {
+    return [
+      "Library info:",
+      `- content path: ${CONTENT_PATH}` ,
+      `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}` ,
+      "- files: 0",
+      "- total chunks: 0",
+    ].join("\n");
+  }
+
+  const indexState = readIndexState();
+  const perFile = files.map((file) => ({
+    ...file,
+    chunkCount: fileToChunks(file).length,
+    embedded: indexState[file.relativePath] === file.hash,
+  }));
+
+  const totalChunks = perFile.reduce((sum, file) => sum + file.chunkCount, 0);
+
+  const lines = [
+    "Library info:",
+    `- content path: ${CONTENT_PATH}` ,
+    `- embeddable extensions: ${EMBEDDABLE_EXTENSIONS.join(", ")}` ,
+    `- files: ${perFile.length}`,
+    `- embedded files: ${perFile.filter((file) => file.embedded).length}`,
+    `- total chunks: ${totalChunks}`,
+    "",
+    "Embeddable files:",
+  ];
+
+  for (const file of perFile) {
+    const modifiedAt = file.lastModified ? new Date(file.lastModified).toISOString() : "n/a";
+
+    lines.push(`- ${file.relativePath}`);
+    lines.push(`  size: ${formatBytes(file.size)} (${file.size} bytes)`);
+    lines.push(`  chunks: ${file.chunkCount}`);
+    lines.push(`  extension: ${file.extension}`);
+    lines.push(`  embedded: ${file.embedded ? "yes" : "no"}`);
+    lines.push(`  hash: ${file.hash}`);
+    lines.push(`  modified: ${modifiedAt}`);
+  }
+
+  return lines.join("\n");
+}
+
+function handlePromptCommand(prompt, sessionId) {
+  const normalizedPrompt = prompt.toLowerCase();
+  const pendingWeakAnswer = pendingWeakAnswers.get(sessionId);
+
+  if (pendingWeakAnswer) {
+    if (["/yes", "/y"].includes(normalizedPrompt)) {
+      pendingWeakAnswers.delete(sessionId);
+      return {
+        statusCode: 200,
+        payload: {
+          sessionId,
+          answer: pendingWeakAnswer.answer,
+          evidenceSeverity: pendingWeakAnswer.evidenceSeverity,
+        },
+      };
+    }
+
+    if (["/no", "/skip"].includes(normalizedPrompt)) {
+      pendingWeakAnswers.delete(sessionId);
+      return {
+        statusCode: 200,
+        payload: {
+          sessionId,
+          answer: "Okay, skipped displaying the weak-evidence answer.",
+          evidenceSeverity: "weak",
+        },
+      };
+    }
+
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: "Please confirm with /yes to show the answer, or /no (or /skip) to hide it.",
+        evidenceSeverity: "warn",
+        interaction: {
+          type: "weak_confirmation",
+          pending: true,
+        },
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/help" || normalizedPrompt === "?") {
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: buildHelpMessage(),
+        evidenceSeverity: null,
+        responseType: "help",
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/info") {
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: buildSystemInfoMessage({
+          appName: APP_NAME,
+          appVersion: APP_VERSION,
+          uiMode: "webui",
+          assistantMode,
+          profileId,
+          chatModelName: chatModel.model,
+          embeddingModelName: embeddingsModel.model,
+          qdrantUrl: QDRANT_URL,
+          collectionName: COLLECTION_NAME,
+          contentPath: CONTENT_PATH,
+          embeddableExtensions: EMBEDDABLE_EXTENSIONS,
+          chatHistoryDir: CHAT_HISTORY_DIR,
+        }),
+        evidenceSeverity: null,
+        responseType: "system_info",
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/lib") {
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: null,
+        evidenceSeverity: null,
+        responseType: "library_info",
+        deferredCommand: "library_info",
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/config") {
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: stripAnsi(buildActiveConfigMessage({
+          historyMessages: HISTORY_MESSAGES,
+          maxSimilarities: MAX_SIMILARITIES,
+          minSimilarities: MIN_SIMILARITIES,
+          cosineLimit: COSINE_LIMIT,
+        }, {
+          chunkSize: CHUNK_SIZE,
+          chunkOverlap: CHUNK_OVERLAP,
+          maxEmbeddingChars: MAX_EMBEDDING_CHARS,
+          pdfMinExtractedChars: PDF_MIN_EXTRACTED_CHARS,
+          indexSchemaVersion: INDEX_SCHEMA_VERSION,
+          indexStateFile: INDEX_STATE_FILE,
+          chatHistoryDir: CHAT_HISTORY_DIR,
+          temperature: process.env.OPTION_TEMPERATURE || "0.0",
+          topP: process.env.OPTION_TOP_P || "0.5",
+          presencePenalty: process.env.OPTION_PRESENCE_PENALTY || "2.2",
+        })),
+        evidenceSeverity: null,
+        responseType: "active_config",
+      },
+    };
+  }
+
+  if (normalizedPrompt.startsWith("/config set ")) {
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: "In web UI, /config set is not implemented yet. Use /config to view active configuration.",
+        evidenceSeverity: "warn",
+      },
+    };
+  }
+
+  return null;
 }
 
 async function searchKnowledgeBase(prompt) {
@@ -194,11 +399,22 @@ function readJsonBody(req) {
 
 async function handlePrompt(req, res) {
   const body = await readJsonBody(req);
-  const prompt = String(body.prompt || "").trim();
+  const prompt = normalizePrompt(body.prompt);
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
 
   if (!prompt) {
     json(res, 400, { error: "Missing required field: prompt" });
+    return;
+  }
+
+  const commandResult = handlePromptCommand(prompt, sessionId);
+  if (commandResult) {
+    if (commandResult.payload?.deferredCommand === "library_info") {
+      commandResult.payload.answer = await buildLibraryInfoMessage();
+      delete commandResult.payload.deferredCommand;
+    }
+
+    json(res, commandResult.statusCode, commandResult.payload);
     return;
   }
 
@@ -226,6 +442,34 @@ async function handlePrompt(req, res) {
   ]);
 
   const answer = String(assistantResponse.content || "").trim();
+
+  if (searchResult.evidenceQuality === "weak") {
+    pendingWeakAnswers.set(sessionId, {
+      answer,
+      evidenceSeverity: searchResult.evidenceQuality,
+    });
+
+    appendHistory(sessionId, "human", prompt);
+    appendHistory(sessionId, "ai", answer);
+
+    json(res, 200, {
+      sessionId,
+      answer:
+        "Evidence quality is WEAK for this topic. The generated answer may be unreliable. Do you want to see it? Use /yes to show it, or /no or /skip to hide it.",
+      evidenceSeverity: "warn",
+      hasSufficientEvidence: searchResult.hasSufficientEvidence,
+      interaction: {
+        type: "weak_confirmation",
+        pending: true,
+      },
+      retrieval: createSimilarityDetails(searchResult.results, {
+        maxSimilarities: MAX_SIMILARITIES,
+        cosineLimit: COSINE_LIMIT,
+      }),
+    });
+    return;
+  }
+
   appendHistory(sessionId, "human", prompt);
   appendHistory(sessionId, "ai", answer);
 
