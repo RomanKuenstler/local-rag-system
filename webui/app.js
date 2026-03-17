@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "https://esm.sh/reac
 import { createRoot } from "https://esm.sh/react-dom@18/client";
 
 const API_BASE_URL = window.__API_BASE_URL__ || "http://localhost:3000";
-const PANEL_COMMANDS = new Set(["/info", "/config", "/lib"]);
+const PANEL_COMMANDS = new Set(["/info", "/config", "/lib", "/assistant", "/help", "?"]);
 
 function statusColor(ready) {
   if (ready === true) return "ok";
@@ -46,6 +46,7 @@ function App() {
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const lastMessageRef = useRef(null);
+  const composerInputRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const statusBadges = useMemo(() => formatSystemStatus(statusData, filesData), [statusData, filesData]);
@@ -131,6 +132,12 @@ function App() {
       .filter(Boolean);
   }
 
+  function resizeComposerInput(element) {
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 192)}px`;
+  }
+
   async function sendRawPrompt(rawPrompt) {
     const prompt = String(rawPrompt || "").trim();
     const isPanelCommand = PANEL_COMMANDS.has(prompt.toLowerCase());
@@ -146,6 +153,10 @@ function App() {
       }));
     }
     setInputValue("");
+    if (composerInputRef.current) {
+      composerInputRef.current.style.height = "";
+      resizeComposerInput(composerInputRef.current);
+    }
 
     if (!isEmbeddingReady) {
       setMessages((prev) => prev.concat({
@@ -177,6 +188,7 @@ function App() {
           title: payload.responseType || prompt,
           content: parsePanelText(payload.answer || ""),
           severity: payload.evidenceSeverity || null,
+          configView: payload.configView || null,
         });
       } else {
         setMessages((prev) => prev.concat({
@@ -214,6 +226,12 @@ function App() {
     await sendRawPrompt(`/profile ${profileId}`);
   }
 
+  async function submitConfigChange(configName, rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) return;
+    await sendRawPrompt(`/config set '${configName}' ${value}`);
+  }
+
   const icon = (path) => React.createElement(
     "svg",
     { viewBox: "0 0 24 24", className: "icon", "aria-hidden": "true" },
@@ -226,7 +244,11 @@ function App() {
       ? "Current Configuration"
       : panelData?.command === "/lib"
         ? "Library Overview"
-        : "Details";
+        : panelData?.command === "/assistant"
+          ? "Assistant Modes"
+          : panelData?.command === "/help" || panelData?.command === "?"
+            ? "Quick Help"
+            : "Details";
 
   return React.createElement(
     "div",
@@ -258,6 +280,12 @@ function App() {
         ),
         React.createElement(
           "button",
+          { type: "button", onClick: () => sendRawPrompt("/assistant"), disabled: isSending || !isEmbeddingReady },
+          icon("M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z"),
+          React.createElement("span", null, "Assistant")
+        ),
+        React.createElement(
+          "button",
           { type: "button", onClick: () => sendRawPrompt("/lib"), disabled: isSending || !isEmbeddingReady },
           icon("M4 6.5C4 5.12 5.12 4 6.5 4H20v15H6.5A2.5 2.5 0 0 1 4 16.5zm2.5-.5a.5.5 0 0 0 0 1H18V6zM18 18v-8H6.5a1.5 1.5 0 0 0 0 3H18"),
           React.createElement("span", null, "Library")
@@ -280,41 +308,62 @@ function App() {
       )),
       React.createElement(
         "div",
-        { className: "status-chip ok selectable" },
+        { className: "status-chip ok" },
         React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
         React.createElement(
           "div",
           { className: "status-meta" },
           React.createElement("span", { className: "status-label" }, "Mode"),
+          React.createElement("strong", { className: "status-value" }, statusData?.app?.uiMode || "webui")
+        )
+      ),
+      React.createElement(
+        "label",
+        { className: "status-chip ok status-chip-dropdown" },
+        React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
+        React.createElement(
+          "div",
+          { className: "status-meta" },
+          React.createElement("span", { className: "status-label" }, "Assistant mode"),
           React.createElement(
-            "select",
-            {
-              className: "status-select",
-              value: statusData?.assistant?.mode || "",
-              onChange: (event) => setAssistantMode(event.target.value),
-              disabled: isSending || !isEmbeddingReady,
-            },
-            ...availableModes.map((mode) => React.createElement("option", { key: mode.id, value: mode.id }, mode.label || mode.id))
+            "div",
+            { className: "status-select-wrap" },
+            React.createElement(
+              "select",
+              {
+                className: "status-chip-select",
+                value: statusData?.assistant?.mode || "",
+                onChange: (event) => setAssistantMode(event.target.value),
+                disabled: isSending || !isEmbeddingReady,
+              },
+              ...availableModes.map((mode) => React.createElement("option", { key: mode.id, value: mode.id }, mode.label || mode.id))
+            ),
+            React.createElement("span", { className: "status-chevron", "aria-hidden": "true" }, "▾")
           )
         )
       ),
       React.createElement(
-        "div",
-        { className: "status-chip ok selectable" },
+        "label",
+        { className: "status-chip ok status-chip-dropdown" },
         React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
         React.createElement(
           "div",
           { className: "status-meta" },
           React.createElement("span", { className: "status-label" }, "Profile"),
           React.createElement(
-            "select",
-            {
-              className: "status-select",
-              value: statusData?.assistant?.profile || "",
-              onChange: (event) => setProfile(event.target.value),
-              disabled: isSending || !isEmbeddingReady,
-            },
-            ...availableProfiles.map((profile) => React.createElement("option", { key: profile.id, value: profile.id }, profile.label || profile.id))
+            "div",
+            { className: "status-select-wrap" },
+            React.createElement(
+              "select",
+              {
+                className: "status-chip-select",
+                value: statusData?.assistant?.profile || "",
+                onChange: (event) => setProfile(event.target.value),
+                disabled: isSending || !isEmbeddingReady,
+              },
+              ...availableProfiles.map((profile) => React.createElement("option", { key: profile.id, value: profile.id }, profile.label || profile.id))
+            ),
+            React.createElement("span", { className: "status-chevron", "aria-hidden": "true" }, "▾")
           )
         )
       )
@@ -338,16 +387,52 @@ function App() {
               )
               : null
           ),
-          Array.isArray(panelData.content)
-            ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
-            : typeof panelData.content === "object" && panelData.content !== null
-              ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
+          panelData.command === "/config" && panelData.configView
+            ? React.createElement(
+              "div",
+              { className: "config-sections" },
+              ...panelData.configView.sections.map((section) => React.createElement(
                 "div",
-                { key, className: "info-row" },
-                React.createElement("span", null, key),
-                React.createElement("strong", null, typeof value === "object" ? JSON.stringify(value) : String(value))
-              ))
-              : React.createElement("p", null, String(panelData.content || "No data available."))
+                { key: section.id, className: "config-section" },
+                React.createElement("h4", null, section.label),
+                ...section.entries.map((entry) => React.createElement(
+                  "div",
+                  { key: `${section.id}-${entry.key}`, className: "info-row" },
+                  React.createElement("span", null, entry.key),
+                  entry.editable
+                    ? React.createElement(
+                      "form",
+                      {
+                        className: "config-edit-form",
+                        onSubmit: async (event) => {
+                          event.preventDefault();
+                          const formData = new FormData(event.currentTarget);
+                          await submitConfigChange(entry.key, formData.get("value"));
+                        },
+                      },
+                      React.createElement("input", {
+                        name: "value",
+                        defaultValue: String(entry.value),
+                        className: "config-input",
+                        disabled: isSending || !isEmbeddingReady,
+                      }),
+                      React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
+                    )
+                    : React.createElement("strong", null, String(entry.value))
+                ))
+              )),
+              React.createElement("p", { className: "config-help" }, panelData.configView.help)
+            )
+            : Array.isArray(panelData.content)
+              ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
+              : typeof panelData.content === "object" && panelData.content !== null
+                ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
+                  "div",
+                  { key, className: "info-row" },
+                  React.createElement("span", null, key),
+                  React.createElement("strong", null, typeof value === "object" ? JSON.stringify(value) : String(value))
+                ))
+                : React.createElement("p", null, String(panelData.content || "No data available."))
         )
         : null,
       !isEmbeddingReady && !isLoadingStatus
@@ -390,9 +475,15 @@ function App() {
     React.createElement(
       "form",
       { className: "composer", onSubmit: sendPrompt },
-      React.createElement("input", {
+      React.createElement("textarea", {
+        ref: composerInputRef,
         value: inputValue,
-        onChange: (event) => setInputValue(event.target.value),
+        onChange: (event) => {
+          setInputValue(event.target.value);
+          resizeComposerInput(event.target);
+        },
+        onInput: (event) => resizeComposerInput(event.target),
+        rows: 1,
         placeholder: "Ask anything about your knowledge base...",
         disabled: isSending,
       }),
@@ -406,16 +497,15 @@ function App() {
     React.createElement(
       "div",
       { className: "composer-meta" },
-      React.createElement("span", null, "Quick command:"),
       React.createElement(
         "button",
-        { type: "button", onClick: () => sendRawPrompt("/help"), disabled: isSending || !isEmbeddingReady },
-        "/help"
-      ),
-      React.createElement(
-        "button",
-        { type: "button", onClick: () => sendRawPrompt("?"), disabled: isSending || !isEmbeddingReady },
-        "?"
+        {
+          type: "button",
+          className: "quick-help-link",
+          onClick: () => sendRawPrompt("/help"),
+          disabled: isSending || !isEmbeddingReady,
+        },
+        "Quick help"
       )
     )
   );
