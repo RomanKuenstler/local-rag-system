@@ -76,6 +76,7 @@ function App() {
               role: "assistant",
               text: "How can I help you today?",
               evidenceSeverity: null,
+              responseType: null,
             }));
             setHasShownReadyGreeting(true);
           }
@@ -113,9 +114,8 @@ function App() {
     };
   }, [hasShownReadyGreeting]);
 
-  async function sendPrompt(event) {
-    event.preventDefault();
-    const prompt = inputValue.trim();
+  async function sendRawPrompt(rawPrompt) {
+    const prompt = String(rawPrompt || "").trim();
     if (!prompt || isSending) return;
 
     setMessages((prev) => prev.concat({
@@ -123,6 +123,7 @@ function App() {
       role: "user",
       text: prompt,
       evidenceSeverity: null,
+      responseType: null,
     }));
     setInputValue("");
 
@@ -132,6 +133,7 @@ function App() {
         role: "assistant",
         text: "Embedding is still running. Please wait until indexing is finished before sending prompts.",
         evidenceSeverity: "warn",
+        responseType: null,
       }));
       return;
     }
@@ -152,7 +154,8 @@ function App() {
         id: crypto.randomUUID(),
         role: "assistant",
         text: payload.answer || "",
-        evidenceSeverity: payload.evidenceSeverity || "unknown",
+        evidenceSeverity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
       }));
     } catch (error) {
       setMessages((prev) => prev.concat({
@@ -160,11 +163,17 @@ function App() {
         role: "assistant",
         text: `Error: ${error.message}`,
         evidenceSeverity: "error",
+        responseType: null,
       }));
     } finally {
       setIsSending(false);
       await refreshStatus();
     }
+  }
+
+  async function sendPrompt(event) {
+    event.preventDefault();
+    await sendRawPrompt(inputValue);
   }
 
   return React.createElement(
@@ -178,6 +187,25 @@ function App() {
         { className: "brand" },
         React.createElement("h1", null, "local RAG"),
         React.createElement("small", null, "Private document assistant")
+      ),
+      React.createElement(
+        "div",
+        { className: "quick-actions" },
+        React.createElement(
+          "button",
+          { type: "button", onClick: () => sendRawPrompt("/info"), disabled: isSending || !isEmbeddingReady },
+          "Info"
+        ),
+        React.createElement(
+          "button",
+          { type: "button", onClick: () => sendRawPrompt("/config"), disabled: isSending || !isEmbeddingReady },
+          "Config"
+        ),
+        React.createElement(
+          "button",
+          { type: "button", onClick: () => sendRawPrompt("/lib"), disabled: isSending || !isEmbeddingReady },
+          "Library"
+        )
       )
     ),
     React.createElement(
@@ -222,8 +250,29 @@ function App() {
             )
             : null
         ),
-        React.createElement("p", null, message.text)
+        message.responseType
+          ? React.createElement(
+            "div",
+            { className: `msg-command ${message.responseType}` },
+            React.createElement("pre", null, message.text)
+          )
+          : React.createElement("p", null, message.text)
       ))
+    ),
+    React.createElement(
+      "div",
+      { className: "composer-meta" },
+      React.createElement("span", null, "Quick command:"),
+      React.createElement(
+        "button",
+        { type: "button", onClick: () => sendRawPrompt("/help"), disabled: isSending || !isEmbeddingReady },
+        "/help"
+      ),
+      React.createElement(
+        "button",
+        { type: "button", onClick: () => sendRawPrompt("?"), disabled: isSending || !isEmbeddingReady },
+        "?"
+      )
     ),
     React.createElement(
       "form",
