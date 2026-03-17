@@ -17,9 +17,7 @@ function formatSeverityLabel(severity) {
 
 function formatSystemStatus(statusData, filesData) {
   const readiness = statusData?.embedding?.readiness;
-  const fileSummary = filesData
-    ? `${filesData.embeddedFiles}/${filesData.totalFiles} embedded`
-    : "n/a";
+  const fileSummary = filesData ? `${filesData.embeddedFiles}/${filesData.totalFiles} embedded` : "n/a";
 
   return [
     { label: "Retriever", value: statusData?.app?.role || "unknown", color: "ok" },
@@ -33,6 +31,76 @@ function formatSystemStatus(statusData, filesData) {
   ];
 }
 
+function parseAssistantModeContent(text) {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const modes = [];
+  let currentMode = null;
+
+  for (const line of lines) {
+    if (line.startsWith("- ")) {
+      const body = line.slice(2);
+      const colonIndex = body.indexOf(":");
+      if (colonIndex > -1) {
+        modes.push({
+          id: body.slice(0, colonIndex).trim(),
+          description: body.slice(colonIndex + 1).trim(),
+        });
+      }
+      continue;
+    }
+
+    if (line.toLowerCase().startsWith("current mode:")) {
+      currentMode = line.slice("current mode:".length).trim();
+    }
+  }
+
+  return { modes, currentMode };
+}
+
+function parseSystemInfoContent(text) {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => line.startsWith("- "));
+
+  const entries = lines.map((line) => {
+    const body = line.slice(2);
+    const idx = body.indexOf(":");
+    if (idx === -1) return { key: body, value: "" };
+    return {
+      key: body.slice(0, idx).trim(),
+      value: body.slice(idx + 1).trim(),
+    };
+  });
+
+  const groups = [
+    {
+      title: "App",
+      keys: ["app", "ui mode", "assistant mode", "profile"],
+    },
+    {
+      title: "Models",
+      keys: ["chat model", "embedding model"],
+    },
+    {
+      title: "Storage",
+      keys: ["vector db", "collection", "content path", "embeddable extensions", "chat history dir"],
+    },
+  ];
+
+  return groups
+    .map((group) => ({
+      ...group,
+      items: entries.filter((entry) => group.keys.includes(entry.key.toLowerCase())),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -42,11 +110,13 @@ function App() {
   const [filesData, setFilesData] = useState(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
+  const [openDropdown, setOpenDropdown] = useState(null);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const statusBadges = useMemo(() => formatSystemStatus(statusData, filesData), [statusData, filesData]);
@@ -96,7 +166,6 @@ function App() {
   useEffect(() => {
     async function poll() {
       await refreshStatus();
-
       const delay = previousEmbeddingReadyRef.current ? 8000 : 2000;
       pollTimeoutRef.current = window.setTimeout(poll, delay);
     }
@@ -104,9 +173,7 @@ function App() {
     poll();
 
     return () => {
-      if (pollTimeoutRef.current) {
-        clearTimeout(pollTimeoutRef.current);
-      }
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
   }, [hasShownReadyGreeting]);
 
@@ -115,6 +182,23 @@ function App() {
       lastMessageRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
     }
   }, [messages]);
+
+  useEffect(() => {
+    if (composerInputRef.current) {
+      resizeComposerInput(composerInputRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    function closeDropdownOnOutside(event) {
+      if (!dropdownRef.current?.contains(event.target)) {
+        setOpenDropdown(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeDropdownOnOutside);
+    return () => document.removeEventListener("pointerdown", closeDropdownOnOutside);
+  }, []);
 
   function parsePanelText(text) {
     if (!text) return null;
@@ -134,8 +218,15 @@ function App() {
 
   function resizeComposerInput(element) {
     if (!element) return;
+    const computed = window.getComputedStyle(element);
+    const lineHeight = Number.parseFloat(computed.lineHeight) || 22;
+    const padTop = Number.parseFloat(computed.paddingTop) || 0;
+    const padBottom = Number.parseFloat(computed.paddingBottom) || 0;
+    const minHeight = Math.ceil(lineHeight + padTop + padBottom);
+
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, 192)}px`;
+    const nextHeight = Math.min(Math.max(element.scrollHeight, minHeight), 192);
+    element.style.height = `${nextHeight}px`;
   }
 
   async function sendRawPrompt(rawPrompt) {
@@ -152,6 +243,7 @@ function App() {
         responseType: null,
       }));
     }
+
     setInputValue("");
     if (composerInputRef.current) {
       composerInputRef.current.style.height = "";
@@ -188,13 +280,14 @@ function App() {
           title: payload.responseType || prompt,
           content: parsePanelText(payload.answer || ""),
           severity: payload.evidenceSeverity || null,
-          configView: payload.configView || null,
+          responseType: payload.responseType || null,
+          configView: payload.webConfigView || null,
         });
       } else {
         setMessages((prev) => prev.concat({
           id: crypto.randomUUID(),
           role: "assistant",
-          text: payload.answer || "",
+          text: payload.answer || "No answer generated.",
           evidenceSeverity: payload.evidenceSeverity || null,
           responseType: payload.responseType || null,
         }));
@@ -219,10 +312,14 @@ function App() {
   }
 
   async function setAssistantMode(modeId) {
+    if (!modeId) return;
+    setOpenDropdown(null);
     await sendRawPrompt(`/assistant ${modeId}`);
   }
 
   async function setProfile(profileId) {
+    if (!profileId) return;
+    setOpenDropdown(null);
     await sendRawPrompt(`/profile ${profileId}`);
   }
 
@@ -249,6 +346,52 @@ function App() {
           : panelData?.command === "/help" || panelData?.command === "?"
             ? "Quick Help"
             : "Details";
+
+  const parsedAssistantPanel = panelData?.command === "/assistant"
+    ? parseAssistantModeContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+    : null;
+  const parsedInfoGroups = panelData?.command === "/info"
+    ? parseSystemInfoContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+    : [];
+
+  const renderStatusDropdown = (id, label, value, options, onPick) => React.createElement(
+    "div",
+    { className: "status-chip ok status-chip-dropdown", ref: openDropdown === id ? dropdownRef : null },
+    React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        className: "status-chip-trigger",
+        disabled: isSending || !isEmbeddingReady,
+        onClick: () => setOpenDropdown((current) => (current === id ? null : id)),
+      },
+      React.createElement("span", { className: "status-label" }, label),
+      React.createElement(
+        "span",
+        { className: "status-value" },
+        options.find((item) => item.id === value)?.label || value || "unknown"
+      ),
+      React.createElement("span", { className: "status-chevron", "aria-hidden": "true" }, "▾")
+    ),
+    openDropdown === id
+      ? React.createElement(
+        "div",
+        { className: "status-dropdown" },
+        ...options.map((item) => React.createElement(
+          "button",
+          {
+            key: item.id,
+            type: "button",
+            className: `status-dropdown-item ${item.id === value ? "active" : ""}`,
+            onClick: () => onPick(item.id),
+          },
+          React.createElement("strong", null, item.label || item.id),
+          item.description ? React.createElement("small", null, item.description) : null
+        ))
+      )
+      : null
+  );
 
   return React.createElement(
     "div",
@@ -293,219 +436,209 @@ function App() {
       )
     ),
     React.createElement(
-      "section",
-      { className: "status-strip" },
-      ...statusBadges.map((badge) => React.createElement(
-        "div",
-        { key: badge.label, className: `status-chip ${badge.color}`, title: badge.title || "" },
-        React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
-        React.createElement(
-          "div",
-          { className: "status-meta" },
-          React.createElement("span", { className: "status-label" }, badge.label),
-          React.createElement("strong", { className: "status-value" }, badge.value)
-        )
-      )),
+      "div",
+      { className: "workspace" },
       React.createElement(
-        "div",
-        { className: "status-chip ok" },
-        React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
+        "section",
+        { className: "chat-column" },
         React.createElement(
-          "div",
-          { className: "status-meta" },
-          React.createElement("span", { className: "status-label" }, "Mode"),
-          React.createElement("strong", { className: "status-value" }, statusData?.app?.uiMode || "webui")
-        )
-      ),
-      React.createElement(
-        "label",
-        { className: "status-chip ok status-chip-dropdown" },
-        React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
-        React.createElement(
-          "div",
-          { className: "status-meta" },
-          React.createElement("span", { className: "status-label" }, "Assistant mode"),
-          React.createElement(
-            "div",
-            { className: "status-select-wrap" },
-            React.createElement(
-              "select",
-              {
-                className: "status-chip-select",
-                value: statusData?.assistant?.mode || "",
-                onChange: (event) => setAssistantMode(event.target.value),
-                disabled: isSending || !isEmbeddingReady,
-              },
-              ...availableModes.map((mode) => React.createElement("option", { key: mode.id, value: mode.id }, mode.label || mode.id))
-            ),
-            React.createElement("span", { className: "status-chevron", "aria-hidden": "true" }, "▾")
-          )
-        )
-      ),
-      React.createElement(
-        "label",
-        { className: "status-chip ok status-chip-dropdown" },
-        React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
-        React.createElement(
-          "div",
-          { className: "status-meta" },
-          React.createElement("span", { className: "status-label" }, "Profile"),
-          React.createElement(
-            "div",
-            { className: "status-select-wrap" },
-            React.createElement(
-              "select",
-              {
-                className: "status-chip-select",
-                value: statusData?.assistant?.profile || "",
-                onChange: (event) => setProfile(event.target.value),
-                disabled: isSending || !isEmbeddingReady,
-              },
-              ...availableProfiles.map((profile) => React.createElement("option", { key: profile.id, value: profile.id }, profile.label || profile.id))
-            ),
-            React.createElement("span", { className: "status-chevron", "aria-hidden": "true" }, "▾")
-          )
-        )
-      )
-    ),
-    React.createElement(
-      "section",
-      { className: "chat" },
-      panelData
-        ? React.createElement(
-          "aside",
-          { className: "info-panel", key: panelData.id },
-          React.createElement(
-            "div",
-            { className: "info-panel-head" },
-            React.createElement("strong", null, panelTitle),
-            panelData.severity
-              ? React.createElement(
-                "small",
-                { className: `evidence-pill ${panelData.severity}` },
-                formatSeverityLabel(panelData.severity)
-              )
-              : null
-          ),
-          panelData.command === "/config" && panelData.configView
+          "section",
+          { className: "chat" },
+          panelData
+            ? React.createElement(
+              "aside",
+              { className: "info-panel", key: panelData.id },
+              React.createElement(
+                "div",
+                { className: "info-panel-head" },
+                React.createElement("strong", null, panelTitle),
+                panelData.severity
+                  ? React.createElement(
+                    "small",
+                    { className: `evidence-pill ${panelData.severity}` },
+                    formatSeverityLabel(panelData.severity)
+                  )
+                  : null
+              ),
+              panelData.command === "/config" && panelData.configView
+                ? React.createElement(
+                  "div",
+                  { className: "config-sections" },
+                  ...panelData.configView.sections.map((section) => React.createElement(
+                    "div",
+                    { key: section.id, className: "config-section" },
+                    React.createElement("h4", null, section.label),
+                    ...section.entries.map((entry) => React.createElement(
+                      "div",
+                      { key: `${section.id}-${entry.key}`, className: "info-row" },
+                      React.createElement("span", null, entry.key),
+                      entry.editable
+                        ? React.createElement(
+                          "form",
+                          {
+                            className: "config-edit-form",
+                            onSubmit: async (event) => {
+                              event.preventDefault();
+                              const formData = new FormData(event.currentTarget);
+                              await submitConfigChange(entry.key, formData.get("value"));
+                            },
+                          },
+                          React.createElement("input", {
+                            name: "value",
+                            defaultValue: String(entry.value),
+                            className: "config-input",
+                            disabled: isSending || !isEmbeddingReady,
+                          }),
+                          React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
+                        )
+                        : React.createElement("strong", null, String(entry.value))
+                    ))
+                  )),
+                  React.createElement("p", { className: "config-help" }, panelData.configView.help)
+                )
+                : panelData.command === "/info"
+                  ? React.createElement(
+                    "div",
+                    { className: "info-groups" },
+                    ...parsedInfoGroups.map((group) => React.createElement(
+                      "section",
+                      { key: group.title, className: "info-group-card" },
+                      React.createElement("h4", null, group.title),
+                      ...group.items.map((item) => React.createElement(
+                        "div",
+                        { key: `${group.title}-${item.key}`, className: "info-row" },
+                        React.createElement("span", null, item.key),
+                        React.createElement("strong", null, item.value)
+                      ))
+                    ))
+                  )
+                  : panelData.command === "/assistant" && parsedAssistantPanel
+                    ? React.createElement(
+                      "div",
+                      { className: "assistant-mode-grid" },
+                      parsedAssistantPanel.currentMode
+                        ? React.createElement("div", { className: "assistant-current" }, `Current mode: ${parsedAssistantPanel.currentMode}`)
+                        : null,
+                      ...parsedAssistantPanel.modes.map((mode) => React.createElement(
+                        "article",
+                        { key: mode.id, className: `assistant-mode-card ${mode.id === parsedAssistantPanel.currentMode ? "active" : ""}` },
+                        React.createElement("strong", null, mode.id),
+                        React.createElement("p", null, mode.description)
+                      ))
+                    )
+                    : Array.isArray(panelData.content)
+                      ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
+                      : typeof panelData.content === "object" && panelData.content !== null
+                        ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
+                          "div",
+                          { key, className: "info-row" },
+                          React.createElement("span", null, key),
+                          React.createElement("strong", null, typeof value === "object" ? JSON.stringify(value) : String(value))
+                        ))
+                        : React.createElement("p", null, String(panelData.content || "No data available."))
+            )
+            : null,
+          !isEmbeddingReady && !isLoadingStatus
             ? React.createElement(
               "div",
-              { className: "config-sections" },
-              ...panelData.configView.sections.map((section) => React.createElement(
-                "div",
-                { key: section.id, className: "config-section" },
-                React.createElement("h4", null, section.label),
-                ...section.entries.map((entry) => React.createElement(
-                  "div",
-                  { key: `${section.id}-${entry.key}`, className: "info-row" },
-                  React.createElement("span", null, entry.key),
-                  entry.editable
-                    ? React.createElement(
-                      "form",
-                      {
-                        className: "config-edit-form",
-                        onSubmit: async (event) => {
-                          event.preventDefault();
-                          const formData = new FormData(event.currentTarget);
-                          await submitConfigChange(entry.key, formData.get("value"));
-                        },
-                      },
-                      React.createElement("input", {
-                        name: "value",
-                        defaultValue: String(entry.value),
-                        className: "config-input",
-                        disabled: isSending || !isEmbeddingReady,
-                      }),
-                      React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
-                    )
-                    : React.createElement("strong", null, String(entry.value))
-                ))
-              )),
-              React.createElement("p", { className: "config-help" }, panelData.configView.help)
+              { className: "embedding-loading" },
+              React.createElement("span", { className: "spinner", "aria-hidden": "true" }),
+              React.createElement("strong", null, "Embedding in progress"),
+              React.createElement("p", null, "Your documents are being indexed. You can type a prompt, and I’ll remind you to wait until indexing completes.")
             )
-            : Array.isArray(panelData.content)
-              ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
-              : typeof panelData.content === "object" && panelData.content !== null
-                ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
-                  "div",
-                  { key, className: "info-row" },
-                  React.createElement("span", null, key),
-                  React.createElement("strong", null, typeof value === "object" ? JSON.stringify(value) : String(value))
-                ))
-                : React.createElement("p", null, String(panelData.content || "No data available."))
-        )
-        : null,
-      !isEmbeddingReady && !isLoadingStatus
-        ? React.createElement(
-          "div",
-          { className: "embedding-loading" },
-          React.createElement("span", { className: "spinner", "aria-hidden": "true" }),
-          React.createElement("strong", null, "Embedding in progress"),
-          React.createElement("p", null, "Your documents are being indexed. You can type a prompt, and I’ll remind you to wait until indexing completes.")
-        )
-        : null,
-      ...messages.map((message, index) => React.createElement(
-        "article",
-        {
-          key: message.id,
-          className: `msg ${message.role}`,
-          ref: index === messages.length - 1 ? lastMessageRef : null,
-        },
+            : null,
+          ...messages.map((message, index) => React.createElement(
+            "article",
+            {
+              key: message.id,
+              className: `msg ${message.role}`,
+              ref: index === messages.length - 1 ? lastMessageRef : null,
+            },
+            React.createElement(
+              "div",
+              { className: "msg-header" },
+              React.createElement("span", null, message.role === "user" ? "You" : "Assistant"),
+              message.evidenceSeverity
+                ? React.createElement(
+                  "small",
+                  { className: `evidence-pill ${message.evidenceSeverity}` },
+                  `evidence: ${formatSeverityLabel(message.evidenceSeverity)}`
+                )
+                : null
+            ),
+            message.responseType
+              ? React.createElement(
+                "div",
+                { className: `msg-command ${message.responseType}` },
+                React.createElement("pre", null, message.text)
+              )
+              : React.createElement("p", null, message.text)
+          ))
+        ),
+        React.createElement(
+          "form",
+          { className: "composer", onSubmit: sendPrompt },
+          React.createElement("textarea", {
+            ref: composerInputRef,
+            value: inputValue,
+            onChange: (event) => {
+              setInputValue(event.target.value);
+              resizeComposerInput(event.target);
+            },
+            onInput: (event) => resizeComposerInput(event.target),
+            rows: 1,
+            placeholder: "Ask anything about your knowledge base...",
+            disabled: isSending,
+          }),
+          React.createElement(
+            "button",
+            { className: "send", type: "submit", disabled: isSending || !inputValue.trim() },
+            icon("M12 4l7 7h-4v9h-6v-9H5z"),
+            React.createElement("span", null, isSending ? "Sending..." : "Send")
+          )
+        ),
         React.createElement(
           "div",
-          { className: "msg-header" },
-          React.createElement("span", null, message.role === "user" ? "You" : "Assistant"),
-          message.evidenceSeverity
-            ? React.createElement(
-              "small",
-              { className: `evidence-pill ${message.evidenceSeverity}` },
-              `evidence: ${formatSeverityLabel(message.evidenceSeverity)}`
-            )
-            : null
-        ),
-        message.responseType
-          ? React.createElement(
-            "div",
-            { className: `msg-command ${message.responseType}` },
-            React.createElement("pre", null, message.text)
+          { className: "composer-meta" },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              className: "quick-help-link",
+              onClick: () => sendRawPrompt("/help"),
+              disabled: isSending || !isEmbeddingReady,
+            },
+            "Quick help"
           )
-          : React.createElement("p", null, message.text)
-      ))
-    ),
-    React.createElement(
-      "form",
-      { className: "composer", onSubmit: sendPrompt },
-      React.createElement("textarea", {
-        ref: composerInputRef,
-        value: inputValue,
-        onChange: (event) => {
-          setInputValue(event.target.value);
-          resizeComposerInput(event.target);
-        },
-        onInput: (event) => resizeComposerInput(event.target),
-        rows: 1,
-        placeholder: "Ask anything about your knowledge base...",
-        disabled: isSending,
-      }),
+        )
+      ),
       React.createElement(
-        "button",
-        { className: "send", type: "submit", disabled: isSending || !inputValue.trim() },
-        icon("M12 4l7 7h-4v9h-6v-9H5z"),
-        React.createElement("span", null, isSending ? "Sending..." : "Send")
-      )
-    ),
-    React.createElement(
-      "div",
-      { className: "composer-meta" },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "quick-help-link",
-          onClick: () => sendRawPrompt("/help"),
-          disabled: isSending || !isEmbeddingReady,
-        },
-        "Quick help"
+        "aside",
+        { className: "status-rail" },
+        ...statusBadges.map((badge) => React.createElement(
+          "div",
+          { key: badge.label, className: `status-chip ${badge.color}`, title: badge.title || "" },
+          React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
+          React.createElement(
+            "div",
+            { className: "status-meta" },
+            React.createElement("span", { className: "status-label" }, badge.label),
+            React.createElement("strong", { className: "status-value" }, badge.value)
+          )
+        )),
+        React.createElement(
+          "div",
+          { className: "status-chip ok" },
+          React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
+          React.createElement(
+            "div",
+            { className: "status-meta" },
+            React.createElement("span", { className: "status-label" }, "Mode"),
+            React.createElement("strong", { className: "status-value" }, statusData?.app?.uiMode || "webui")
+          )
+        ),
+        renderStatusDropdown("assistant", "Assistant mode", statusData?.assistant?.mode || "", availableModes, setAssistantMode),
+        renderStatusDropdown("profile", "Profile", statusData?.assistant?.profile || "", availableProfiles, setProfile)
       )
     )
   );
