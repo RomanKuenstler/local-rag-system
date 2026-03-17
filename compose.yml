@@ -21,12 +21,13 @@ services:
       INDEX_STATE_FILE: /app/state/.index-state.json
       EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       CHAT_HISTORY_DIR: /app/state/chat-history
+      RETRIEVER_API_PORT: 3000
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
       - rag_state:/app/state
-    stdin_open: true
-    tty: true
+    ports:
+      - "3000:3000"
     configs:
       - source: guardrails.md
         target: /app/guardrails.md
@@ -45,6 +46,7 @@ services:
           initial_sync: true
           ignore:
             - node_modules/
+    command: ["npm", "run", "start:retriever:api"]
     depends_on:
       - qdrant
       - embedder
@@ -80,6 +82,16 @@ services:
             - node_modules/
     depends_on:
       - qdrant
+
+
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - retriever
 
   qdrant:
     image: qdrant/qdrant
