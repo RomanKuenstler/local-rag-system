@@ -50,6 +50,7 @@ import {
   readEmbeddableFiles,
   readEmbeddingStatus,
 } from "./src/embedding-service.js";
+import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
 
 validateRetrievalConfig();
 
@@ -78,6 +79,12 @@ const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
 const sessionMemory = new Map();
 const pendingWeakAnswers = new Map();
+const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
+  historyMessages: HISTORY_MESSAGES,
+  maxSimilarities: MAX_SIMILARITIES,
+  minSimilarities: MIN_SIMILARITIES,
+  cosineLimit: COSINE_LIMIT,
+});
 
 function stripAnsi(text) {
   return String(text || "").replace(/\u001b\[[0-9;]*m/g, "");
@@ -95,7 +102,7 @@ function appendHistory(sessionId, role, content) {
   const history = getSessionHistory(sessionId);
   history.push([role, content]);
 
-  const maxHistoryEntries = HISTORY_MESSAGES * 2;
+  const maxHistoryEntries = runtimeConfig.historyMessages * 2;
   if (history.length > maxHistoryEntries) {
     history.splice(0, history.length - maxHistoryEntries);
   }
@@ -106,6 +113,47 @@ function normalizePrompt(input) {
 }
 
 
+
+
+function buildWebConfigView() {
+  return {
+    sections: [
+      {
+        id: "retrieval",
+        label: "Retrieval",
+        entries: [
+          { key: "history messages", value: runtimeConfig.historyMessages, editable: true },
+          { key: "max similarities", value: runtimeConfig.maxSimilarities, editable: true },
+          { key: "min similarities", value: runtimeConfig.minSimilarities, editable: true },
+          { key: "cosine limit", value: runtimeConfig.cosineLimit, editable: true },
+        ],
+      },
+      {
+        id: "chunking",
+        label: "Chunking / Indexing",
+        entries: [
+          { key: "chunk size", value: CHUNK_SIZE, editable: false },
+          { key: "chunk overlap", value: CHUNK_OVERLAP, editable: false },
+          { key: "max embedding chars", value: MAX_EMBEDDING_CHARS, editable: false },
+          { key: "pdf min extracted chars", value: PDF_MIN_EXTRACTED_CHARS, editable: false },
+          { key: "index schema version", value: INDEX_SCHEMA_VERSION, editable: false },
+          { key: "index state file", value: INDEX_STATE_FILE, editable: false },
+          { key: "chat history dir", value: CHAT_HISTORY_DIR, editable: false },
+        ],
+      },
+      {
+        id: "generation",
+        label: "Generation",
+        entries: [
+          { key: "temperature", value: process.env.OPTION_TEMPERATURE || "0.0", editable: false },
+          { key: "top_p", value: process.env.OPTION_TOP_P || "0.5", editable: false },
+          { key: "presence penalty", value: process.env.OPTION_PRESENCE_PENALTY || "2.2", editable: false },
+        ],
+      },
+    ],
+    help: "Only runtime-changeable entries can be edited without restarting services.",
+  };
+}
 
 async function buildLibraryInfoMessage() {
   const files = await readEmbeddableFiles();
@@ -345,10 +393,10 @@ function handlePromptCommand(prompt, sessionId) {
       payload: {
         sessionId,
         answer: stripAnsi(buildActiveConfigMessage({
-          historyMessages: HISTORY_MESSAGES,
-          maxSimilarities: MAX_SIMILARITIES,
-          minSimilarities: MIN_SIMILARITIES,
-          cosineLimit: COSINE_LIMIT,
+          historyMessages: runtimeConfig.historyMessages,
+          maxSimilarities: runtimeConfig.maxSimilarities,
+          minSimilarities: runtimeConfig.minSimilarities,
+          cosineLimit: runtimeConfig.cosineLimit,
         }, {
           chunkSize: CHUNK_SIZE,
           chunkOverlap: CHUNK_OVERLAP,
@@ -363,17 +411,35 @@ function handlePromptCommand(prompt, sessionId) {
         })),
         evidenceSeverity: null,
         responseType: "active_config",
+        configView: buildWebConfigView(),
       },
     };
   }
 
   if (normalizedPrompt.startsWith("/config set ")) {
+    const parsed = parseConfigSetCommand(prompt);
+    if (!parsed) {
+      return {
+        statusCode: 400,
+        payload: {
+          sessionId,
+          error: "Invalid config set format",
+          answer: "Invalid format. Use: /config set <name> <value> or /config set '<name>'=<value>",
+          evidenceSeverity: "warn",
+        },
+      };
+    }
+
+    const update = setRuntimeConfigValue(parsed.configName, parsed.rawValue);
+
     return {
-      statusCode: 200,
+      statusCode: update.ok ? 200 : 400,
       payload: {
         sessionId,
-        answer: "In web UI, /config set is not implemented yet. Use /config to view active configuration.",
-        evidenceSeverity: "warn",
+        answer: update.message,
+        evidenceSeverity: update.ok ? "ok" : "warn",
+        responseType: "active_config",
+        configView: buildWebConfigView(),
       },
     };
   }
@@ -385,13 +451,13 @@ async function searchKnowledgeBase(prompt) {
   const userQuestionEmbedding = await embeddingsModel.embedQuery(prompt);
   const results = await qdrant.search(COLLECTION_NAME, {
     vector: userQuestionEmbedding,
-    limit: MAX_SIMILARITIES,
+    limit: runtimeConfig.maxSimilarities,
     with_payload: true,
   });
 
-  const filteredResults = results.filter((result) => result.score >= COSINE_LIMIT);
-  const hasSufficientEvidence = filteredResults.length >= MIN_SIMILARITIES;
-  const evidenceQuality = getEvidenceQuality(filteredResults, MIN_SIMILARITIES);
+  const filteredResults = results.filter((result) => result.score >= runtimeConfig.cosineLimit);
+  const hasSufficientEvidence = filteredResults.length >= runtimeConfig.minSimilarities;
+  const evidenceQuality = getEvidenceQuality(filteredResults, runtimeConfig.minSimilarities);
 
   return {
     results: filteredResults,
@@ -558,8 +624,8 @@ async function handlePrompt(req, res) {
         pending: true,
       },
       retrieval: createSimilarityDetails(searchResult.results, {
-        maxSimilarities: MAX_SIMILARITIES,
-        cosineLimit: COSINE_LIMIT,
+        maxSimilarities: runtimeConfig.maxSimilarities,
+        cosineLimit: runtimeConfig.cosineLimit,
       }),
     });
     return;
@@ -574,8 +640,8 @@ async function handlePrompt(req, res) {
     evidenceSeverity: searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     retrieval: createSimilarityDetails(searchResult.results, {
-      maxSimilarities: MAX_SIMILARITIES,
-      cosineLimit: COSINE_LIMIT,
+      maxSimilarities: runtimeConfig.maxSimilarities,
+      cosineLimit: runtimeConfig.cosineLimit,
     }),
   });
 }
@@ -589,6 +655,7 @@ async function handleStatus(_req, res) {
       name: APP_NAME,
       version: APP_VERSION,
       role: "retriever-api",
+      uiMode: "webui",
     },
     assistant: {
       mode: assistantMode,
@@ -599,9 +666,9 @@ async function handleStatus(_req, res) {
     retrieval: {
       collection: COLLECTION_NAME,
       qdrantUrl: QDRANT_URL,
-      maxSimilarities: MAX_SIMILARITIES,
-      minSimilarities: MIN_SIMILARITIES,
-      cosineLimit: COSINE_LIMIT,
+      maxSimilarities: runtimeConfig.maxSimilarities,
+      minSimilarities: runtimeConfig.minSimilarities,
+      cosineLimit: runtimeConfig.cosineLimit,
     },
     embedding: {
       readiness,
