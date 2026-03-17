@@ -244,7 +244,7 @@ async function extractTextFromPdf(filePath) {
   return pageSections.join("\n\n").trim();
 }
 
-function extractIndexableTextByExtension(rawContent, extension) {
+export function extractIndexableTextByExtension(rawContent, extension) {
   if (!rawContent) {
     return "";
   }
@@ -254,6 +254,10 @@ function extractIndexableTextByExtension(rawContent, extension) {
   }
 
   return rawContent;
+}
+
+export function normalizeIndexableTextByExtension(rawContent, extension) {
+  return normalizeTextForIndexing(extractIndexableTextByExtension(rawContent, extension));
 }
 
 function buildIndexRelevantHash(content) {

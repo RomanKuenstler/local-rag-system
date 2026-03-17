@@ -48,6 +48,7 @@ import {
   getEvidenceQuality,
 } from "./src/messages.js";
 import { createEmbeddingsModel, createQdrantClient, fileToChunks, readEmbeddableFiles } from "./src/embedding-service.js";
+import { normalizeIndexableTextByExtension } from "./src/document-processing.js";
 
 function colorEvidenceQuality(q) {
   if (q === "strong") return chalk.green(q);
@@ -113,7 +114,7 @@ const DEFAULT_SESSION_ID = "default-session-id";
 const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
 const UPLOAD_PATH = path.resolve(process.cwd(), "upload");
-const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt"]);
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm"]);
 
 function ensureUploadDirectory() {
   fs.mkdirSync(UPLOAD_PATH, { recursive: true });
@@ -137,7 +138,14 @@ function consumeUploadFiles() {
       continue;
     }
 
-    const content = fs.readFileSync(fullPath, "utf8");
+    const rawContent = fs.readFileSync(fullPath, "utf8");
+    const content = normalizeIndexableTextByExtension(rawContent, extension);
+
+    if (!content) {
+      skippedFiles.push(file.name);
+      continue;
+    }
+
     uploadedFiles.push({
       name: file.name,
       content,
@@ -501,7 +509,7 @@ while (!exit) {
     if (uploadedFiles.length === 0) {
       const reason =
         skippedFiles.length > 0
-          ? `Found unsupported file types in ./upload (${skippedFiles.join(", ")}). Only .md and .txt are allowed.`
+          ? `Found unsupported or empty file types in ./upload (${skippedFiles.join(", ")}). Only .md, .txt, .html, and .htm with indexable text are allowed.`
           : "No files found in ./upload.";
 
       ui.printAssistantMessage(`Nothing was uploaded. ${reason}`);
