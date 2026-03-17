@@ -251,6 +251,10 @@ async function handleStatus(_req, res) {
       version: APP_VERSION,
       role: "retriever-api",
     },
+    assistant: {
+      mode: assistantMode,
+      profile: profileId,
+    },
     retrieval: {
       collection: COLLECTION_NAME,
       qdrantUrl: QDRANT_URL,
