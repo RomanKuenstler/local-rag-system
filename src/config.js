@@ -14,6 +14,9 @@ export const COSINE_LIMIT = parseFloat(process.env.COSINE_LIMIT || "0.45");
 export const INDEX_STATE_FILE =
   process.env.INDEX_STATE_FILE || path.resolve("./.index-state.json");
 
+export const EMBEDDING_STATUS_FILE =
+  process.env.EMBEDDING_STATUS_FILE || path.resolve("./.embedding-status.json");
+
 export const CHAT_HISTORY_DIR =
   process.env.CHAT_HISTORY_DIR || path.resolve("./chat-history");
 
@@ -32,7 +35,7 @@ export const PDF_MIN_EXTRACTED_CHARS = parseInt(
 );
 
 export const APP_NAME = "local RAG";
-export const APP_VERSION = "v1.0.1";
+export const APP_VERSION = "v1.0.2";
 
 export function validateRetrievalConfig() {
   if (!Number.isInteger(MAX_SIMILARITIES) || MAX_SIMILARITIES < 1) {

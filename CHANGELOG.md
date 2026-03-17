@@ -1,6 +1,8 @@
 # CHANGELOG
 
 ### Added
+- Added embedding readiness status tracking via a shared status file so retriever can determine whether indexing is complete.
+- Added `DOCUMENTATION.md` with the previous full project documentation content.
 - Added a dedicated RAG TUI mode with similarity insights in responses.
 - Added `/info` command for system details and then streamlined its output.
 - Added `/lib` command to display embedded files and surfaced embeddable extensions in `/info`.
@@ -14,6 +16,9 @@
 - Mapped `./upload` into the retriever container (`/app/upload`) so host-side files are immediately available to `/upload`.
 
 ### Changed
+- Retriever now blocks user prompts until embedder status is `ready`, with clear waiting/error guidance messages.
+- Updated `compose.yml` so `retriever` depends on `embedder` and both services share `EMBEDDING_STATUS_FILE`.
+- Split documentation: `README.md` is now concise, with detailed guidance moved to `DOCUMENTATION.md`.
 - Refined clean TUI layout, evidence rendering, and loading feedback.
 - Improved TUI viewport behavior and command output UX.
 - Fixed TUI sizing/display issues and replaced emoji-heavy output with cleaner symbols.
