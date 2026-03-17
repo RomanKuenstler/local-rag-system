@@ -19,6 +19,7 @@ services:
       OPTION_PRESENCE_PENALTY: 2.2
       CONTENT_PATH: /app/data
       INDEX_STATE_FILE: /app/state/.index-state.json
+      EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       CHAT_HISTORY_DIR: /app/state/chat-history
     volumes:
       - ./data:/app/data
@@ -46,6 +47,7 @@ services:
             - node_modules/
     depends_on:
       - qdrant
+      - embedder
 
   embedder:
     build:
@@ -55,6 +57,7 @@ services:
       APP_ROLE: embedder
       CONTENT_PATH: /app/data
       INDEX_STATE_FILE: /app/state/.index-state.json
+      EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       EMBED_INTERVAL_SECONDS: 15
       CHUNK_SIZE: 600
       CHUNK_OVERLAP: 100

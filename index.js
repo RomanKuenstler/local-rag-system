@@ -14,6 +14,7 @@ import {
   CONTENT_PATH,
   COSINE_LIMIT,
   EMBEDDABLE_EXTENSIONS,
+  EMBEDDING_STATUS_FILE,
   HISTORY_MESSAGES,
   INDEX_SCHEMA_VERSION,
   INDEX_STATE_FILE,
@@ -47,7 +48,13 @@ import {
   formatBytes,
   getEvidenceQuality,
 } from "./src/messages.js";
-import { createEmbeddingsModel, createQdrantClient, fileToChunks, readEmbeddableFiles } from "./src/embedding-service.js";
+import {
+  createEmbeddingsModel,
+  createQdrantClient,
+  fileToChunks,
+  readEmbeddableFiles,
+  readEmbeddingStatus,
+} from "./src/embedding-service.js";
 import { normalizeIndexableFileByExtension } from "./src/document-processing.js";
 
 function colorEvidenceQuality(q) {
@@ -216,6 +223,51 @@ async function buildLibraryInfoMessage() {
   return lines.join("\n");
 }
 
+
+
+function getEmbeddingReadiness() {
+  const embeddingStatus = readEmbeddingStatus();
+
+  if (!embeddingStatus) {
+    return {
+      ready: false,
+      message:
+        `Embedding is not finished yet. Waiting for embedder to write status at ${EMBEDDING_STATUS_FILE}. ` +
+        "Please try again shortly.",
+    };
+  }
+
+  if (embeddingStatus.status === "ready") {
+    return {
+      ready: true,
+      message: "Embedding is finished and the retriever is ready for prompts.",
+    };
+  }
+
+  if (embeddingStatus.status === "running") {
+    return {
+      ready: false,
+      message:
+        `Embedding is currently running (started at ${embeddingStatus.startedAt || "unknown"}). ` +
+        "Please wait until it is finished.",
+    };
+  }
+
+  if (embeddingStatus.status === "error") {
+    return {
+      ready: false,
+      message:
+        `Embedding last run failed: ${embeddingStatus.error || "unknown error"}. ` +
+        "Please check `docker compose logs -f embedder` and wait for a successful run.",
+    };
+  }
+
+  return {
+    ready: false,
+    message: `Embedding status is '${embeddingStatus.status}'. Please wait until it becomes 'ready'.`,
+  };
+}
+
 function addToHistory(sessionId, role, content) {
   const history = getConversationHistory(sessionId);
   history.push([role, content]);
@@ -287,6 +339,8 @@ validateRetrievalConfig();
 ui.renderLoadingScreen();
 ui.printAssistantMessage("Retriever service is ready.");
 ui.printAssistantMessage("Embedding runs in a separate embedder container.");
+const initialEmbeddingReadiness = getEmbeddingReadiness();
+ui.printAssistantMessage(initialEmbeddingReadiness.message);
 ui.printAssistantMessage("How can I help you today?");
 ensureUploadDirectory();
 ui.uiLog(`Chat history file: ${CHAT_HISTORY_FILE}`);
@@ -489,6 +543,12 @@ while (!exit) {
 
     const update = setRuntimeConfigValue(parsed.configName, parsed.rawValue);
     ui.printAssistantMessage(update.message);
+    continue;
+  }
+
+  const embeddingReadiness = getEmbeddingReadiness();
+  if (!embeddingReadiness.ready) {
+    ui.printAssistantMessage(embeddingReadiness.message);
     continue;
   }
 
