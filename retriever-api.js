@@ -7,7 +7,6 @@ import {
   COLLECTION_NAME,
   CONTENT_PATH,
   COSINE_LIMIT,
-  EMBEDDABLE_EXTENSIONS,
   HISTORY_MESSAGES,
   INDEX_STATE_FILE,
   MAX_SIMILARITIES,
@@ -158,6 +157,9 @@ function json(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(body);
 }
@@ -298,6 +300,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "OPTIONS") {
+      json(res, 200, { ok: true });
+      return;
+    }
 
     if (req.method === "GET" && url.pathname === "/api/status") {
       await handleStatus(req, res);

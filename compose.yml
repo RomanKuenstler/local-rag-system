@@ -83,6 +83,16 @@ services:
     depends_on:
       - qdrant
 
+
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - retriever
+
   qdrant:
     image: qdrant/qdrant
     container_name: qdrant
