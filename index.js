@@ -14,6 +14,7 @@ import {
   CONTENT_PATH,
   COSINE_LIMIT,
   EMBEDDABLE_EXTENSIONS,
+  EMBEDDING_STATUS_FILE,
   HISTORY_MESSAGES,
   INDEX_SCHEMA_VERSION,
   INDEX_STATE_FILE,
@@ -47,7 +48,14 @@ import {
   formatBytes,
   getEvidenceQuality,
 } from "./src/messages.js";
-import { createEmbeddingsModel, createQdrantClient, fileToChunks, readEmbeddableFiles } from "./src/embedding-service.js";
+import {
+  createEmbeddingsModel,
+  createQdrantClient,
+  fileToChunks,
+  readEmbeddableFiles,
+  readEmbeddingStatus,
+} from "./src/embedding-service.js";
+import { normalizeIndexableFileByExtension } from "./src/document-processing.js";
 
 function colorEvidenceQuality(q) {
   if (q === "strong") return chalk.green(q);
@@ -112,6 +120,61 @@ const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager(
 const DEFAULT_SESSION_ID = "default-session-id";
 const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
+const UPLOAD_PATH = path.resolve(process.cwd(), "upload");
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
+
+function ensureUploadDirectory() {
+  fs.mkdirSync(UPLOAD_PATH, { recursive: true });
+}
+
+async function consumeUploadFiles() {
+  ensureUploadDirectory();
+
+  const entries = fs.readdirSync(UPLOAD_PATH, { withFileTypes: true });
+  const files = entries.filter((entry) => entry.isFile());
+  const uploadedFiles = [];
+  const skippedFiles = [];
+  const retainedFiles = [];
+
+  for (const file of files) {
+    const extension = path.extname(file.name).toLowerCase();
+    const fullPath = path.join(UPLOAD_PATH, file.name);
+
+    if (!UPLOADABLE_EXTENSIONS.has(extension)) {
+      skippedFiles.push(file.name);
+      continue;
+    }
+
+    const content = await normalizeIndexableFileByExtension(fullPath, extension);
+
+    if (!content) {
+      skippedFiles.push(file.name);
+      continue;
+    }
+
+    uploadedFiles.push({
+      name: file.name,
+      content,
+    });
+
+    try {
+      fs.unlinkSync(fullPath);
+    } catch (error) {
+      if (error?.code === "EACCES" || error?.code === "EPERM") {
+        retainedFiles.push(file.name);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return {
+    uploadedFiles,
+    skippedFiles,
+    retainedFiles,
+  };
+}
 
 async function buildLibraryInfoMessage() {
   const files = await readEmbeddableFiles();
@@ -158,6 +221,51 @@ async function buildLibraryInfoMessage() {
   }
 
   return lines.join("\n");
+}
+
+
+
+function getEmbeddingReadiness() {
+  const embeddingStatus = readEmbeddingStatus();
+
+  if (!embeddingStatus) {
+    return {
+      ready: false,
+      message:
+        `Embedding is not finished yet. Waiting for embedder to write status at ${EMBEDDING_STATUS_FILE}. ` +
+        "Please try again shortly.",
+    };
+  }
+
+  if (embeddingStatus.status === "ready") {
+    return {
+      ready: true,
+      message: "Embedding is finished and the retriever is ready for prompts.",
+    };
+  }
+
+  if (embeddingStatus.status === "running") {
+    return {
+      ready: false,
+      message:
+        `Embedding is currently running (started at ${embeddingStatus.startedAt || "unknown"}). ` +
+        "Please wait until it is finished.",
+    };
+  }
+
+  if (embeddingStatus.status === "error") {
+    return {
+      ready: false,
+      message:
+        `Embedding last run failed: ${embeddingStatus.error || "unknown error"}. ` +
+        "Please check `docker compose logs -f embedder` and wait for a successful run.",
+    };
+  }
+
+  return {
+    ready: false,
+    message: `Embedding status is '${embeddingStatus.status}'. Please wait until it becomes 'ready'.`,
+  };
 }
 
 function addToHistory(sessionId, role, content) {
@@ -231,7 +339,10 @@ validateRetrievalConfig();
 ui.renderLoadingScreen();
 ui.printAssistantMessage("Retriever service is ready.");
 ui.printAssistantMessage("Embedding runs in a separate embedder container.");
+const initialEmbeddingReadiness = getEmbeddingReadiness();
+ui.printAssistantMessage(initialEmbeddingReadiness.message);
 ui.printAssistantMessage("How can I help you today?");
+ensureUploadDirectory();
 ui.uiLog(`Chat history file: ${CHAT_HISTORY_FILE}`);
 
 let exit = false;
@@ -435,11 +546,60 @@ while (!exit) {
     continue;
   }
 
+  const embeddingReadiness = getEmbeddingReadiness();
+  if (!embeddingReadiness.ready) {
+    ui.printAssistantMessage(embeddingReadiness.message);
+    continue;
+  }
+
+  let promptForRetrieval = userMessage;
+  let promptForAssistant = userMessage;
+
+  if (normalizedUserMessage === "/upload" || normalizedUserMessage.startsWith("/upload ")) {
+    const promptAfterUpload = userMessage.slice("/upload".length).trim();
+
+    if (!promptAfterUpload) {
+      ui.printAssistantMessage("Use /upload <your prompt>. Example: /upload summarize these notes.");
+      continue;
+    }
+
+    const { uploadedFiles, skippedFiles, retainedFiles } = await consumeUploadFiles();
+
+    if (uploadedFiles.length === 0) {
+      const reason =
+        skippedFiles.length > 0
+          ? `Found unsupported or empty file types in ./upload (${skippedFiles.join(", ")}). Only .md, .txt, .html, .htm, and .pdf with indexable text are allowed.`
+          : "No files found in ./upload.";
+
+      ui.printAssistantMessage(`Nothing was uploaded. ${reason}`);
+      continue;
+    }
+
+    const uploadedContext = uploadedFiles
+      .map((file) => [`UPLOAD FILE: ${file.name}`, file.content.trim()].join("\n"))
+      .join("\n\n---\n\n");
+
+    const skippedNotice =
+      skippedFiles.length > 0
+        ? `\n\nUnsupported files were ignored and kept in ./upload: ${skippedFiles.join(", ")}`
+        : "";
+
+    const retainedNotice =
+      retainedFiles.length > 0
+        ? `\n\nSome uploaded files could not be deleted due to permissions and were kept in ./upload: ${retainedFiles.join(", ")}`
+        : "";
+
+    promptForRetrieval = promptAfterUpload;
+    promptForAssistant = `${promptAfterUpload}\n\nONE-TIME UPLOADED FILE CONTEXT\n${uploadedContext}${skippedNotice}${retainedNotice}`;
+
+    ui.printAssistantMessage(`Uploaded ${uploadedFiles.length} file(s) from ./upload for this prompt only.`);
+  }
+
   ui.printUserMessage(userMessage);
   ui.setPendingStatus("Searching knowledge base...");
 
   const history = getConversationHistory(DEFAULT_SESSION_ID);
-  const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(userMessage);
+  const { ragContextPackage, evidenceQuality, results } = await searchKnowledgeBase(promptForRetrieval);
   ui.setPendingSimilarityDetails(createSimilarityDetails(results, runtimeConfig));
   ui.setPendingStatus("Generating answer...");
 
@@ -451,7 +611,7 @@ while (!exit) {
       profileId,
     }),
     ...history,
-    ["user", userMessage],
+    ["user", promptForAssistant],
   ];
 
   let assistantResponse = "";

@@ -244,7 +244,7 @@ async function extractTextFromPdf(filePath) {
   return pageSections.join("\n\n").trim();
 }
 
-function extractIndexableTextByExtension(rawContent, extension) {
+export function extractIndexableTextByExtension(rawContent, extension) {
   if (!rawContent) {
     return "";
   }
@@ -254,6 +254,21 @@ function extractIndexableTextByExtension(rawContent, extension) {
   }
 
   return rawContent;
+}
+
+export function normalizeIndexableTextByExtension(rawContent, extension) {
+  return normalizeTextForIndexing(extractIndexableTextByExtension(rawContent, extension));
+}
+
+export async function normalizeIndexableFileByExtension(filePath, extension, encoding = "utf8") {
+  const normalizedExtension = extension.toLowerCase();
+
+  if (normalizedExtension === ".pdf") {
+    return normalizeTextForIndexing(await extractTextFromPdf(filePath));
+  }
+
+  const rawContent = fs.readFileSync(filePath, encoding);
+  return normalizeIndexableTextByExtension(rawContent, normalizedExtension);
 }
 
 function buildIndexRelevantHash(content) {
@@ -304,16 +319,7 @@ export async function readTextFilesRecursively(dirPath, allowedExtensions, encod
       }
 
       try {
-        let extractedContent = "";
-
-        if (ext === ".pdf") {
-          extractedContent = await extractTextFromPdf(itemPath);
-        } else {
-          const rawContent = fs.readFileSync(itemPath, encoding);
-          extractedContent = extractIndexableTextByExtension(rawContent, ext);
-        }
-
-        const content = normalizeTextForIndexing(extractedContent);
+        const content = await normalizeIndexableFileByExtension(itemPath, ext, encoding);
 
         if (!content || content.length === 0) {
           console.log(`Skipping file with no indexable text: ${itemPath}`);
@@ -326,7 +332,7 @@ export async function readTextFilesRecursively(dirPath, allowedExtensions, encod
           filename: path.basename(itemPath),
           extension: ext,
           content,
-          hash: buildIndexRelevantHash(extractedContent),
+          hash: buildIndexRelevantHash(content),
           size: stats.size,
           lastModified: stats.mtimeMs,
         });
