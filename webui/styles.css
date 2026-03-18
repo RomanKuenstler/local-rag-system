@@ -13,10 +13,8 @@ body {
 }
 
 .page {
-  max-width: 1240px;
-  margin: 0 auto;
   min-height: 100vh;
-  padding: 5.6rem 1.25rem 1.25rem;
+  padding: 4.4rem 1rem 1rem;
 }
 
 .topbar {
@@ -25,55 +23,52 @@ body {
   left: 0;
   right: 0;
   z-index: 40;
-  display: grid;
-  grid-template-columns: 1fr minmax(260px, 1240px) 1fr;
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  min-height: 4.5rem;
-  padding: 0.65rem 1rem;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid #eceff3;
+  align-items: center;
+  min-height: 3.8rem;
+  padding: 0.65rem 1.2rem;
+  background: transparent;
 }
 
 .brand,
 .quick-actions {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.55rem;
 }
 
-.brand { justify-self: start; flex-direction: column; align-items: flex-start; padding-left: 0.4rem; }
-.brand h1 { margin: 0; font-size: 1.08rem; font-weight: 620; letter-spacing: -0.01em; }
-.brand small { color: #6b7280; font-size: 0.76rem; }
+.brand { justify-self: start; padding-left: 0.4rem; }
+.brand h1 { margin: 0; font-size: 1.08rem; font-weight: 620; letter-spacing: 0.02em; }
+.brand-status-light {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: #9ca3af;
+  box-shadow: 0 0 0 4px rgba(156,163,175,.16);
+}
+.brand-status-light.ok { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.18); }
+.brand-status-light.warn { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.2); }
+.brand-status-light.error { background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,.2); }
 .header-center-spacer { width: 100%; height: 100%; }
 .quick-actions { justify-self: end; padding-right: 0.4rem; }
 
-.quick-actions button {
-  border: 1px solid #d4d8de;
-  background: #ffffff;
-  color: #111827;
-  border-radius: 999px;
-  padding: 0.46rem 0.75rem;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-.quick-actions button:hover:not(:disabled) { border-color: #9ca3af; }
+.quick-actions button { display: none; }
 .icon { width: 0.95rem; height: 0.95rem; fill: currentColor; }
 
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 290px;
-  align-items: start;
-  gap: 1rem;
+  display: block;
 }
 
 .chat-column {
+  width: min(100%, 860px);
+  margin: 0 auto;
   min-width: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
   gap: 0.75rem;
+  padding-bottom: 0.6rem;
 }
 
 .status-rail {
@@ -155,7 +150,7 @@ body {
 
 .chat {
   border-radius: 22px;
-  padding: 0.6rem 0.1rem 0.3rem;
+  padding: 0.6rem 0.1rem 0.5rem;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -250,8 +245,10 @@ body {
   border-radius: 20px;
   padding: 0.46rem;
   position: sticky;
-  bottom: 0.5rem;
+  bottom: 0.8rem;
   z-index: 30;
+  width: min(100%, 860px);
+  margin: 0 auto;
 }
 
 input, textarea, button { font: inherit; }
@@ -314,6 +311,46 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 .config-help { margin: 0.2rem 0 0; color: #6b7280; font-size: 0.84rem; }
 
+.floating-menu {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 60;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.floating-menu-toggle {
+  border: 1px solid #d1d5db;
+  background: rgba(255,255,255,.96);
+  color: #111827;
+  border-radius: 999px;
+  padding: 0.45rem 0.85rem;
+  cursor: pointer;
+}
+
+.floating-menu-panel {
+  display: grid;
+  gap: 0.35rem;
+  background: rgba(255,255,255,.98);
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 0.4rem;
+  min-width: 130px;
+  box-shadow: 0 10px 28px rgba(17, 24, 39, 0.12);
+}
+
+.floating-menu-panel button {
+  border: 1px solid transparent;
+  background: #fff;
+  color: #111827;
+  border-radius: 9px;
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+  text-align: left;
+}
+.floating-menu-panel button:hover:not(:disabled) { border-color: #cbd5e1; }
+
 @media (max-width: 1080px) {
   .workspace { grid-template-columns: 1fr; }
   .status-rail {
@@ -325,7 +362,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 
 @media (max-width: 760px) {
-  .page { padding: 5.6rem 0.8rem 0.8rem; }
+  .page { padding: 4.3rem 0.8rem 0.8rem; }
   .quick-actions button span { display: none; }
   .msg { max-width: 92%; }
+  .floating-menu { left: 0.8rem; bottom: 0.8rem; }
 }
