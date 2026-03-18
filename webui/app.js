@@ -118,6 +118,84 @@ function parseSystemInfoContent(text) {
     .filter((group) => group.items.length > 0);
 }
 
+function normalizeStatusBadge(rawValue) {
+  const value = String(rawValue || "").trim().toLowerCase();
+  if (!value) return "disconnected";
+  if (["ready", "ok", "active", "running", "connected"].includes(value)) return "active";
+  if (["pending", "loading", "starting", "indexing", "building"].some((token) => value.includes(token))) return "pending";
+  if (["error", "failed", "fail", "unhealthy"].some((token) => value.includes(token))) return "error";
+  if (["disconnected", "offline", "unknown", "n/a"].includes(value)) return "disconnected";
+  return "active";
+}
+
+function parseHelpContent(text) {
+  const lines = String(text || "")
+    .split("\n")
+    .map((line) => line.trim());
+
+  const intro = [];
+  const commands = [];
+  const tips = [];
+  let currentSection = "intro";
+
+  for (const line of lines) {
+    if (!line) continue;
+    const lower = line.toLowerCase();
+    if (lower === "commands:") {
+      currentSection = "commands";
+      continue;
+    }
+    if (lower === "tips:") {
+      currentSection = "tips";
+      continue;
+    }
+
+    if (line.startsWith("- ")) {
+      const body = line.slice(2).trim();
+      if (currentSection === "commands") {
+        if (/^example:/i.test(body)) continue;
+        const splitIndex = body.search(/\s{2,}/);
+        if (splitIndex > -1) {
+          commands.push({
+            command: body.slice(0, splitIndex).trim(),
+            description: body.slice(splitIndex).trim(),
+          });
+        } else {
+          const colonIndex = body.indexOf(":");
+          commands.push({
+            command: colonIndex > -1 ? body.slice(0, colonIndex).trim() : body,
+            description: colonIndex > -1 ? body.slice(colonIndex + 1).trim() : "",
+          });
+        }
+      } else if (currentSection === "tips") {
+        tips.push(body);
+      } else {
+        intro.push(body);
+      }
+      continue;
+    }
+
+    if (currentSection === "commands" && /^example:/i.test(line)) {
+      if (commands.length > 0) {
+        const current = commands[commands.length - 1];
+        commands[commands.length - 1] = {
+          ...current,
+          description: `${current.description} (${line})`.trim(),
+        };
+      }
+      continue;
+    }
+
+    if (currentSection === "tips") {
+      tips.push(line);
+    } else {
+      intro.push(line);
+    }
+  }
+
+  return { intro, commands, tips };
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -444,6 +522,20 @@ function App() {
   const parsedInfoGroups = panelData?.command === "/info"
     ? parseSystemInfoContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
     : [];
+  const parsedHelpPanel = panelData?.command === "/help" || panelData?.command === "?"
+    ? parseHelpContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+    : null;
+  const configSections = panelData?.command === "/config" && panelData.configView
+    ? panelData.configView.sections
+    : [];
+  const editableConfigRows = configSections.flatMap((section) => section.entries
+    .filter((entry) => entry.editable)
+    .map((entry) => ({ ...entry, section: section.label })));
+  const restartConfigRows = configSections.flatMap((section) => section.entries
+    .filter((entry) => !entry.editable)
+    .map((entry) => ({ ...entry, section: section.label })));
+  const retrieverStatus = normalizeStatusBadge(statusData?.app?.role);
+  const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
 
   return React.createElement(
     "div",
@@ -640,16 +732,30 @@ function App() {
               ? React.createElement(
                 "div",
                 { className: "config-sections" },
-                ...panelData.configView.sections.map((section) => React.createElement(
-                  "div",
-                  { key: section.id, className: "config-section" },
-                  React.createElement("h4", null, section.label),
-                  ...section.entries.map((entry) => React.createElement(
+                React.createElement(
+                  "section",
+                  { className: "config-section config-table-card" },
+                  React.createElement("h4", null, "Change now (no restart)"),
+                  React.createElement(
                     "div",
-                    { key: `${section.id}-${entry.key}`, className: "info-row" },
-                    React.createElement("span", null, entry.key),
-                    entry.editable
-                      ? React.createElement(
+                    { className: "config-table" },
+                    React.createElement(
+                      "div",
+                      { className: "config-table-head" },
+                      React.createElement("span", null, "Setting"),
+                      React.createElement("span", null, "Value"),
+                      React.createElement("span", null, "Apply")
+                    ),
+                    ...editableConfigRows.map((entry) => React.createElement(
+                      "div",
+                      { key: `editable-${entry.section}-${entry.key}`, className: "config-table-row" },
+                      React.createElement(
+                        "div",
+                        { className: "config-setting-cell" },
+                        React.createElement("strong", null, entry.key),
+                        React.createElement("small", null, entry.section)
+                      ),
+                      React.createElement(
                         "form",
                         {
                           className: "config-edit-form",
@@ -666,10 +772,47 @@ function App() {
                           disabled: isSending || !isEmbeddingReady,
                         }),
                         React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
-                      )
-                      : React.createElement("strong", null, String(entry.value))
-                  ))
-                )),
+                      ),
+                      React.createElement("span", { className: "config-row-ready" }, "Live")
+                    ))
+                  )
+                ),
+                React.createElement(
+                  "section",
+                  { className: "config-section config-table-card" },
+                  React.createElement(
+                    "div",
+                    { className: "config-table-header" },
+                    React.createElement("h4", null, "Restart required"),
+                    React.createElement(
+                      "button",
+                      { type: "button", className: "restart-button", disabled: true },
+                      icon("M12 6V3l-4 4 4 4V8c2.8 0 5 2.2 5 5a5 5 0 0 1-8.7 3.3l-1.4 1.4A7 7 0 0 0 19 13c0-3.9-3.1-7-7-7"),
+                      "Restart"
+                    )
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "config-table" },
+                    React.createElement(
+                      "div",
+                      { className: "config-table-head" },
+                      React.createElement("span", null, "Setting"),
+                      React.createElement("span", null, "Value")
+                    ),
+                    ...restartConfigRows.map((entry) => React.createElement(
+                      "div",
+                      { key: `restart-${entry.section}-${entry.key}`, className: "config-table-row static" },
+                      React.createElement(
+                        "div",
+                        { className: "config-setting-cell" },
+                        React.createElement("strong", null, entry.key),
+                        React.createElement("small", null, entry.section)
+                      ),
+                      React.createElement("strong", { className: "config-static-value" }, String(entry.value))
+                    ))
+                  )
+                ),
                 React.createElement("p", { className: "config-help" }, panelData.configView.help)
               )
               : panelData.command === "/info"
@@ -684,13 +827,21 @@ function App() {
                       "div",
                       { className: "info-row" },
                       React.createElement("span", null, "retriever"),
-                      React.createElement("strong", null, statusData?.app?.role || "unknown")
+                      React.createElement(
+                        "strong",
+                        null,
+                        React.createElement("span", { className: `status-badge ${retrieverStatus}` }, retrieverStatus)
+                      )
                     ),
                     React.createElement(
                       "div",
                       { className: "info-row" },
                       React.createElement("span", null, "embedder"),
-                      React.createElement("strong", null, statusData?.embedding?.readiness?.status || "unknown")
+                      React.createElement(
+                        "strong",
+                        null,
+                        React.createElement("span", { className: `status-badge ${embedderStatus}` }, embedderStatus)
+                      )
                     )
                   ),
                   ...parsedInfoGroups.map((group) => React.createElement(
@@ -760,6 +911,52 @@ function App() {
                           ))
                         )
                       )
+                  : (panelData.command === "/help" || panelData.command === "?") && parsedHelpPanel
+                    ? React.createElement(
+                      "div",
+                      { className: "help-grid" },
+                      parsedHelpPanel.intro.length
+                        ? React.createElement(
+                          "section",
+                          { className: "info-group-card" },
+                          React.createElement("h4", null, "Overview"),
+                          ...parsedHelpPanel.intro.map((line, idx) => React.createElement("p", { key: `help-intro-${idx}` }, line))
+                        )
+                        : null,
+                      React.createElement(
+                        "section",
+                        { className: "info-group-card" },
+                        React.createElement("h4", null, "Commands"),
+                        React.createElement(
+                          "div",
+                          { className: "help-table" },
+                          React.createElement(
+                            "div",
+                            { className: "help-table-head" },
+                            React.createElement("span", null, "Command"),
+                            React.createElement("span", null, "What it does")
+                          ),
+                          ...parsedHelpPanel.commands.map((item, idx) => React.createElement(
+                            "div",
+                            { key: `help-command-${idx}`, className: "help-table-row" },
+                            React.createElement("code", null, item.command),
+                            React.createElement("span", null, item.description || "—")
+                          ))
+                        )
+                      ),
+                      parsedHelpPanel.tips.length
+                        ? React.createElement(
+                          "section",
+                          { className: "info-group-card" },
+                          React.createElement("h4", null, "Tips"),
+                          React.createElement(
+                            "ul",
+                            { className: "help-tips" },
+                            ...parsedHelpPanel.tips.map((tip, idx) => React.createElement("li", { key: `help-tip-${idx}` }, tip))
+                          )
+                        )
+                        : null
+                    )
                   : Array.isArray(panelData.content)
                     ? React.createElement(
                       "div",
