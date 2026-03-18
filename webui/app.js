@@ -4,31 +4,18 @@ import { createRoot } from "https://esm.sh/react-dom@18/client";
 const API_BASE_URL = window.__API_BASE_URL__ || "http://localhost:3000";
 const PANEL_COMMANDS = new Set(["/info", "/config", "/lib", "/assistant", "/help", "?"]);
 
-function statusColor(ready) {
-  if (ready === true) return "ok";
-  if (ready === false) return "warn";
-  return "unknown";
-}
-
 function formatSeverityLabel(severity) {
   if (!severity) return "";
   return String(severity).replace(/[_-]+/g, " ");
 }
 
-function formatSystemStatus(statusData, filesData) {
+function getOverallHealth(statusData, filesData) {
   const readiness = statusData?.embedding?.readiness;
-  const fileSummary = filesData ? `${filesData.embeddedFiles}/${filesData.totalFiles} embedded` : "n/a";
-
-  return [
-    { label: "Retriever", value: statusData?.app?.role || "unknown", color: "ok" },
-    {
-      label: "Embedding",
-      value: readiness?.status || "unknown",
-      color: statusColor(readiness?.ready),
-      title: readiness?.message,
-    },
-    { label: "Files", value: fileSummary, color: filesData ? "ok" : "unknown" },
-  ];
+  const readinessText = String(readiness?.status || "").toLowerCase();
+  if (!statusData) return "error";
+  if (readinessText.includes("error") || readinessText.includes("fail")) return "error";
+  if (readiness?.ready === true && filesData) return "ok";
+  return "warn";
 }
 
 function parseAssistantModeContent(text) {
@@ -110,18 +97,16 @@ function App() {
   const [filesData, setFilesData] = useState(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
-  const [openDropdown, setOpenDropdown] = useState(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
-  const dropdownRef = useRef(null);
+  const menuRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
-  const statusBadges = useMemo(() => formatSystemStatus(statusData, filesData), [statusData, filesData]);
-  const availableModes = statusData?.assistant?.availableModes || [];
-  const availableProfiles = statusData?.assistant?.availableProfiles || [];
+  const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
 
   async function refreshStatus() {
     try {
@@ -190,14 +175,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    function closeDropdownOnOutside(event) {
-      if (!dropdownRef.current?.contains(event.target)) {
-        setOpenDropdown(null);
+    function closeMenuOnOutside(event) {
+      if (!menuRef.current?.contains(event.target)) {
+        setIsMenuOpen(false);
       }
     }
 
-    document.addEventListener("pointerdown", closeDropdownOnOutside);
-    return () => document.removeEventListener("pointerdown", closeDropdownOnOutside);
+    document.addEventListener("pointerdown", closeMenuOnOutside);
+    return () => document.removeEventListener("pointerdown", closeMenuOnOutside);
   }, []);
 
   function parsePanelText(text) {
@@ -311,18 +296,6 @@ function App() {
     await sendRawPrompt(inputValue);
   }
 
-  async function setAssistantMode(modeId) {
-    if (!modeId) return;
-    setOpenDropdown(null);
-    await sendRawPrompt(`/assistant ${modeId}`);
-  }
-
-  async function setProfile(profileId) {
-    if (!profileId) return;
-    setOpenDropdown(null);
-    await sendRawPrompt(`/profile ${profileId}`);
-  }
-
   async function submitConfigChange(configName, rawValue) {
     const value = String(rawValue || "").trim();
     if (!value) return;
@@ -354,45 +327,6 @@ function App() {
     ? parseSystemInfoContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
     : [];
 
-  const renderStatusDropdown = (id, label, value, options, onPick) => React.createElement(
-    "div",
-    { className: "status-chip ok status-chip-dropdown", ref: openDropdown === id ? dropdownRef : null },
-    React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
-    React.createElement(
-      "button",
-      {
-        type: "button",
-        className: "status-chip-trigger",
-        disabled: isSending || !isEmbeddingReady,
-        onClick: () => setOpenDropdown((current) => (current === id ? null : id)),
-      },
-      React.createElement("span", { className: "status-label" }, label),
-      React.createElement(
-        "span",
-        { className: "status-value" },
-        options.find((item) => item.id === value)?.label || value || "unknown"
-      ),
-      React.createElement("span", { className: "status-chevron", "aria-hidden": "true" }, "▾")
-    ),
-    openDropdown === id
-      ? React.createElement(
-        "div",
-        { className: "status-dropdown" },
-        ...options.map((item) => React.createElement(
-          "button",
-          {
-            key: item.id,
-            type: "button",
-            className: `status-dropdown-item ${item.id === value ? "active" : ""}`,
-            onClick: () => onPick(item.id),
-          },
-          React.createElement("strong", null, item.label || item.id),
-          item.description ? React.createElement("small", null, item.description) : null
-        ))
-      )
-      : null
-  );
-
   return React.createElement(
     "div",
     { className: "page" },
@@ -402,38 +336,11 @@ function App() {
       React.createElement(
         "div",
         { className: "brand" },
-        React.createElement("h1", null, "local RAG"),
-        React.createElement("small", null, "Private document assistant")
+        React.createElement("h1", null, "RAG"),
+        React.createElement("span", { className: `brand-status-light ${healthState}`, "aria-label": `System status: ${healthState}` })
       ),
       React.createElement("div", { className: "header-center-spacer", "aria-hidden": "true" }),
-      React.createElement(
-        "div",
-        { className: "quick-actions" },
-        React.createElement(
-          "button",
-          { type: "button", onClick: () => sendRawPrompt("/info"), disabled: isSending || !isEmbeddingReady },
-          icon("M11 10h2v7h-2zm0-3h2v2h-2zm1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"),
-          React.createElement("span", null, "Info")
-        ),
-        React.createElement(
-          "button",
-          { type: "button", onClick: () => sendRawPrompt("/config"), disabled: isSending || !isEmbeddingReady },
-          icon("M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.48 7.48 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.89 2h-3.78a.5.5 0 0 0-.49.42l-.36 2.54c-.58.22-1.13.53-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.71 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.41 1.05.72 1.63.94l.36 2.54c.04.24.24.42.49.42h3.78c.25 0 .45-.18.49-.42l.36-2.54c.58-.22 1.13-.53 1.63-.94l2.39.96c.23.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"),
-          React.createElement("span", null, "Config")
-        ),
-        React.createElement(
-          "button",
-          { type: "button", onClick: () => sendRawPrompt("/assistant"), disabled: isSending || !isEmbeddingReady },
-          icon("M12 12c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z"),
-          React.createElement("span", null, "Assistant")
-        ),
-        React.createElement(
-          "button",
-          { type: "button", onClick: () => sendRawPrompt("/lib"), disabled: isSending || !isEmbeddingReady },
-          icon("M4 6.5C4 5.12 5.12 4 6.5 4H20v15H6.5A2.5 2.5 0 0 1 4 16.5zm2.5-.5a.5.5 0 0 0 0 1H18V6zM18 18v-8H6.5a1.5 1.5 0 0 0 0 3H18"),
-          React.createElement("span", null, "Library")
-        )
-      )
+      React.createElement("div", { className: "quick-actions", "aria-hidden": "true" })
     ),
     React.createElement(
       "div",
@@ -611,34 +518,56 @@ function App() {
             "Quick help"
           )
         )
-      ),
+      )
+    ),
+    React.createElement(
+      "div",
+      { className: "floating-menu", ref: menuRef },
+      isMenuOpen
+        ? React.createElement(
+          "div",
+          { className: "floating-menu-panel" },
+          React.createElement(
+            "button",
+            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/info"); }, disabled: isSending || !isEmbeddingReady },
+            "Info"
+          ),
+          React.createElement(
+            "button",
+            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/config"); }, disabled: isSending || !isEmbeddingReady },
+            "Config"
+          ),
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => {
+                setIsMenuOpen(false);
+                setPanelData({
+                  id: crypto.randomUUID(),
+                  command: "/status",
+                  title: "Status",
+                  content: {
+                    retriever: statusData?.app?.role || "unknown",
+                    embedding: statusData?.embedding?.readiness?.status || "unknown",
+                    files: filesData ? `${filesData.embeddedFiles}/${filesData.totalFiles} embedded` : "n/a",
+                    assistantMode: statusData?.assistant?.mode || "n/a",
+                    profile: statusData?.assistant?.profile || "n/a",
+                  },
+                  severity: healthState === "error" ? "error" : healthState === "warn" ? "warn" : "ok",
+                  responseType: null,
+                  configView: null,
+                });
+              },
+            },
+            "Status"
+          )
+        )
+        : null,
       React.createElement(
-        "aside",
-        { className: "status-rail" },
-        ...statusBadges.map((badge) => React.createElement(
-          "div",
-          { key: badge.label, className: `status-chip ${badge.color}`, title: badge.title || "" },
-          React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
-          React.createElement(
-            "div",
-            { className: "status-meta" },
-            React.createElement("span", { className: "status-label" }, badge.label),
-            React.createElement("strong", { className: "status-value" }, badge.value)
-          )
-        )),
-        React.createElement(
-          "div",
-          { className: "status-chip ok" },
-          React.createElement("span", { className: "status-dot", "aria-hidden": "true" }),
-          React.createElement(
-            "div",
-            { className: "status-meta" },
-            React.createElement("span", { className: "status-label" }, "Mode"),
-            React.createElement("strong", { className: "status-value" }, statusData?.app?.uiMode || "webui")
-          )
-        ),
-        renderStatusDropdown("assistant", "Assistant mode", statusData?.assistant?.mode || "", availableModes, setAssistantMode),
-        renderStatusDropdown("profile", "Profile", statusData?.assistant?.profile || "", availableProfiles, setProfile)
+        "button",
+        { className: "floating-menu-toggle", type: "button", onClick: () => setIsMenuOpen((current) => !current) },
+        isMenuOpen ? "Close" : "Menu"
       )
     )
   );
