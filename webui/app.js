@@ -6,6 +6,7 @@ import {
   API_BASE_URL,
   PANEL_COMMANDS,
   createMessage,
+  formatBytes,
   formatSeverityLabel,
   getOverallHealth,
   getPanelTitle,
@@ -44,6 +45,7 @@ marked.setOptions({
 });
 
 function App() {
+  const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [panelData, setPanelData] = useState(null);
@@ -53,6 +55,7 @@ function App() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [activeView, setActiveView] = useState(getInitialView);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -123,6 +126,15 @@ function App() {
     if (composerInputRef.current) {
       resizeComposerInput(composerInputRef.current);
     }
+  }, []);
+
+  useEffect(() => {
+    function syncViewFromHash() {
+      setActiveView(window.location.hash === "#library" ? "library" : "chat");
+    }
+
+    window.addEventListener("hashchange", syncViewFromHash);
+    return () => window.removeEventListener("hashchange", syncViewFromHash);
   }, []);
 
   useEffect(() => {
@@ -406,6 +418,19 @@ function App() {
     .map((entry) => ({ ...entry, section: section.label })));
   const retrieverStatus = normalizeStatusBadge(statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
+  const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
+  const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
+
+  function openLibraryPage() {
+    setIsMenuOpen(false);
+    setPanelData(null);
+    window.location.hash = "#library";
+  }
+
+  function openChatPage() {
+    setIsMenuOpen(false);
+    window.location.hash = "";
+  }
 
   return React.createElement(
     "div",
@@ -420,12 +445,76 @@ function App() {
         React.createElement("span", { className: `brand-status-light ${healthState}`, "aria-label": `System status: ${healthState}` })
       ),
       React.createElement("div", { className: "header-center-spacer", "aria-hidden": "true" }),
-      React.createElement("div", { className: "quick-actions", "aria-hidden": "true" })
+      React.createElement(
+        "div",
+        { className: "quick-actions" },
+        activeView === "library"
+          ? React.createElement(
+            React.Fragment,
+            null,
+            React.createElement(
+              "button",
+              { type: "button", className: "header-link", onClick: openChatPage },
+              "Back to Chat"
+            ),
+            React.createElement("h2", { className: "header-title" }, "Library")
+          )
+          : null
+      )
     ),
     React.createElement(
       "div",
       { className: "workspace" },
-      React.createElement(
+      activeView === "library"
+        ? React.createElement(
+          "section",
+          { className: "chat-column library-column" },
+          React.createElement(
+            "section",
+            { className: "info-group-card library-summary-card" },
+            React.createElement("h4", null, "Library summary"),
+            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "content path"), React.createElement("strong", null, filesData?.contentPath || "n/a")),
+            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "files"), React.createElement("strong", null, String(filesData?.totalFiles ?? 0))),
+            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "embedded files"), React.createElement("strong", null, String(filesData?.embeddedFiles ?? 0))),
+            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "total chunks"), React.createElement("strong", null, String(libraryTotalChunks)))
+          ),
+          React.createElement(
+            "section",
+            { className: "info-group-card library-table-card" },
+            React.createElement("h4", null, "Embeddable files"),
+            React.createElement(
+              "div",
+              { className: "library-table", role: "table", "aria-label": "Library files" },
+              React.createElement(
+                "div",
+                { className: "library-table-head", role: "row" },
+                React.createElement("span", null, "File"),
+                React.createElement("span", null, "Size"),
+                React.createElement("span", null, "Chunks"),
+                React.createElement("span", null, "Extension"),
+                React.createElement("span", null, "Embedded"),
+                React.createElement("span", null, "Modified"),
+                React.createElement("span", null, "Hash")
+              ),
+              ...libraryFiles.map((file) => React.createElement(
+                "div",
+                { key: file.path, className: "library-table-row", role: "row" },
+                React.createElement("strong", { className: "library-path" }, file.path),
+                React.createElement("span", null, formatBytes(file.sizeBytes)),
+                React.createElement("span", null, String(file.chunkCount ?? "0")),
+                React.createElement("span", null, file.extension || "n/a"),
+                React.createElement(
+                  "span",
+                  null,
+                  React.createElement("span", { className: `status-badge ${file.embedded ? "active" : "pending"}` }, file.embedded ? "yes" : "no")
+                ),
+                React.createElement("span", null, file.lastModified ? new Date(file.lastModified).toISOString() : "n/a"),
+                React.createElement("span", { className: "library-hash" }, file.hash || "n/a")
+              ))
+            )
+          )
+        )
+        : React.createElement(
         "section",
         { className: "chat-column" },
         React.createElement(
@@ -556,6 +645,19 @@ function App() {
             icon("M11 17h2v-6h-2zm1-8a1.25 1.25 0 1 0 0 2.5A1.25 1.25 0 0 0 12 9m0 13A10 10 0 1 1 12 2a10 10 0 0 1 0 20"),
             "Info"
           ),
+          activeView === "library"
+            ? React.createElement(
+              "button",
+              { type: "button", onClick: openChatPage },
+              icon("M3 5h18v14H3zm2 2v10h14V7zm2 2h10v2H7zm0 4h7v2H7"),
+              "Chat"
+            )
+            : React.createElement(
+              "button",
+              { type: "button", onClick: openLibraryPage },
+              icon("M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1m1 2v10h14V7Zm2 2h10v2H7zm0 4h6v2H7"),
+              "Library"
+            ),
           React.createElement(
             "button",
             { type: "button", onClick: openPersonalizationPanel, disabled: isSending || !isEmbeddingReady },
