@@ -741,9 +741,6 @@ function App() {
                           "section",
                           { className: "info-group-card" },
                           React.createElement("h4", null, "Assistant mode"),
-                          panelData.content.assistant.currentMode
-                            ? React.createElement("div", { className: "assistant-current" }, `Current mode: ${panelData.content.assistant.currentMode}`)
-                            : null,
                           ...panelData.content.assistant.modes.map((mode) => React.createElement(
                             "article",
                             { key: `personalization-mode-${mode.id}`, className: `assistant-mode-card ${mode.id === panelData.content.assistant.currentMode ? "active" : ""}` },
@@ -755,9 +752,6 @@ function App() {
                           "section",
                           { className: "info-group-card" },
                           React.createElement("h4", null, "Profile"),
-                          panelData.content.profile.currentProfile
-                            ? React.createElement("div", { className: "assistant-current" }, `Current profile: ${panelData.content.profile.currentProfile}`)
-                            : null,
                           ...panelData.content.profile.profiles.map((profile) => React.createElement(
                             "article",
                             { key: `personalization-profile-${profile.id}`, className: `assistant-mode-card ${profile.id === panelData.content.profile.currentProfile ? "active" : ""}` },
@@ -767,7 +761,11 @@ function App() {
                         )
                       )
                   : Array.isArray(panelData.content)
-                    ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
+                    ? React.createElement(
+                      "div",
+                      { className: "panel-text-block" },
+                      ...panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
+                    )
                     : typeof panelData.content === "object" && panelData.content !== null
                       ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
                         "div",

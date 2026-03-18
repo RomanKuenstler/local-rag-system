@@ -298,7 +298,13 @@ body {
 
 .msg { max-width: min(82%, 700px); border-radius: 16px; padding: 0.8rem 0.95rem; scroll-margin-top: 6rem; border: none; }
 .msg.user { align-self: flex-end; background: #f3f5f9; }
-.msg.assistant { align-self: stretch; max-width: 100%; width: 100%; background: #f8fafd; }
+.msg.assistant {
+  align-self: stretch;
+  max-width: 100%;
+  width: 100%;
+  background: #fcfdff;
+  border: 1px solid #eef2f8;
+}
 .msg-header { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: .35rem; color: #6b7280; font-size: .82rem; }
 .evidence-pill { font-size: .72rem; border-radius: 999px; padding: .2rem .5rem; border: 1px solid #d1d5db; color: #4b5563; background: #f9fafb; text-transform: capitalize; }
 .evidence-pill.high,.evidence-pill.strong,.evidence-pill.sufficient,.evidence-pill.ok { border-color: rgba(22,163,74,.35); background: rgba(22,163,74,.1); color: #166534; }
@@ -365,23 +371,66 @@ button.send {
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 .config-sections { display: grid; gap: 0.7rem; }
-.config-section h4 { margin: 0.2rem 0 0; font-size: 0.9rem; color: #374151; }
+.config-section {
+  background: linear-gradient(180deg, #fcfdff 0%, #f8fafd 100%);
+  border: 1px solid #e5eaf2;
+  border-radius: 12px;
+  padding: 0.65rem 0.7rem;
+}
+.config-section h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.82rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+}
 .config-edit-form { display: flex; gap: 0.45rem; align-items: center; }
 .config-edit-form .config-input {
-  border: 1px solid #d1d5db;
+  border: 1px solid #d4dbe6;
   border-radius: 10px;
   background: #fff;
-  padding: 0.35rem 0.5rem;
+  padding: 0.38rem 0.55rem;
   min-width: 120px;
 }
+.config-edit-form .config-input:focus {
+  outline: none;
+  border-color: #9fb8dc;
+  box-shadow: 0 0 0 3px rgba(159, 184, 220, 0.24);
+}
 .config-edit-form button {
-  border: 1px solid #d1d5db;
+  border: 1px solid #d4dbe6;
   border-radius: 10px;
-  background: #fff;
-  padding: 0.35rem 0.6rem;
+  background: #ffffff;
+  padding: 0.36rem 0.65rem;
   cursor: pointer;
 }
-.config-help { margin: 0.2rem 0 0; color: #6b7280; font-size: 0.84rem; }
+.config-edit-form button:hover:not(:disabled) {
+  border-color: #bcc9db;
+  background: #f8fafd;
+}
+.config-help {
+  margin: 0.25rem 0 0;
+  color: #64748b;
+  font-size: 0.83rem;
+  background: #f8fafd;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+}
+
+.panel-text-block {
+  background: linear-gradient(180deg, #fbfcff 0%, #f8fafc 100%);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.panel-text-block p {
+  margin: 0;
+  line-height: 1.5;
+  color: #334155;
+}
 
 .floating-menu {
   position: fixed;
