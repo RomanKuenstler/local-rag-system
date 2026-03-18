@@ -22,6 +22,13 @@ const UI_MODE_OPTIONS = [
   { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details." },
 ];
 
+function getScoreSeverity(score) {
+  if (!Number.isFinite(score)) return "unknown";
+  if (score >= 0.8) return "high";
+  if (score >= 0.6) return "medium";
+  return "low";
+}
+
 function getCurrentUiModeFromInfoText(infoText) {
   const parsedGroups = parseSystemInfoContent(infoText || "");
   const appGroup = parsedGroups.find((group) => group.title === "App");
@@ -447,33 +454,41 @@ function App() {
                       React.createElement("p", null, message.text)
                     ),
                     React.createElement(
-                      "section",
+                      "details",
                       { className: "assistant-evidence-block" },
-                      React.createElement("small", null, "Evidence details"),
+                      React.createElement("summary", null, React.createElement("small", null, "Evidence details")),
                       React.createElement(
-                        "p",
-                        { className: "assistant-evidence-summary" },
-                        `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
-                      ),
-                      Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
-                        ? React.createElement(
-                          "ul",
-                          { className: "assistant-evidence-list" },
-                          ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
-                            "li",
-                            { key: `${message.id}-${match.rank}-${match.source}` },
-                            React.createElement(
-                              "div",
-                              { className: "assistant-evidence-meta" },
-                              React.createElement("strong", null, `#${match.rank}`),
-                              React.createElement("span", null, `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`),
-                              React.createElement("span", null, match.source || "unknown source")
-                            ),
-                            match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
-                            match.preview ? React.createElement("p", null, match.preview) : null
-                          ))
-                        )
-                        : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                        "div",
+                        { className: "assistant-evidence-content" },
+                        React.createElement(
+                          "p",
+                          { className: "assistant-evidence-summary" },
+                          `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
+                        ),
+                        Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
+                          ? React.createElement(
+                            "ul",
+                            { className: "assistant-evidence-list" },
+                            ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
+                              "li",
+                              { key: `${message.id}-${match.rank}-${match.source}` },
+                              React.createElement(
+                                "div",
+                                { className: "assistant-evidence-meta" },
+                                React.createElement("strong", null, `#${match.rank}`),
+                                React.createElement(
+                                  "span",
+                                  { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
+                                  `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`
+                                ),
+                                React.createElement("span", null, match.source || "unknown source")
+                              ),
+                              match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
+                              match.preview ? React.createElement("p", null, match.preview) : null
+                            ))
+                          )
+                          : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                      )
                     )
                   )
                   : React.createElement("p", null, message.text)
