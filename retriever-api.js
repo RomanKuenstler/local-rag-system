@@ -58,6 +58,10 @@ const PORT = parseInt(process.env.RETRIEVER_API_PORT || "3000", 10);
 const HOST = process.env.RETRIEVER_API_HOST || "0.0.0.0";
 let assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
 let profileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
+const SUPPORTED_UI_MODES = new Set(["clean", "rag"]);
+let uiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim().toLowerCase())
+  ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
+  : "clean";
 const guardrailsText = loadGuardrails();
 
 const chatModel = new ChatOpenAI({
@@ -266,7 +270,7 @@ function handlePromptCommand(prompt, sessionId) {
         answer: buildSystemInfoMessage({
           appName: APP_NAME,
           appVersion: APP_VERSION,
-          uiMode: "webui",
+          uiMode,
           assistantMode,
           profileId,
           chatModelName: chatModel.model,
@@ -310,6 +314,49 @@ function handlePromptCommand(prompt, sessionId) {
         ].join("\n"),
         evidenceSeverity: null,
         responseType: "assistant_mode",
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/mode") {
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: [
+          "UI modes:",
+          "- clean: Clean chat-focused UI without retrieval diagnostics.",
+          "- rag: Retrieval-debug UI that includes evidence quality and similarity details.",
+          `Current mode: ${uiMode}`,
+        ].join("\n"),
+        evidenceSeverity: null,
+        responseType: "ui_mode",
+      },
+    };
+  }
+
+  if (normalizedPrompt.startsWith("/mode ")) {
+    const requestedMode = prompt.slice("/mode ".length).trim().toLowerCase();
+    if (!SUPPORTED_UI_MODES.has(requestedMode)) {
+      return {
+        statusCode: 400,
+        payload: {
+          sessionId,
+          error: `Unsupported UI mode: ${requestedMode}`,
+          answer: `Unsupported UI mode: ${requestedMode}. Use /mode to list available modes.`,
+          evidenceSeverity: "warn",
+        },
+      };
+    }
+
+    uiMode = requestedMode;
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: `UI mode changed to: ${uiMode}`,
+        evidenceSeverity: "ok",
+        responseType: "ui_mode",
       },
     };
   }
@@ -655,7 +702,7 @@ async function handleStatus(_req, res) {
       name: APP_NAME,
       version: APP_VERSION,
       role: "retriever-api",
-      uiMode: "webui",
+      uiMode,
     },
     assistant: {
       mode: assistantMode,
