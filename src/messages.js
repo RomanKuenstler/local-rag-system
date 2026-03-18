@@ -132,7 +132,7 @@ export function buildHelpMessage() {
     "- /mode clean      Switch to clean chat-focused UI",
     "- /mode rag        Switch to debug RAG UI with similarity details",
     "- /assistant       List assistant modes and current mode",
-    "- /assistant <mode> Switch assistant mode (e.g. learning, normal)",
+    "- /assistant <mode>  Switch assistant mode (e.g. learning, normal)",
     "- /profile         List profiles and current profile",
     "- /profile <name>  Switch profile (e.g. default, alice)",
     "- /embed           Show embedder-container status hint",
