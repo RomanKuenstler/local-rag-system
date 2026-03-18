@@ -54,10 +54,23 @@ body {
 .header-center-spacer { width: 100%; height: 100%; }
 .quick-actions { justify-self: end; padding-right: 0.4rem; }
 .quick-actions { gap: 0.75rem; }
+<<<<<<< codex/add-library-page-to-web-ui-menu
 .header-chat-link {
   padding: 0.45rem 0.9rem !important;
   font-size: 0.83rem;
 }
+=======
+.header-link {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 999px;
+  padding: 0.32rem 0.75rem;
+  font-size: 0.8rem;
+  color: #374151;
+  cursor: pointer;
+}
+.header-link:hover { background: #f8fafc; }
+>>>>>>> webui
 .header-title {
   margin: 0;
   font-size: 0.95rem;
@@ -101,12 +114,15 @@ body {
   gap: 0.2rem;
 }
 .library-table-card { display: grid; gap: 0.65rem; }
+<<<<<<< codex/add-library-page-to-web-ui-menu
 .library-table-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
 }
+=======
+>>>>>>> webui
 .library-table {
   display: grid;
   border: 1px solid #e5e7eb;
@@ -116,7 +132,11 @@ body {
 .library-table-head,
 .library-table-row {
   display: grid;
+<<<<<<< codex/add-library-page-to-web-ui-menu
   grid-template-columns: minmax(180px, 2fr) 0.9fr 0.65fr 0.7fr 0.9fr 1.4fr 1.2fr 0.5fr;
+=======
+  grid-template-columns: minmax(180px, 2fr) 0.9fr 0.65fr 0.7fr 0.9fr 1.4fr 1.4fr;
+>>>>>>> webui
   gap: 0.7rem;
   align-items: center;
   padding: 0.55rem 0.7rem;
@@ -145,6 +165,7 @@ body {
   font-size: 0.74rem;
   overflow-wrap: anywhere;
 }
+<<<<<<< codex/add-library-page-to-web-ui-menu
 .library-upload-button { white-space: nowrap; }
 .library-delete-button {
   border: none;
@@ -156,6 +177,8 @@ body {
 }
 .library-delete-button:hover { color: #b91c1c; }
 .library-delete-button .icon { width: 0.95rem; height: 0.95rem; }
+=======
+>>>>>>> webui
 
 .status-rail {
   position: sticky;
