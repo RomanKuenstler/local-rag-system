@@ -228,3 +228,19 @@ export function createMessage(role, text, extra = {}) {
     ...extra,
   };
 }
+
+export function formatBytes(sizeInBytes) {
+  if (!Number.isFinite(sizeInBytes) || sizeInBytes < 0) return "n/a";
+  if (sizeInBytes < 1024) return `${sizeInBytes} B`;
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = sizeInBytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(2)} ${units[unitIndex]}`;
+}
