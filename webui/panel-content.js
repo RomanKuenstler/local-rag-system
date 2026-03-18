@@ -13,8 +13,25 @@ export function renderPanelContent({
   isSending,
   isEmbeddingReady,
   submitConfigChange,
+  applyPersonalizationChange,
   icon,
 }) {
+  const interactionDisabled = isSending || !isEmbeddingReady;
+
+  const renderSelectableModeCard = ({ key, id, description, isActive, onSelect }) => React.createElement(
+    "button",
+    {
+      key,
+      type: "button",
+      className: `assistant-mode-card mode-select-button ${isActive ? "active" : ""}`,
+      onClick: () => onSelect(id),
+      disabled: interactionDisabled,
+      "aria-pressed": isActive,
+    },
+    React.createElement("strong", null, id),
+    React.createElement("p", null, description)
+  );
+
   if (panelData.command === "/config" && panelData.configView) {
     return React.createElement(
       "div",
@@ -154,12 +171,13 @@ export function renderPanelContent({
       parsedAssistantPanel.currentMode
         ? React.createElement("div", { className: "assistant-current" }, `Current mode: ${parsedAssistantPanel.currentMode}`)
         : null,
-      ...parsedAssistantPanel.modes.map((mode) => React.createElement(
-        "article",
-        { key: mode.id, className: `assistant-mode-card ${mode.id === parsedAssistantPanel.currentMode ? "active" : ""}` },
-        React.createElement("strong", null, mode.id),
-        React.createElement("p", null, mode.description)
-      ))
+      ...parsedAssistantPanel.modes.map((mode) => renderSelectableModeCard({
+        key: mode.id,
+        id: mode.id,
+        description: mode.description,
+        isActive: mode.id === parsedAssistantPanel.currentMode,
+        onSelect: (id) => applyPersonalizationChange("assistant", id),
+      }))
     );
   }
 
@@ -170,40 +188,62 @@ export function renderPanelContent({
       parsedProfilePanel.currentProfile
         ? React.createElement("div", { className: "assistant-current" }, `Current profile: ${parsedProfilePanel.currentProfile}`)
         : null,
-      ...parsedProfilePanel.profiles.map((profile) => React.createElement(
-        "article",
-        { key: profile.id, className: `assistant-mode-card ${profile.id === parsedProfilePanel.currentProfile ? "active" : ""}` },
-        React.createElement("strong", null, profile.id),
-        React.createElement("p", null, profile.description)
-      ))
+      ...parsedProfilePanel.profiles.map((profile) => renderSelectableModeCard({
+        key: profile.id,
+        id: profile.id,
+        description: profile.description,
+        isActive: profile.id === parsedProfilePanel.currentProfile,
+        onSelect: (id) => applyPersonalizationChange("profile", id),
+      }))
     );
   }
 
   if (panelData.command === "/personalization" && panelData.content) {
+    const uiModes = panelData.content.ui?.modes || [];
+    const currentUiMode = panelData.content.ui?.currentMode || null;
+    const assistantModes = panelData.content.assistant?.modes || [];
+    const currentAssistantMode = panelData.content.assistant?.currentMode || null;
+    const profiles = panelData.content.profile?.profiles || [];
+    const currentProfile = panelData.content.profile?.currentProfile || null;
+
     return React.createElement(
       "div",
       { className: "info-groups" },
       React.createElement(
         "section",
         { className: "info-group-card" },
+        React.createElement("h4", null, "UI mode"),
+        ...uiModes.map((mode) => renderSelectableModeCard({
+          key: `personalization-ui-${mode.id}`,
+          id: mode.id,
+          description: mode.description,
+          isActive: mode.id === currentUiMode,
+          onSelect: (id) => applyPersonalizationChange("ui", id),
+        }))
+      ),
+      React.createElement(
+        "section",
+        { className: "info-group-card" },
         React.createElement("h4", null, "Assistant mode"),
-        ...panelData.content.assistant.modes.map((mode) => React.createElement(
-          "article",
-          { key: `personalization-mode-${mode.id}`, className: `assistant-mode-card ${mode.id === panelData.content.assistant.currentMode ? "active" : ""}` },
-          React.createElement("strong", null, mode.id),
-          React.createElement("p", null, mode.description)
-        ))
+        ...assistantModes.map((mode) => renderSelectableModeCard({
+          key: `personalization-mode-${mode.id}`,
+          id: mode.id,
+          description: mode.description,
+          isActive: mode.id === currentAssistantMode,
+          onSelect: (id) => applyPersonalizationChange("assistant", id),
+        }))
       ),
       React.createElement(
         "section",
         { className: "info-group-card" },
         React.createElement("h4", null, "Profile"),
-        ...panelData.content.profile.profiles.map((profile) => React.createElement(
-          "article",
-          { key: `personalization-profile-${profile.id}`, className: `assistant-mode-card ${profile.id === panelData.content.profile.currentProfile ? "active" : ""}` },
-          React.createElement("strong", null, profile.id),
-          React.createElement("p", null, profile.description)
-        ))
+        ...profiles.map((profile) => renderSelectableModeCard({
+          key: `personalization-profile-${profile.id}`,
+          id: profile.id,
+          description: profile.description,
+          isActive: profile.id === currentProfile,
+          onSelect: (id) => applyPersonalizationChange("profile", id),
+        }))
       )
     );
   }

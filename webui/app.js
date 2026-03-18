@@ -17,6 +17,18 @@ import {
 } from "./utils.js";
 import { renderPanelContent } from "./panel-content.js";
 
+const UI_MODE_OPTIONS = [
+  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
+  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details." },
+];
+
+function getCurrentUiModeFromInfoText(infoText) {
+  const parsedGroups = parseSystemInfoContent(infoText || "");
+  const appGroup = parsedGroups.find((group) => group.title === "App");
+  const uiModeEntry = appGroup?.items?.find((item) => item.key.toLowerCase() === "ui mode");
+  return uiModeEntry?.value || "clean";
+}
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -35,6 +47,8 @@ function App() {
   const menuRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
+  const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
+  const isRagMode = currentUiMode === "rag";
   const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
 
   async function refreshStatus() {
@@ -180,6 +194,7 @@ function App() {
             text: payload.answer || "No answer generated.",
             evidenceSeverity: payload.evidenceSeverity || null,
             responseType: payload.responseType || null,
+            retrieval: payload.retrieval || null,
             isPending: false,
           };
         }));
@@ -192,6 +207,7 @@ function App() {
           text: `Error: ${error.message}`,
           evidenceSeverity: "error",
           responseType: null,
+          retrieval: null,
           isPending: false,
         };
       }));
@@ -220,9 +236,10 @@ function App() {
     setIsSending(true);
 
     try {
-      const [assistantPayload, profilePayload] = await Promise.all([
+      const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
         fetchPanelCommand("/assistant"),
         fetchPanelCommand("/profile"),
+        fetchPanelCommand("/info"),
       ]);
 
       setPanelData({
@@ -230,6 +247,10 @@ function App() {
         command: "/personalization",
         title: "Personalization",
         content: {
+          ui: {
+            currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
+            modes: UI_MODE_OPTIONS,
+          },
           assistant: parseAssistantModeContent(assistantPayload.answer || ""),
           profile: parseProfileContent(profilePayload.answer || ""),
         },
@@ -237,6 +258,82 @@ function App() {
         responseType: null,
         configView: null,
       });
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+    } finally {
+      setIsSending(false);
+      await refreshStatus();
+    }
+  }
+
+  async function refreshCurrentPanel(activeCommand) {
+    if (activeCommand === "/assistant") {
+      const assistantPayload = await fetchPanelCommand("/assistant");
+      setPanelData({
+        id: crypto.randomUUID(),
+        command: "/assistant",
+        title: assistantPayload.responseType || "/assistant",
+        content: parsePanelText(assistantPayload.answer || ""),
+        severity: assistantPayload.evidenceSeverity || null,
+        responseType: assistantPayload.responseType || null,
+        configView: assistantPayload.configView || assistantPayload.webConfigView || null,
+      });
+      return;
+    }
+
+    if (activeCommand === "/profile") {
+      const profilePayload = await fetchPanelCommand("/profile");
+      setPanelData({
+        id: crypto.randomUUID(),
+        command: "/profile",
+        title: profilePayload.responseType || "/profile",
+        content: parsePanelText(profilePayload.answer || ""),
+        severity: profilePayload.evidenceSeverity || null,
+        responseType: profilePayload.responseType || null,
+        configView: profilePayload.configView || profilePayload.webConfigView || null,
+      });
+      return;
+    }
+
+    if (activeCommand === "/personalization") {
+      const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
+        fetchPanelCommand("/assistant"),
+        fetchPanelCommand("/profile"),
+        fetchPanelCommand("/info"),
+      ]);
+
+      setPanelData({
+        id: crypto.randomUUID(),
+        command: "/personalization",
+        title: "Personalization",
+        content: {
+          ui: {
+            currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
+            modes: UI_MODE_OPTIONS,
+          },
+          assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+          profile: parseProfileContent(profilePayload.answer || ""),
+        },
+        severity: null,
+        responseType: null,
+        configView: null,
+      });
+    }
+  }
+
+  async function applyPersonalizationChange(kind, selectedId) {
+    if (isSending || !isEmbeddingReady) return;
+
+    const command = kind === "assistant"
+      ? `/assistant ${selectedId}`
+      : kind === "profile"
+        ? `/profile ${selectedId}`
+        : `/mode ${selectedId}`;
+
+    setIsSending(true);
+    try {
+      await fetchPanelCommand(command);
+      await refreshCurrentPanel(panelData?.command);
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
     } finally {
@@ -339,7 +436,47 @@ function App() {
                   { className: `msg-command ${message.responseType}` },
                   React.createElement("pre", null, message.text)
                 )
-                : React.createElement("p", null, message.text)
+                : message.role === "assistant" && isRagMode && message.retrieval
+                  ? React.createElement(
+                    "div",
+                    { className: "assistant-rag-layout" },
+                    React.createElement(
+                      "section",
+                      { className: "assistant-answer-block" },
+                      React.createElement("small", null, "Answer"),
+                      React.createElement("p", null, message.text)
+                    ),
+                    React.createElement(
+                      "section",
+                      { className: "assistant-evidence-block" },
+                      React.createElement("small", null, "Evidence details"),
+                      React.createElement(
+                        "p",
+                        { className: "assistant-evidence-summary" },
+                        `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
+                      ),
+                      Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
+                        ? React.createElement(
+                          "ul",
+                          { className: "assistant-evidence-list" },
+                          ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
+                            "li",
+                            { key: `${message.id}-${match.rank}-${match.source}` },
+                            React.createElement(
+                              "div",
+                              { className: "assistant-evidence-meta" },
+                              React.createElement("strong", null, `#${match.rank}`),
+                              React.createElement("span", null, `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`),
+                              React.createElement("span", null, match.source || "unknown source")
+                            ),
+                            match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
+                            match.preview ? React.createElement("p", null, match.preview) : null
+                          ))
+                        )
+                        : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                    )
+                  )
+                  : React.createElement("p", null, message.text)
             ))
         ),
         React.createElement(
@@ -491,6 +628,7 @@ function App() {
               isSending,
               isEmbeddingReady,
               submitConfigChange,
+              applyPersonalizationChange,
               icon,
             })
           )

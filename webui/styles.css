@@ -257,6 +257,20 @@ body {
 .assistant-mode-card strong { font-size: 0.9rem; }
 .assistant-mode-card p { margin: 0; font-size: 0.84rem; color: #4b5563; }
 .assistant-mode-card.active { border-color: rgba(34,197,94,.45); background: rgba(34,197,94,.06); }
+.mode-select-button {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.mode-select-button:hover:not(:disabled) {
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.35);
+}
+.mode-select-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
 
 .info-row {
   display: grid;
@@ -328,8 +342,67 @@ body {
 .msg-command { border: 1px solid #e5e7eb; background: #ffffff; border-radius: 12px; padding: 0.6rem 0.7rem; }
 .msg-command pre { margin: 0; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size: .82rem; line-height: 1.45; white-space: pre-wrap; }
 .msg p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
+.assistant-rag-layout { display: grid; gap: 0.6rem; }
+.assistant-answer-block,
+.assistant-evidence-block {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.62rem 0.72rem;
+  background: #ffffff;
+}
+.assistant-answer-block { border-color: rgba(37, 99, 235, 0.25); background: rgba(239, 246, 255, 0.45); }
+.assistant-evidence-block { border-color: rgba(148, 163, 184, 0.4); background: rgba(248, 250, 252, 0.95); }
+.assistant-rag-layout small {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  color: #475569;
+}
+.assistant-evidence-summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  color: #334155;
+}
+.assistant-evidence-list {
+  margin: 0;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.48rem;
+}
+.assistant-evidence-list li { color: #475569; }
+.assistant-evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: #64748b;
+  margin-bottom: 0.22rem;
+}
+.assistant-evidence-meta strong { color: #0f172a; }
+.assistant-evidence-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 0.18rem;
+}
+.assistant-evidence-empty {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #64748b;
+}
 
 .msg.pending p::after {
+  content: "";
+  display: inline-block;
+  width: 1em;
+  text-align: left;
+  animation: typingDots 1.1s steps(4, end) infinite;
+  overflow: hidden;
+  vertical-align: baseline;
+}
+.msg.pending .assistant-answer-block p::after {
   content: "";
   display: inline-block;
   width: 1em;
