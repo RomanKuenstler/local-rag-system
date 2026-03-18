@@ -185,6 +185,21 @@ function App() {
     return () => document.removeEventListener("pointerdown", closeMenuOnOutside);
   }, []);
 
+  useEffect(() => {
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setPanelData(null);
+      }
+    }
+
+    if (panelData) {
+      document.addEventListener("keydown", handleEscape);
+      return () => document.removeEventListener("keydown", handleEscape);
+    }
+
+    return undefined;
+  }, [panelData]);
+
   function parsePanelText(text) {
     if (!text) return null;
 
@@ -247,6 +262,15 @@ function App() {
     }
 
     setIsSending(true);
+    const pendingMessageId = crypto.randomUUID();
+    setMessages((prev) => prev.concat({
+      id: pendingMessageId,
+      role: "assistant",
+      text: "Assistant is thinking…",
+      evidenceSeverity: null,
+      responseType: null,
+      isPending: true,
+    }));
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/prompt`, {
@@ -259,6 +283,7 @@ function App() {
       if (!response.ok) throw new Error(payload?.error || "Request failed");
 
       if (isPanelCommand) {
+        setMessages((prev) => prev.filter((message) => message.id !== pendingMessageId));
         setPanelData({
           id: crypto.randomUUID(),
           command: prompt.toLowerCase(),
@@ -269,21 +294,27 @@ function App() {
           configView: payload.webConfigView || null,
         });
       } else {
-        setMessages((prev) => prev.concat({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: payload.answer || "No answer generated.",
-          evidenceSeverity: payload.evidenceSeverity || null,
-          responseType: payload.responseType || null,
+        setMessages((prev) => prev.map((message) => {
+          if (message.id !== pendingMessageId) return message;
+          return {
+            ...message,
+            text: payload.answer || "No answer generated.",
+            evidenceSeverity: payload.evidenceSeverity || null,
+            responseType: payload.responseType || null,
+            isPending: false,
+          };
         }));
       }
     } catch (error) {
-      setMessages((prev) => prev.concat({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        text: `Error: ${error.message}`,
-        evidenceSeverity: "error",
-        responseType: null,
+      setMessages((prev) => prev.map((message) => {
+        if (message.id !== pendingMessageId) return message;
+        return {
+          ...message,
+          text: `Error: ${error.message}`,
+          evidenceSeverity: "error",
+          responseType: null,
+          isPending: false,
+        };
       }));
     } finally {
       setIsSending(false);
@@ -329,7 +360,7 @@ function App() {
 
   return React.createElement(
     "div",
-    { className: "page" },
+    { className: `page${panelData ? " modal-open" : ""}` },
     React.createElement(
       "header",
       { className: "topbar" },
@@ -351,100 +382,6 @@ function App() {
         React.createElement(
           "section",
           { className: "chat" },
-          panelData
-            ? React.createElement(
-              "aside",
-              { className: "info-panel", key: panelData.id },
-              React.createElement(
-                "div",
-                { className: "info-panel-head" },
-                React.createElement("strong", null, panelTitle),
-                panelData.severity
-                  ? React.createElement(
-                    "small",
-                    { className: `evidence-pill ${panelData.severity}` },
-                    formatSeverityLabel(panelData.severity)
-                  )
-                  : null
-              ),
-              panelData.command === "/config" && panelData.configView
-                ? React.createElement(
-                  "div",
-                  { className: "config-sections" },
-                  ...panelData.configView.sections.map((section) => React.createElement(
-                    "div",
-                    { key: section.id, className: "config-section" },
-                    React.createElement("h4", null, section.label),
-                    ...section.entries.map((entry) => React.createElement(
-                      "div",
-                      { key: `${section.id}-${entry.key}`, className: "info-row" },
-                      React.createElement("span", null, entry.key),
-                      entry.editable
-                        ? React.createElement(
-                          "form",
-                          {
-                            className: "config-edit-form",
-                            onSubmit: async (event) => {
-                              event.preventDefault();
-                              const formData = new FormData(event.currentTarget);
-                              await submitConfigChange(entry.key, formData.get("value"));
-                            },
-                          },
-                          React.createElement("input", {
-                            name: "value",
-                            defaultValue: String(entry.value),
-                            className: "config-input",
-                            disabled: isSending || !isEmbeddingReady,
-                          }),
-                          React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
-                        )
-                        : React.createElement("strong", null, String(entry.value))
-                    ))
-                  )),
-                  React.createElement("p", { className: "config-help" }, panelData.configView.help)
-                )
-                : panelData.command === "/info"
-                  ? React.createElement(
-                    "div",
-                    { className: "info-groups" },
-                    ...parsedInfoGroups.map((group) => React.createElement(
-                      "section",
-                      { key: group.title, className: "info-group-card" },
-                      React.createElement("h4", null, group.title),
-                      ...group.items.map((item) => React.createElement(
-                        "div",
-                        { key: `${group.title}-${item.key}`, className: "info-row" },
-                        React.createElement("span", null, item.key),
-                        React.createElement("strong", null, item.value)
-                      ))
-                    ))
-                  )
-                  : panelData.command === "/assistant" && parsedAssistantPanel
-                    ? React.createElement(
-                      "div",
-                      { className: "assistant-mode-grid" },
-                      parsedAssistantPanel.currentMode
-                        ? React.createElement("div", { className: "assistant-current" }, `Current mode: ${parsedAssistantPanel.currentMode}`)
-                        : null,
-                      ...parsedAssistantPanel.modes.map((mode) => React.createElement(
-                        "article",
-                        { key: mode.id, className: `assistant-mode-card ${mode.id === parsedAssistantPanel.currentMode ? "active" : ""}` },
-                        React.createElement("strong", null, mode.id),
-                        React.createElement("p", null, mode.description)
-                      ))
-                    )
-                    : Array.isArray(panelData.content)
-                      ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
-                      : typeof panelData.content === "object" && panelData.content !== null
-                        ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
-                          "div",
-                          { key, className: "info-row" },
-                          React.createElement("span", null, key),
-                          React.createElement("strong", null, typeof value === "object" ? JSON.stringify(value) : String(value))
-                        ))
-                        : React.createElement("p", null, String(panelData.content || "No data available."))
-            )
-            : null,
           !isEmbeddingReady && !isLoadingStatus
             ? React.createElement(
               "div",
@@ -458,7 +395,7 @@ function App() {
             "article",
             {
               key: message.id,
-              className: `msg ${message.role}`,
+              className: `msg ${message.role}${message.isPending ? " pending" : ""}`,
               ref: index === messages.length - 1 ? lastMessageRef : null,
             },
             React.createElement(
@@ -493,6 +430,14 @@ function App() {
               resizeComposerInput(event.target);
             },
             onInput: (event) => resizeComposerInput(event.target),
+            onKeyDown: (event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (inputValue.trim() && !isSending) {
+                  void sendRawPrompt(inputValue);
+                }
+              }
+            },
             rows: 1,
             placeholder: "Ask anything about your knowledge base...",
             disabled: isSending,
@@ -569,7 +514,132 @@ function App() {
         { className: "floating-menu-toggle", type: "button", onClick: () => setIsMenuOpen((current) => !current) },
         isMenuOpen ? "Close" : "Menu"
       )
-    )
+    ),
+    panelData
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setPanelData(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "panel-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": panelTitle,
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement(
+            "div",
+            { className: "panel-modal-head" },
+            React.createElement("strong", null, panelTitle),
+            React.createElement(
+              "div",
+              { className: "panel-modal-head-actions" },
+              panelData.severity
+                ? React.createElement(
+                  "small",
+                  { className: `evidence-pill ${panelData.severity}` },
+                  formatSeverityLabel(panelData.severity)
+                )
+                : null,
+              React.createElement(
+                "button",
+                {
+                  className: "panel-close",
+                  type: "button",
+                  onClick: () => setPanelData(null),
+                  "aria-label": "Close details panel",
+                },
+                "×"
+              )
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "panel-modal-content" },
+            panelData.command === "/config" && panelData.configView
+              ? React.createElement(
+                "div",
+                { className: "config-sections" },
+                ...panelData.configView.sections.map((section) => React.createElement(
+                  "div",
+                  { key: section.id, className: "config-section" },
+                  React.createElement("h4", null, section.label),
+                  ...section.entries.map((entry) => React.createElement(
+                    "div",
+                    { key: `${section.id}-${entry.key}`, className: "info-row" },
+                    React.createElement("span", null, entry.key),
+                    entry.editable
+                      ? React.createElement(
+                        "form",
+                        {
+                          className: "config-edit-form",
+                          onSubmit: async (event) => {
+                            event.preventDefault();
+                            const formData = new FormData(event.currentTarget);
+                            await submitConfigChange(entry.key, formData.get("value"));
+                          },
+                        },
+                        React.createElement("input", {
+                          name: "value",
+                          defaultValue: String(entry.value),
+                          className: "config-input",
+                          disabled: isSending || !isEmbeddingReady,
+                        }),
+                        React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
+                      )
+                      : React.createElement("strong", null, String(entry.value))
+                  ))
+                )),
+                React.createElement("p", { className: "config-help" }, panelData.configView.help)
+              )
+              : panelData.command === "/info"
+                ? React.createElement(
+                  "div",
+                  { className: "info-groups" },
+                  ...parsedInfoGroups.map((group) => React.createElement(
+                    "section",
+                    { key: group.title, className: "info-group-card" },
+                    React.createElement("h4", null, group.title),
+                    ...group.items.map((item) => React.createElement(
+                      "div",
+                      { key: `${group.title}-${item.key}`, className: "info-row" },
+                      React.createElement("span", null, item.key),
+                      React.createElement("strong", null, item.value)
+                    ))
+                  ))
+                )
+                : panelData.command === "/assistant" && parsedAssistantPanel
+                  ? React.createElement(
+                    "div",
+                    { className: "assistant-mode-grid" },
+                    parsedAssistantPanel.currentMode
+                      ? React.createElement("div", { className: "assistant-current" }, `Current mode: ${parsedAssistantPanel.currentMode}`)
+                      : null,
+                    ...parsedAssistantPanel.modes.map((mode) => React.createElement(
+                      "article",
+                      { key: mode.id, className: `assistant-mode-card ${mode.id === parsedAssistantPanel.currentMode ? "active" : ""}` },
+                      React.createElement("strong", null, mode.id),
+                      React.createElement("p", null, mode.description)
+                    ))
+                  )
+                  : Array.isArray(panelData.content)
+                    ? panelData.content.map((item, idx) => React.createElement("p", { key: `${panelData.id}-${idx}` }, item))
+                    : typeof panelData.content === "object" && panelData.content !== null
+                      ? Object.entries(panelData.content).map(([key, value]) => React.createElement(
+                        "div",
+                        { key, className: "info-row" },
+                        React.createElement("span", null, key),
+                        React.createElement("strong", null, typeof value === "object" ? JSON.stringify(value) : String(value))
+                      ))
+                      : React.createElement("p", null, String(panelData.content || "No data available."))
+          )
+        )
+      )
+      : null
   );
 }
 
