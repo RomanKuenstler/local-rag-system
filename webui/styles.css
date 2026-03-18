@@ -268,6 +268,21 @@ body {
 }
 .info-row span { color: #6b7280; text-transform: capitalize; }
 .info-row strong { word-break: break-word; font-weight: 570; color: #111827; }
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+}
+.status-badge.active { background: rgba(22,163,74,.12); border-color: rgba(22,163,74,.28); color: #166534; }
+.status-badge.pending { background: rgba(234,179,8,.12); border-color: rgba(234,179,8,.35); color: #854d0e; }
+.status-badge.error { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.32); color: #991b1b; }
+.status-badge.disconnected { background: rgba(148,163,184,.18); border-color: rgba(148,163,184,.35); color: #475569; }
 
 .embedding-loading-overlay {
   position: fixed;
@@ -384,6 +399,62 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   text-transform: uppercase;
   letter-spacing: 0.045em;
 }
+.config-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.config-table-card { display: grid; gap: 0.5rem; }
+.config-table {
+  border: 1px solid #e4e9f2;
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.config-table-head,
+.config-table-row {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.5rem 0.6rem;
+}
+.config-table-head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #e5eaf2;
+}
+.config-table-row {
+  align-items: center;
+  border-top: 1px solid #f1f5f9;
+}
+.config-table-row:first-of-type { border-top: none; }
+.config-setting-cell {
+  display: grid;
+  gap: 0.1rem;
+}
+.config-setting-cell strong { font-size: 0.84rem; text-transform: capitalize; color: #0f172a; }
+.config-setting-cell small { color: #64748b; font-size: 0.73rem; }
+.config-row-ready {
+  justify-self: start;
+  border: 1px solid rgba(22,163,74,.25);
+  color: #166534;
+  background: rgba(22,163,74,.09);
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-size: 0.72rem;
+}
+.config-static-value {
+  word-break: break-word;
+  font-size: 0.86rem;
+}
+.config-table-row.static {
+  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr);
+}
+.config-table-row:not(.static),
+.config-table-head { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr) 80px; }
 .config-edit-form { display: flex; gap: 0.45rem; align-items: center; }
 .config-edit-form .config-input {
   border: 1px solid #d4dbe6;
@@ -408,6 +479,17 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   border-color: #bcc9db;
   background: #f8fafd;
 }
+.restart-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  padding: 0.34rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.restart-button .icon { width: 0.85rem; height: 0.85rem; }
 .config-help {
   margin: 0.25rem 0 0;
   color: #64748b;
@@ -431,6 +513,43 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   line-height: 1.5;
   color: #334155;
 }
+
+.help-grid { display: grid; gap: 0.7rem; }
+.help-table {
+  border: 1px solid #e4e9f2;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.help-table-head,
+.help-table-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.95fr) minmax(180px, 1.5fr);
+  gap: 0.65rem;
+  padding: 0.5rem 0.6rem;
+  align-items: start;
+}
+.help-table-head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #e5eaf2;
+}
+.help-table-row {
+  border-top: 1px solid #f1f5f9;
+  font-size: 0.86rem;
+}
+.help-table-row:first-of-type { border-top: none; }
+.help-table-row code {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.2rem 0.4rem;
+  width: fit-content;
+  font-size: 0.8rem;
+}
+.help-tips { margin: 0; padding-left: 1.1rem; color: #334155; display: grid; gap: 0.3rem; }
 
 .floating-menu {
   position: fixed;
