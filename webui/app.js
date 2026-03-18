@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "https://esm.sh/react@18";
 import { createRoot } from "https://esm.sh/react-dom@18/client";
+import { marked } from "https://esm.sh/marked@13";
+import DOMPurify from "https://esm.sh/dompurify@3";
 import {
   API_BASE_URL,
   PANEL_COMMANDS,
@@ -35,6 +37,11 @@ function getCurrentUiModeFromInfoText(infoText) {
   const uiModeEntry = appGroup?.items?.find((item) => item.key.toLowerCase() === "ui mode");
   return uiModeEntry?.value || "clean";
 }
+
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+});
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -365,6 +372,14 @@ function App() {
     { viewBox: "0 0 24 24", className: "icon", "aria-hidden": "true" },
     React.createElement("path", { d: path })
   );
+  const renderAssistantMarkdown = (text) => {
+    const rendered = marked.parse(String(text || ""));
+    const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
+    return React.createElement("div", {
+      className: "assistant-markdown",
+      dangerouslySetInnerHTML: { __html: sanitized },
+    });
+  };
 
   const panelTitle = getPanelTitle(panelData?.command);
 
@@ -451,7 +466,7 @@ function App() {
                       "section",
                       { className: "assistant-answer-block" },
                       React.createElement("small", null, "Answer"),
-                      React.createElement("p", null, message.text)
+                      renderAssistantMarkdown(message.text)
                     ),
                     React.createElement(
                       "details",
@@ -491,7 +506,9 @@ function App() {
                       )
                     )
                   )
-                  : React.createElement("p", null, message.text)
+                  : message.role === "assistant"
+                    ? renderAssistantMarkdown(message.text)
+                    : React.createElement("p", null, message.text)
             ))
         ),
         React.createElement(
