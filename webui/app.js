@@ -454,8 +454,9 @@ function App() {
             null,
             React.createElement(
               "button",
-              { type: "button", className: "header-link", onClick: openChatPage },
-              "Back to Chat"
+              { type: "button", className: "send header-chat-link", onClick: openChatPage },
+              icon("M4 5h16v14H4zm2 2v10h12V7zm2 2h8v2H8zm0 4h5v2H8"),
+              "Chat"
             ),
             React.createElement("h2", { className: "header-title" }, "Library")
           )
@@ -481,7 +482,17 @@ function App() {
           React.createElement(
             "section",
             { className: "info-group-card library-table-card" },
-            React.createElement("h4", null, "Embeddable files"),
+            React.createElement(
+              "div",
+              { className: "library-table-header" },
+              React.createElement("h4", null, "Embeddable files"),
+              React.createElement(
+                "button",
+                { type: "button", className: "restart-button library-upload-button" },
+                icon("M12 3v10m0-10 4 4m-4-4-4 4M4 15v4h16v-4"),
+                "Upload"
+              )
+            ),
             React.createElement(
               "div",
               { className: "library-table", role: "table", "aria-label": "Library files" },
@@ -494,7 +505,8 @@ function App() {
                 React.createElement("span", null, "Extension"),
                 React.createElement("span", null, "Embedded"),
                 React.createElement("span", null, "Modified"),
-                React.createElement("span", null, "Hash")
+                React.createElement("span", null, "Hash"),
+                React.createElement("span", null, "Action")
               ),
               ...libraryFiles.map((file) => React.createElement(
                 "div",
@@ -509,7 +521,12 @@ function App() {
                   React.createElement("span", { className: `status-badge ${file.embedded ? "active" : "pending"}` }, file.embedded ? "yes" : "no")
                 ),
                 React.createElement("span", null, file.lastModified ? new Date(file.lastModified).toISOString() : "n/a"),
-                React.createElement("span", { className: "library-hash" }, file.hash || "n/a")
+                React.createElement("span", { className: "library-hash" }, file.hash || "n/a"),
+                React.createElement(
+                  "button",
+                  { type: "button", className: "library-delete-button", "aria-label": `Delete ${file.path}` },
+                  icon("M9 3h6l1 2h4v2H4V5h4zm1 6h2v8h-2zm4 0h2v8h-2zM7 9h2v8H7z")
+                )
               ))
             )
           )
