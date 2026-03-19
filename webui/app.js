@@ -384,6 +384,9 @@ function App() {
     { viewBox: "0 0 24 24", className: "icon", "aria-hidden": "true" },
     React.createElement("path", { d: path })
   );
+  const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
+  const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
+  const fileUploadIconPath = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zm0 1.5L18.5 9H14zM11 17v-4.6l-1.7 1.7-1.4-1.4L12 8.6l4.1 4.1-1.4 1.4-1.7-1.7V17z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -455,7 +458,7 @@ function App() {
             React.createElement(
               "button",
               { type: "button", className: "send header-chat-link", onClick: openChatPage },
-              icon("M4 5h16v14H4zm2 2v10h12V7zm2 2h8v2H8zm0 4h5v2H8"),
+              icon(chatIconPath),
               "Chat"
             ),
             React.createElement("h2", { className: "header-title" }, "Library")
@@ -489,7 +492,7 @@ function App() {
               React.createElement(
                 "button",
                 { type: "button", className: "restart-button library-upload-button" },
-                icon("M12 3v10m0-10 4 4m-4-4-4 4M4 15v4h16v-4"),
+                icon(fileUploadIconPath),
                 "Upload"
               )
             ),
@@ -666,13 +669,13 @@ function App() {
             ? React.createElement(
               "button",
               { type: "button", onClick: openChatPage },
-              icon("M3 5h18v14H3zm2 2v10h14V7zm2 2h10v2H7zm0 4h7v2H7"),
+              icon(chatIconPath),
               "Chat"
             )
             : React.createElement(
               "button",
               { type: "button", onClick: openLibraryPage },
-              icon("M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1m1 2v10h14V7Zm2 2h10v2H7zm0 4h6v2H7"),
+              icon(libraryIconPath),
               "Library"
             ),
           React.createElement(
