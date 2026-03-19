@@ -745,6 +745,7 @@ function App() {
                 onClick: openPromptFilePicker,
                 disabled: isSending || !isEmbeddingReady,
                 "aria-label": "Attach files",
+                "data-testid": "composer-attach-button",
                 title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
               },
               icon("M16.5 6.5a4.5 4.5 0 0 0-6.36 0l-6 6a3.5 3.5 0 0 0 4.95 4.95l6.01-6.01 1.41 1.42-6.01 6.01a5.5 5.5 0 0 1-7.78-7.78l6-6a6.5 6.5 0 0 1 9.2 9.2l-6.01 6a3.5 3.5 0 0 1-4.95-4.95l5.3-5.3 1.41 1.42-5.3 5.3a1.5 1.5 0 0 0 2.12 2.12l6.01-6.01a4.5 4.5 0 0 0 0-6.36"),
@@ -777,6 +778,13 @@ function App() {
             icon("M2 21l20-9L2 3v7l14 2-14 2z"),
             React.createElement("span", null, isSending ? "Sending..." : "Send")
           ),
+          attachedPromptFiles.length > 0
+            ? React.createElement(
+              "p",
+              { className: "composer-attachment-list" },
+              `Attached: ${attachedPromptFiles.map((file) => file.name).join(", ")}`
+            )
+            : null,
           attachmentNotice
             ? React.createElement(
               "p",
