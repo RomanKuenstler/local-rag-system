@@ -90,6 +90,15 @@ services:
       dockerfile: Dockerfile
     ports:
       - "5173:80"
+    develop:
+      watch:
+        - action: sync
+          path: ./webui
+          target: /usr/share/nginx/html
+          initial_sync: true
+          ignore:
+            - Dockerfile
+            - nginx.conf
     depends_on:
       - retriever
 
