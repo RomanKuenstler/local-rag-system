@@ -1,5 +1,7 @@
 import fs from "fs";
 import http from "http";
+import os from "os";
+import path from "path";
 import { ChatOpenAI } from "@langchain/openai";
 import {
   APP_NAME,
@@ -50,6 +52,10 @@ import {
   readEmbeddableFiles,
   readEmbeddingStatus,
 } from "./src/embedding-service.js";
+import {
+  normalizeIndexableFileByExtension,
+  normalizeIndexableTextByExtension,
+} from "./src/document-processing.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
 
 validateRetrievalConfig();
@@ -81,6 +87,8 @@ const chatModel = new ChatOpenAI({
 
 const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
+const MAX_PROMPT_UPLOAD_FILES = 3;
 const sessionMemory = new Map();
 const pendingWeakAnswers = new Map();
 const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
@@ -114,6 +122,97 @@ function appendHistory(sessionId, role, content) {
 
 function normalizePrompt(input) {
   return String(input || "").trim();
+}
+
+async function normalizeUploadedPromptFile(file) {
+  const rawName = String(file?.name || "").trim();
+  if (!rawName) {
+    return { ok: false, reason: "missing_name" };
+  }
+
+  const name = path.basename(rawName);
+  const extension = path.extname(name).toLowerCase();
+  if (!UPLOADABLE_EXTENSIONS.has(extension)) {
+    return { ok: false, reason: "unsupported_extension", name };
+  }
+
+  let buffer;
+  try {
+    if (typeof file?.contentBase64 === "string" && file.contentBase64.length > 0) {
+      buffer = Buffer.from(file.contentBase64, "base64");
+    } else if (typeof file?.content === "string" && file.content.length > 0) {
+      buffer = Buffer.from(file.content, "utf8");
+    } else {
+      return { ok: false, reason: "missing_content", name };
+    }
+  } catch {
+    return { ok: false, reason: "invalid_encoding", name };
+  }
+
+  let content = "";
+  if (extension === ".pdf") {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-rag-upload-"));
+    const tempPath = path.join(tempDir, name);
+
+    try {
+      fs.writeFileSync(tempPath, buffer);
+      content = await normalizeIndexableFileByExtension(tempPath, extension);
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+  } else {
+    content = normalizeIndexableTextByExtension(buffer.toString("utf8"), extension);
+  }
+
+  if (!content) {
+    return { ok: false, reason: "empty_content", name };
+  }
+
+  return {
+    ok: true,
+    file: {
+      name,
+      content,
+    },
+  };
+}
+
+async function buildUploadedPromptContext(uploadedFiles) {
+  const normalizedUploadedFiles = [];
+  const skippedFiles = [];
+
+  for (const file of uploadedFiles) {
+    const normalized = await normalizeUploadedPromptFile(file);
+    if (!normalized.ok) {
+      skippedFiles.push(normalized.name || "unnamed-file");
+      continue;
+    }
+    normalizedUploadedFiles.push(normalized.file);
+  }
+
+  if (normalizedUploadedFiles.length === 0) {
+    return {
+      hasUploadedContext: false,
+      uploadedFiles: [],
+      skippedFiles,
+      uploadedContext: "",
+    };
+  }
+
+  const uploadedContext = normalizedUploadedFiles
+    .map((file) => [`UPLOAD FILE: ${file.name}`, file.content.trim()].join("\n"))
+    .join("\n\n---\n\n");
+
+  return {
+    hasUploadedContext: true,
+    uploadedFiles: normalizedUploadedFiles,
+    skippedFiles,
+    uploadedContext,
+  };
 }
 
 
@@ -609,9 +708,17 @@ async function handlePrompt(req, res) {
   const body = await readJsonBody(req);
   const prompt = normalizePrompt(body.prompt);
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+  const uploadedFiles = Array.isArray(body.uploadedFiles) ? body.uploadedFiles : [];
 
   if (!prompt) {
     json(res, 400, { error: "Missing required field: prompt" });
+    return;
+  }
+
+  if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
+    json(res, 400, {
+      error: `Too many uploaded files. Maximum is ${MAX_PROMPT_UPLOAD_FILES} per prompt.`,
+    });
     return;
   }
 
@@ -635,7 +742,31 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const searchResult = await searchKnowledgeBase(prompt);
+  let promptForRetrieval = prompt;
+  let promptForAssistant = prompt;
+  let uploadInfo = null;
+
+  if (uploadedFiles.length > 0) {
+    const uploadedContextResult = await buildUploadedPromptContext(uploadedFiles);
+    if (!uploadedContextResult.hasUploadedContext) {
+      json(res, 400, {
+        error:
+          uploadedContextResult.skippedFiles.length > 0
+            ? `No valid uploaded files. Unsupported/empty files: ${uploadedContextResult.skippedFiles.join(", ")}.`
+            : "No valid uploaded files.",
+      });
+      return;
+    }
+
+    promptForAssistant = `${prompt}\n\nONE-TIME UPLOADED FILE CONTEXT\n${uploadedContextResult.uploadedContext}`;
+    uploadInfo = {
+      uploadedCount: uploadedContextResult.uploadedFiles.length,
+      uploadedFiles: uploadedContextResult.uploadedFiles.map((file) => file.name),
+      skippedFiles: uploadedContextResult.skippedFiles,
+    };
+  }
+
+  const searchResult = await searchKnowledgeBase(promptForRetrieval);
   const chatHistory = getSessionHistory(sessionId);
 
   const assistantResponse = await chatModel.invoke([
@@ -646,7 +777,7 @@ async function handlePrompt(req, res) {
       profileId,
     }),
     ...chatHistory,
-    ["human", prompt],
+    ["human", promptForAssistant],
   ]);
 
   const answer = String(assistantResponse.content || "").trim();
@@ -657,7 +788,7 @@ async function handlePrompt(req, res) {
       evidenceSeverity: searchResult.evidenceQuality,
     });
 
-    appendHistory(sessionId, "human", prompt);
+    appendHistory(sessionId, "human", promptForRetrieval);
     appendHistory(sessionId, "ai", answer);
 
     json(res, 200, {
@@ -670,6 +801,7 @@ async function handlePrompt(req, res) {
         type: "weak_confirmation",
         pending: true,
       },
+      upload: uploadInfo,
       retrieval: createSimilarityDetails(searchResult.results, {
         maxSimilarities: runtimeConfig.maxSimilarities,
         cosineLimit: runtimeConfig.cosineLimit,
@@ -678,7 +810,7 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  appendHistory(sessionId, "human", prompt);
+  appendHistory(sessionId, "human", promptForRetrieval);
   appendHistory(sessionId, "ai", answer);
 
   json(res, 200, {
@@ -686,6 +818,7 @@ async function handlePrompt(req, res) {
     answer,
     evidenceSeverity: searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
+    upload: uploadInfo,
     retrieval: createSimilarityDetails(searchResult.results, {
       maxSimilarities: runtimeConfig.maxSimilarities,
       cosineLimit: runtimeConfig.cosineLimit,
