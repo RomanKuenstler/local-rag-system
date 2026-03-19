@@ -572,17 +572,25 @@ body {
   display: none;
 }
 .composer-attach-button {
-  border: none;
-  background: transparent;
-  padding: 0.38rem 0.42rem;
-  color: #6b7280;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 0.34rem 0.62rem;
+  color: #334155;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  gap: 0.32rem;
   justify-content: center;
-  align-self: stretch;
+  align-self: center;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 550;
 }
-.composer-attach-button:hover:not(:disabled) { color: #111827; }
+.composer-attach-button:hover:not(:disabled) {
+  color: #0f172a;
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+}
 .composer-attach-button .icon {
   width: 1.02rem;
   height: 1.02rem;
