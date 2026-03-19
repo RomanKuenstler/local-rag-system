@@ -24,6 +24,10 @@ const UI_MODE_OPTIONS = [
   { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
   { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details." },
 ];
+const PROMPT_ATTACHMENT_RULES = {
+  maxFiles: 3,
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
+};
 
 function getScoreSeverity(score) {
   if (!Number.isFinite(score)) return "unknown";
@@ -45,8 +49,6 @@ marked.setOptions({
 });
 
 function App() {
-  const UPLOAD_ALLOWED_EXTENSIONS = [".md", ".txt", ".html", ".htm", ".pdf"];
-  const MAX_PROMPT_ATTACHMENTS = 3;
   const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -187,11 +189,47 @@ function App() {
       return [];
     }
 
-    const limitedFiles = normalizedFiles.slice(0, MAX_PROMPT_ATTACHMENTS);
+    const limitedFiles = normalizedFiles.slice(0, PROMPT_ATTACHMENT_RULES.maxFiles);
     return Promise.all(limitedFiles.map(async (file) => ({
       name: file.name,
       contentBase64: await fileToBase64(file),
     })));
+  }
+
+  function getFileExtension(filename) {
+    const normalized = String(filename || "");
+    const extension = normalized.includes(".")
+      ? `.${normalized.split(".").pop()?.toLowerCase() || ""}`
+      : "";
+    return extension;
+  }
+
+  function validatePromptAttachments(files) {
+    const selectedFiles = Array.isArray(files) ? files : [];
+
+    if (selectedFiles.length > PROMPT_ATTACHMENT_RULES.maxFiles) {
+      return {
+        validFiles: [],
+        notice: `You can attach up to ${PROMPT_ATTACHMENT_RULES.maxFiles} files per prompt.`,
+      };
+    }
+
+    const invalidFiles = selectedFiles.filter((file) => {
+      const extension = getFileExtension(file.name);
+      return !PROMPT_ATTACHMENT_RULES.allowedExtensions.includes(extension);
+    });
+
+    if (invalidFiles.length > 0) {
+      return {
+        validFiles: [],
+        notice: `Unsupported file type: ${invalidFiles.map((file) => file.name).join(", ")}`,
+      };
+    }
+
+    return {
+      validFiles: selectedFiles,
+      notice: `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected.`,
+    };
   }
 
   async function sendRawPrompt(rawPrompt, promptFiles = []) {
@@ -430,27 +468,9 @@ function App() {
       return;
     }
 
-    if (selectedFiles.length > MAX_PROMPT_ATTACHMENTS) {
-      setAttachmentNotice(`You can attach up to ${MAX_PROMPT_ATTACHMENTS} files per prompt.`);
-      setAttachedPromptFiles([]);
-      event.target.value = "";
-      return;
-    }
-
-    const invalidFiles = selectedFiles.filter((file) => {
-      const extension = `.${String(file.name || "").split(".").pop()?.toLowerCase() || ""}`;
-      return !UPLOAD_ALLOWED_EXTENSIONS.includes(extension);
-    });
-
-    if (invalidFiles.length > 0) {
-      setAttachmentNotice(`Unsupported file type: ${invalidFiles.map((file) => file.name).join(", ")}`);
-      setAttachedPromptFiles([]);
-      event.target.value = "";
-      return;
-    }
-
-    setAttachedPromptFiles(selectedFiles);
-    setAttachmentNotice(`${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected.`);
+    const validation = validatePromptAttachments(selectedFiles);
+    setAttachedPromptFiles(validation.validFiles);
+    setAttachmentNotice(validation.notice);
     event.target.value = "";
   }
 
@@ -712,7 +732,7 @@ function App() {
               type: "file",
               className: "composer-file-input",
               multiple: true,
-              accept: UPLOAD_ALLOWED_EXTENSIONS.join(","),
+              accept: PROMPT_ATTACHMENT_RULES.allowedExtensions.join(","),
               onChange: handlePromptFileSelection,
               "aria-hidden": "true",
               tabIndex: -1,
@@ -725,9 +745,10 @@ function App() {
                 onClick: openPromptFilePicker,
                 disabled: isSending || !isEmbeddingReady,
                 "aria-label": "Attach files",
-                title: `Attach files (${UPLOAD_ALLOWED_EXTENSIONS.join(", ")})`,
+                title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
               },
-              icon("M16.5 6.5a4.5 4.5 0 0 0-6.36 0l-6 6a3.5 3.5 0 0 0 4.95 4.95l6.01-6.01 1.41 1.42-6.01 6.01a5.5 5.5 0 0 1-7.78-7.78l6-6a6.5 6.5 0 0 1 9.2 9.2l-6.01 6a3.5 3.5 0 0 1-4.95-4.95l5.3-5.3 1.41 1.42-5.3 5.3a1.5 1.5 0 0 0 2.12 2.12l6.01-6.01a4.5 4.5 0 0 0 0-6.36")
+              icon("M16.5 6.5a4.5 4.5 0 0 0-6.36 0l-6 6a3.5 3.5 0 0 0 4.95 4.95l6.01-6.01 1.41 1.42-6.01 6.01a5.5 5.5 0 0 1-7.78-7.78l6-6a6.5 6.5 0 0 1 9.2 9.2l-6.01 6a3.5 3.5 0 0 1-4.95-4.95l5.3-5.3 1.41 1.42-5.3 5.3a1.5 1.5 0 0 0 2.12 2.12l6.01-6.01a4.5 4.5 0 0 0 0-6.36"),
+              React.createElement("span", null, "Attach")
             ),
             React.createElement("textarea", {
               ref: composerInputRef,

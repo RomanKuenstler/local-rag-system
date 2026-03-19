@@ -27,6 +27,7 @@ Detailed documentation (architecture, setup details, internals) has been moved t
 The web UI is intentionally minimal for now:
 - message list (chat-like)
 - prompt input + send button
+- **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, up to 3 files)
 - status badges for retriever, embedding state, and embedded file count
 
 ## Quick start
