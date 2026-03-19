@@ -548,7 +548,7 @@ body {
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.55rem;
   background: rgba(255,255,255,.97);
   border: 1px solid #d1d5db;
@@ -561,6 +561,31 @@ body {
   z-index: 50;
   width: min(calc(100% - 2rem), 860px);
   margin: 0;
+}
+.composer-input-shell {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.2rem;
+}
+.composer-file-input {
+  display: none;
+}
+.composer-attach-button {
+  border: none;
+  background: transparent;
+  padding: 0.38rem 0.42rem;
+  color: #6b7280;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+}
+.composer-attach-button:hover:not(:disabled) { color: #111827; }
+.composer-attach-button .icon {
+  width: 1.02rem;
+  height: 1.02rem;
 }
 
 input, textarea, button { font: inherit; }
@@ -577,6 +602,15 @@ textarea {
   overflow-y: auto;
 }
 textarea:focus { outline: none; }
+.composer-attachment-notice {
+  grid-column: 1 / -1;
+  margin: -0.15rem 0 0;
+  padding: 0 0.5rem 0.1rem;
+  font-size: 0.74rem;
+  color: #b45309;
+}
+.composer-attachment-notice.valid { color: #166534; }
+.composer-attachment-notice.invalid { color: #b91c1c; }
 
 button.send {
   background: #111827;
