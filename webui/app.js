@@ -45,9 +45,13 @@ marked.setOptions({
 });
 
 function App() {
+  const UPLOAD_ALLOWED_EXTENSIONS = [".md", ".txt", ".html", ".htm", ".pdf"];
+  const MAX_PROMPT_ATTACHMENTS = 3;
   const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
+  const [attachedPromptFiles, setAttachedPromptFiles] = useState([]);
+  const [attachmentNotice, setAttachmentNotice] = useState("");
   const [panelData, setPanelData] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [statusData, setStatusData] = useState(null);
@@ -61,6 +65,7 @@ function App() {
   const pollTimeoutRef = useRef(null);
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
+  const promptFileInputRef = useRef(null);
   const menuRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
@@ -163,9 +168,36 @@ function App() {
     return undefined;
   }, [panelData]);
 
-  async function sendRawPrompt(rawPrompt) {
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const rawResult = String(reader.result || "");
+        const [, base64 = ""] = rawResult.split(",");
+        resolve(base64);
+      };
+      reader.onerror = () => reject(new Error(`Failed to read file: ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function buildUploadedFilesPayload(files) {
+    const normalizedFiles = Array.isArray(files) ? files : [];
+    if (normalizedFiles.length === 0) {
+      return [];
+    }
+
+    const limitedFiles = normalizedFiles.slice(0, MAX_PROMPT_ATTACHMENTS);
+    return Promise.all(limitedFiles.map(async (file) => ({
+      name: file.name,
+      contentBase64: await fileToBase64(file),
+    })));
+  }
+
+  async function sendRawPrompt(rawPrompt, promptFiles = []) {
     const prompt = String(rawPrompt || "").trim();
     const isPanelCommand = PANEL_COMMANDS.has(prompt.toLowerCase());
+    const hasPromptFiles = Array.isArray(promptFiles) && promptFiles.length > 0;
     if (!prompt || isSending) return;
 
     if (!isPanelCommand) {
@@ -192,10 +224,19 @@ function App() {
     setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", { id: pendingMessageId, isPending: true })));
 
     try {
+      if (isPanelCommand && hasPromptFiles) {
+        throw new Error("File attachments are only supported for normal chat prompts, not slash commands.");
+      }
+
+      const uploadedFilesPayload = isPanelCommand ? [] : await buildUploadedFilesPayload(promptFiles);
       const response = await fetch(`${API_BASE_URL}/api/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, sessionId: "webui-default-session" }),
+        body: JSON.stringify({
+          prompt,
+          sessionId: "webui-default-session",
+          uploadedFiles: uploadedFilesPayload,
+        }),
       });
 
       const payload = await response.json();
@@ -225,6 +266,7 @@ function App() {
           };
         }));
       }
+
     } catch (error) {
       setMessages((prev) => prev.map((message) => {
         if (message.id !== pendingMessageId) return message;
@@ -238,6 +280,10 @@ function App() {
         };
       }));
     } finally {
+      if (hasPromptFiles) {
+        setAttachedPromptFiles([]);
+        setAttachmentNotice("");
+      }
       setIsSending(false);
       await refreshStatus();
     }
@@ -370,7 +416,42 @@ function App() {
 
   async function sendPrompt(event) {
     event.preventDefault();
-    await sendRawPrompt(inputValue);
+    await sendRawPrompt(inputValue, attachedPromptFiles);
+  }
+
+  function openPromptFilePicker() {
+    if (isSending || !isEmbeddingReady) return;
+    promptFileInputRef.current?.click();
+  }
+
+  function handlePromptFileSelection(event) {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    if (selectedFiles.length > MAX_PROMPT_ATTACHMENTS) {
+      setAttachmentNotice(`You can attach up to ${MAX_PROMPT_ATTACHMENTS} files per prompt.`);
+      setAttachedPromptFiles([]);
+      event.target.value = "";
+      return;
+    }
+
+    const invalidFiles = selectedFiles.filter((file) => {
+      const extension = `.${String(file.name || "").split(".").pop()?.toLowerCase() || ""}`;
+      return !UPLOAD_ALLOWED_EXTENSIONS.includes(extension);
+    });
+
+    if (invalidFiles.length > 0) {
+      setAttachmentNotice(`Unsupported file type: ${invalidFiles.map((file) => file.name).join(", ")}`);
+      setAttachedPromptFiles([]);
+      event.target.value = "";
+      return;
+    }
+
+    setAttachedPromptFiles(selectedFiles);
+    setAttachmentNotice(`${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected.`);
+    event.target.value = "";
   }
 
   async function submitConfigChange(configName, rawValue) {
@@ -623,32 +704,65 @@ function App() {
         React.createElement(
           "form",
           { className: "composer", onSubmit: sendPrompt },
-          React.createElement("textarea", {
-            ref: composerInputRef,
-            value: inputValue,
-            onChange: (event) => {
-              setInputValue(event.target.value);
-              resizeComposerInput(event.target);
-            },
-            onInput: (event) => resizeComposerInput(event.target),
-            onKeyDown: (event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                if (inputValue.trim() && !isSending && isEmbeddingReady) {
-                  void sendRawPrompt(inputValue);
+          React.createElement(
+            "div",
+            { className: "composer-input-shell" },
+            React.createElement("input", {
+              ref: promptFileInputRef,
+              type: "file",
+              className: "composer-file-input",
+              multiple: true,
+              accept: UPLOAD_ALLOWED_EXTENSIONS.join(","),
+              onChange: handlePromptFileSelection,
+              "aria-hidden": "true",
+              tabIndex: -1,
+            }),
+            React.createElement(
+              "button",
+              {
+                className: "composer-attach-button",
+                type: "button",
+                onClick: openPromptFilePicker,
+                disabled: isSending || !isEmbeddingReady,
+                "aria-label": "Attach files",
+                title: `Attach files (${UPLOAD_ALLOWED_EXTENSIONS.join(", ")})`,
+              },
+              icon("M16.5 6.5a4.5 4.5 0 0 0-6.36 0l-6 6a3.5 3.5 0 0 0 4.95 4.95l6.01-6.01 1.41 1.42-6.01 6.01a5.5 5.5 0 0 1-7.78-7.78l6-6a6.5 6.5 0 0 1 9.2 9.2l-6.01 6a3.5 3.5 0 0 1-4.95-4.95l5.3-5.3 1.41 1.42-5.3 5.3a1.5 1.5 0 0 0 2.12 2.12l6.01-6.01a4.5 4.5 0 0 0 0-6.36")
+            ),
+            React.createElement("textarea", {
+              ref: composerInputRef,
+              value: inputValue,
+              onChange: (event) => {
+                setInputValue(event.target.value);
+                resizeComposerInput(event.target);
+              },
+              onInput: (event) => resizeComposerInput(event.target),
+              onKeyDown: (event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  if (inputValue.trim() && !isSending && isEmbeddingReady) {
+                    void sendRawPrompt(inputValue, attachedPromptFiles);
+                  }
                 }
-              }
-            },
-            rows: 1,
-            placeholder: "Ask anything about your knowledge base...",
-            disabled: isSending || !isEmbeddingReady,
-          }),
+              },
+              rows: 1,
+              placeholder: "Ask anything about your knowledge base...",
+              disabled: isSending || !isEmbeddingReady,
+            })
+          ),
           React.createElement(
             "button",
             { className: "send", type: "submit", disabled: isSending || !isEmbeddingReady || !inputValue.trim() },
             icon("M2 21l20-9L2 3v7l14 2-14 2z"),
             React.createElement("span", null, isSending ? "Sending..." : "Send")
-          )
+          ),
+          attachmentNotice
+            ? React.createElement(
+              "p",
+              { className: `composer-attachment-notice${attachedPromptFiles.length > 0 ? " valid" : " invalid"}` },
+              attachmentNotice
+            )
+            : null
         )
       )
     ),
