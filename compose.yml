@@ -12,6 +12,20 @@ x-node-service: &node-service
           - node_modules/
 
 services:
+  backend:
+    <<: *node-service
+    environment:
+      APP_ROLE: backend
+      BACKEND_API_PORT: 3100
+      RETRIEVER_BASE_URL: http://retriever:3000
+      EMBEDDER_BASE_URL: http://embedder:3200
+    ports:
+      - "3100:3100"
+    command: ["npm", "run", "start:backend:api"]
+    depends_on:
+      - retriever
+      - embedder
+
   retriever:
     <<: *node-service
     environment:
@@ -37,8 +51,6 @@ services:
       - ./data:/app/data
       - ./upload:/app/upload
       - rag_state:/app/state
-    ports:
-      - "3000:3000"
     configs:
       - source: guardrails.md
         target: /app/guardrails.md
@@ -62,6 +74,7 @@ services:
       INDEX_STATE_FILE: /app/state/.index-state.json
       EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       EMBED_INTERVAL_SECONDS: 15
+      EMBEDDER_HEALTH_PORT: 3200
       CHUNK_SIZE: 600
       CHUNK_OVERLAP: 100
       MAX_EMBEDDING_CHARS: 400
@@ -81,7 +94,7 @@ services:
       context: ./webui
       dockerfile: Dockerfile
     environment:
-      UPSTREAM_API_URL: http://retriever:3000
+      UPSTREAM_API_URL: http://backend:3100
     ports:
       - "5173:80"
     develop:
@@ -94,7 +107,7 @@ services:
             - Dockerfile
             - nginx.conf.template
     depends_on:
-      - retriever
+      - backend
 
   qdrant:
     image: qdrant/qdrant

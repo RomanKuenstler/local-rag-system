@@ -4,11 +4,12 @@ A local, containerized Retrieval-Augmented Generation (RAG) system for experimen
 
 ## What this project is
 
-This project runs four services with Docker Compose:
+This project runs five services with Docker Compose:
+- **backend**: frontend-facing API that orchestrates calls to internal services.
 - **embedder**: continuously indexes files from `./data` into vectors.
 - **qdrant**: stores embeddings and metadata.
 - **retriever**: API-oriented retrieval + answer service.
-- **webui**: very small React chat UI served by nginx; `/api` is reverse-proxied to the active API service (currently retriever).
+- **webui**: very small React chat UI served by nginx; `/api` is reverse-proxied to the backend service.
 
 ## Documentation
 
@@ -33,18 +34,19 @@ The web UI is intentionally minimal for now:
 ## Quick start
 
 ```bash
-docker compose up -d qdrant embedder retriever webui
+docker compose up -d qdrant embedder retriever backend webui
 ```
 
-- Retriever API: `http://localhost:3000`
-- Web UI: `http://localhost:5173` (same-origin `/api` proxy to `retriever:3000`)
+- Backend API: `http://localhost:3100`
+- Retriever API: internal-only (`http://retriever:3000` on the compose network)
+- Web UI: `http://localhost:5173` (same-origin `/api` proxy to `backend:3100`)
 
 ## Example API calls
 
 ```bash
-curl http://localhost:3000/api/status
-curl http://localhost:3000/api/files
-curl -X POST http://localhost:3000/api/prompt \
+curl http://localhost:3100/api/status
+curl http://localhost:3100/api/files
+curl -X POST http://localhost:3100/api/prompt \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"What does the firewall document say about IPS?","sessionId":"demo"}'
 ```

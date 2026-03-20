@@ -7,6 +7,7 @@ RUN npm install
 
 COPY index.js ./
 COPY embedder.js ./
+COPY backend-api.js ./
 COPY retriever-api.js ./
 COPY src ./src
 
@@ -17,4 +18,4 @@ RUN mkdir -p /app/state && chown -R ai:nodejs /app
 USER ai
 
 ENV APP_ROLE=retriever
-CMD ["sh", "-c", "if [ \"$APP_ROLE\" = \"embedder\" ]; then node embedder.js; else node index.js; fi"]
+CMD ["sh", "-c", "if [ \"$APP_ROLE\" = \"embedder\" ]; then node embedder.js; elif [ \"$APP_ROLE\" = \"backend\" ]; then node backend-api.js; else node index.js; fi"]

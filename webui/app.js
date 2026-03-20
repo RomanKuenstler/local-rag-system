@@ -545,7 +545,7 @@ function App() {
   const restartConfigRows = configSections.flatMap((section) => section.entries
     .filter((entry) => !entry.editable)
     .map((entry) => ({ ...entry, section: section.label })));
-  const retrieverStatus = normalizeStatusBadge(statusData?.app?.role);
+  const retrieverStatus = normalizeStatusBadge(statusData?.services?.retriever?.role || statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);

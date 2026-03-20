@@ -889,17 +889,21 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/status") {
+    const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
+    const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
+    const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
+
+    if (req.method === "GET" && isStatusRoute) {
       await handleStatus(req, res);
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/files") {
+    if (req.method === "GET" && isFilesRoute) {
       await handleFiles(req, res);
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/prompt") {
+    if (req.method === "POST" && isPromptRoute) {
       await handlePrompt(req, res);
       return;
     }
@@ -932,5 +936,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, POST /api/prompt");
+  console.log(
+    "Endpoints: GET /api/status, GET /api/files, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, POST /internal/retriever/prompt"
+  );
 });
