@@ -28,6 +28,20 @@ const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
 };
+const SESSION_ID_STORAGE_KEY = "rag-session-id";
+const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+
+function getOrCreatePersistentId(storageKey, fallbackPrefix) {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored) return stored;
+    const created = `${fallbackPrefix}-${crypto.randomUUID()}`;
+    window.localStorage.setItem(storageKey, created);
+    return created;
+  } catch {
+    return `${fallbackPrefix}-fallback`;
+  }
+}
 
 function getScoreSeverity(score) {
   if (!Number.isFinite(score)) return "unknown";
@@ -62,6 +76,8 @@ function App() {
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState(getInitialView);
+  const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
+  const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -128,6 +144,24 @@ function App() {
     }
   }
 
+  async function loadMessagesFromDb() {
+    const sessionId = sessionIdRef.current;
+    const chatId = chatIdRef.current;
+    const response = await fetch(
+      `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}`
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.error || "Failed to load messages");
+    }
+
+    const normalized = Array.isArray(payload.messages)
+      ? payload.messages.map((message) => createMessage(message.role, message.content))
+      : [];
+
+    setMessages(normalized);
+  }
+
   useEffect(() => {
     async function poll() {
       await refreshStatus();
@@ -141,6 +175,12 @@ function App() {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
   }, [hasShownReadyGreeting]);
+
+  useEffect(() => {
+    loadMessagesFromDb().catch(() => {
+      setMessages([]);
+    });
+  }, []);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -299,7 +339,8 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          sessionId: "webui-default-session",
+          sessionId: sessionIdRef.current,
+          chatId: chatIdRef.current,
           uploadedFiles: uploadedFilesPayload,
         }),
       });
@@ -348,6 +389,7 @@ function App() {
       }));
     } finally {
       setIsSending(false);
+      await loadMessagesFromDb().catch(() => {});
       await refreshStatus();
     }
   }
@@ -356,7 +398,7 @@ function App() {
     const response = await fetch(`${API_BASE_URL}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: command, sessionId: "webui-default-session" }),
+      body: JSON.stringify({ prompt: command, sessionId: sessionIdRef.current, chatId: chatIdRef.current }),
     });
 
     const payload = await response.json();
@@ -668,14 +710,14 @@ function App() {
           { className: "chat" },
           !isEmbeddingReady && !isLoadingStatus
             ? null
-            : messages.map((message, index) => {
+            : messages.slice(-20).map((message, index, visibleMessages) => {
               const messageBadge = getMessageBadge(message);
               return React.createElement(
                 "article",
                 {
                   key: message.id,
                   className: `msg ${message.role}${message.isPending ? " pending" : ""}`,
-                  ref: index === messages.length - 1 ? lastMessageRef : null,
+                  ref: index === visibleMessages.length - 1 ? lastMessageRef : null,
                 },
                 React.createElement(
                   "div",
