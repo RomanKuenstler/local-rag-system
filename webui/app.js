@@ -28,6 +28,20 @@ const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
 };
+const SESSION_ID_STORAGE_KEY = "rag-session-id";
+const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+
+function getOrCreatePersistentId(storageKey, fallbackPrefix) {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored) return stored;
+    const created = `${fallbackPrefix}-${crypto.randomUUID()}`;
+    window.localStorage.setItem(storageKey, created);
+    return created;
+  } catch {
+    return `${fallbackPrefix}-fallback`;
+  }
+}
 
 function getScoreSeverity(score) {
   if (!Number.isFinite(score)) return "unknown";
@@ -62,6 +76,8 @@ function App() {
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState(getInitialView);
+  const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
+  const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -108,7 +124,7 @@ function App() {
           const nextReady = newStatus?.embedding?.readiness?.ready === true;
 
           if (!previousReady && nextReady && !hasShownReadyGreeting) {
-            setMessages((prev) => prev.concat(createMessage("assistant", "How can I help you today?")));
+            setMessages((prev) => prev.concat(createMessage("assistant", "How can I help you today?", { isVolatile: true })));
             setHasShownReadyGreeting(true);
           }
 
@@ -128,6 +144,38 @@ function App() {
     }
   }
 
+  async function loadMessagesFromDb() {
+    const sessionId = sessionIdRef.current;
+    const chatId = chatIdRef.current;
+    const messageLoadLimit = 40;
+    const response = await fetch(
+      `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.error || "Failed to load messages");
+    }
+
+    const normalized = Array.isArray(payload.messages)
+      ? payload.messages.map((message) => {
+        const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
+        return createMessage(message.role, message.content, {
+          evidenceSeverity: metadata.evidenceSeverity || null,
+          responseType: metadata.responseType || null,
+          retrieval: metadata.retrieval || null,
+          interaction: metadata.interaction || null,
+          upload: metadata.upload || null,
+          attachedFiles: Array.isArray(metadata.attachedFiles) ? metadata.attachedFiles : [],
+        });
+      })
+      : [];
+
+    setMessages((previous) => {
+      const volatileMessages = previous.filter((message) => message.isVolatile);
+      return normalized.concat(volatileMessages);
+    });
+  }
+
   useEffect(() => {
     async function poll() {
       await refreshStatus();
@@ -141,6 +189,12 @@ function App() {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
   }, [hasShownReadyGreeting]);
+
+  useEffect(() => {
+    loadMessagesFromDb().catch(() => {
+      setMessages([]);
+    });
+  }, []);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -279,14 +333,17 @@ function App() {
       setMessages((prev) => prev.concat(createMessage(
         "assistant",
         "Embedding is still running. Please wait until indexing is finished before sending prompts.",
-        { evidenceSeverity: "warn" }
+        { evidenceSeverity: "warn", isVolatile: true }
       )));
       return;
     }
 
     setIsSending(true);
     const pendingMessageId = crypto.randomUUID();
-    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", { id: pendingMessageId, isPending: true })));
+    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
+      id: pendingMessageId,
+      isPending: true,
+    })));
 
     try {
       if (isPanelCommand && hasPromptFiles) {
@@ -299,7 +356,9 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          sessionId: "webui-default-session",
+          sessionId: sessionIdRef.current,
+          chatId: chatIdRef.current,
+          attachedFiles: selectedPromptFiles.map((file) => file.name),
           uploadedFiles: uploadedFilesPayload,
         }),
       });
@@ -344,10 +403,12 @@ function App() {
           responseType: null,
           retrieval: null,
           isPending: false,
+          isVolatile: true,
         };
       }));
     } finally {
       setIsSending(false);
+      await loadMessagesFromDb().catch(() => {});
       await refreshStatus();
     }
   }
@@ -356,7 +417,7 @@ function App() {
     const response = await fetch(`${API_BASE_URL}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: command, sessionId: "webui-default-session" }),
+      body: JSON.stringify({ prompt: command, sessionId: sessionIdRef.current, chatId: chatIdRef.current }),
     });
 
     const payload = await response.json();
@@ -394,7 +455,10 @@ function App() {
         configView: null,
       });
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
     } finally {
       setIsSending(false);
       await refreshStatus();
@@ -470,7 +534,10 @@ function App() {
       await fetchPanelCommand(command);
       await refreshCurrentPanel(panelData?.command);
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
     } finally {
       setIsSending(false);
       await refreshStatus();
@@ -668,14 +735,14 @@ function App() {
           { className: "chat" },
           !isEmbeddingReady && !isLoadingStatus
             ? null
-            : messages.map((message, index) => {
+            : messages.slice(-20).map((message, index, visibleMessages) => {
               const messageBadge = getMessageBadge(message);
               return React.createElement(
                 "article",
                 {
                   key: message.id,
                   className: `msg ${message.role}${message.isPending ? " pending" : ""}`,
-                  ref: index === messages.length - 1 ? lastMessageRef : null,
+                  ref: index === visibleMessages.length - 1 ? lastMessageRef : null,
                 },
                 React.createElement(
                   "div",

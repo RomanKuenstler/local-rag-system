@@ -53,9 +53,15 @@ import {
 } from "./src/embedding-service.js";
 import { ensureDatabaseReady } from "./src/db.js";
 import {
+  addChatMessage,
+  ensureChatContext,
+  getRuntimeConfigState,
   getIndexStateMap,
+  initializeRuntimeConfigDefaults,
   getSelectionState,
   initializeStateDefaults,
+  listChatMessages,
+  listRecentPromptHistory,
   listFileMetadata,
   updateSetting,
 } from "./src/state-store.js";
@@ -87,7 +93,6 @@ const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
 const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
-const sessionMemory = new Map();
 const pendingWeakAnswers = new Map();
 const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
   historyMessages: HISTORY_MESSAGES,
@@ -100,22 +105,12 @@ function stripAnsi(text) {
   return String(text || "").replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-function getSessionHistory(sessionId) {
-  if (!sessionMemory.has(sessionId)) {
-    sessionMemory.set(sessionId, []);
-  }
-
-  return sessionMemory.get(sessionId);
+function getPendingWeakAnswerKey(sessionId, chatId) {
+  return `${sessionId}::${chatId}`;
 }
 
-function appendHistory(sessionId, role, content) {
-  const history = getSessionHistory(sessionId);
-  history.push([role, content]);
-
-  const maxHistoryEntries = runtimeConfig.historyMessages * 2;
-  if (history.length > maxHistoryEntries) {
-    history.splice(0, history.length - maxHistoryEntries);
-  }
+function generateChatName() {
+  return `chat-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function normalizePrompt(input) {
@@ -304,13 +299,14 @@ async function buildLibraryInfoMessage() {
   return lines.join("\n");
 }
 
-async function handlePromptCommand(prompt, sessionId) {
+async function handlePromptCommand(prompt, sessionId, chatId) {
   const normalizedPrompt = prompt.toLowerCase();
-  const pendingWeakAnswer = pendingWeakAnswers.get(sessionId);
+  const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
+  const pendingWeakAnswer = pendingWeakAnswers.get(pendingWeakAnswerKey);
 
   if (pendingWeakAnswer) {
     if (["/yes", "/y"].includes(normalizedPrompt)) {
-      pendingWeakAnswers.delete(sessionId);
+      pendingWeakAnswers.delete(pendingWeakAnswerKey);
       return {
         statusCode: 200,
         payload: {
@@ -322,7 +318,7 @@ async function handlePromptCommand(prompt, sessionId) {
     }
 
     if (["/no", "/skip"].includes(normalizedPrompt)) {
-      pendingWeakAnswers.delete(sessionId);
+      pendingWeakAnswers.delete(pendingWeakAnswerKey);
       return {
         statusCode: 200,
         payload: {
@@ -577,6 +573,21 @@ async function handlePromptCommand(prompt, sessionId) {
     }
 
     const update = setRuntimeConfigValue(parsed.configName, parsed.rawValue);
+    const runtimeSettingKeyMap = {
+      "history messages": "history_messages",
+      "max similarities": "max_similarities",
+      "min similarities": "min_similarities",
+      "cosine limit": "cosine_limit",
+    };
+    const normalizedConfigName = String(parsed.configName || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (update.ok && runtimeSettingKeyMap[normalizedConfigName]) {
+      await updateSetting(runtimeSettingKeyMap[normalizedConfigName], runtimeConfig[{
+        "history messages": "historyMessages",
+        "max similarities": "maxSimilarities",
+        "min similarities": "minSimilarities",
+        "cosine limit": "cosineLimit",
+      }[normalizedConfigName]]);
+    }
 
     return {
       statusCode: update.ok ? 200 : 400,
@@ -695,12 +706,18 @@ async function handlePrompt(req, res) {
   const body = await readJsonBody(req);
   const prompt = normalizePrompt(body.prompt);
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+  const chatId = String(body.chatId || "default-chat").trim() || "default-chat";
   const uploadedFiles = Array.isArray(body.uploadedFiles) ? body.uploadedFiles : [];
+  const requestedAttachedFiles = Array.isArray(body.attachedFiles)
+    ? body.attachedFiles.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
 
   if (!prompt) {
     json(res, 400, { error: "Missing required field: prompt" });
     return;
   }
+
+  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -709,8 +726,10 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const commandResult = await handlePromptCommand(prompt, sessionId);
+  const commandResult = await handlePromptCommand(prompt, sessionId, chatId);
   if (commandResult) {
+    commandResult.payload.chatId = chatId;
+    commandResult.payload.chatName = chatName;
     if (commandResult.payload?.deferredCommand === "library_info") {
       commandResult.payload.answer = await buildLibraryInfoMessage();
       delete commandResult.payload.deferredCommand;
@@ -754,7 +773,12 @@ async function handlePrompt(req, res) {
   }
 
   const searchResult = await searchKnowledgeBase(promptForRetrieval);
-  const chatHistory = getSessionHistory(sessionId);
+  const historyEntryLimit = runtimeConfig.historyMessages * 2;
+  const chatHistory = await listRecentPromptHistory({ sessionId, chatId, limit: historyEntryLimit });
+  const retrievalDetails = createSimilarityDetails(searchResult.results, {
+    maxSimilarities: runtimeConfig.maxSimilarities,
+    cosineLimit: runtimeConfig.cosineLimit,
+  });
 
   const assistantResponse = await chatModel.invoke([
     ...buildSystemPromptLayers({
@@ -768,20 +792,40 @@ async function handlePrompt(req, res) {
   ]);
 
   const answer = String(assistantResponse.content || "").trim();
+  const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
 
   const hasUploadedContext = Boolean(uploadInfo?.uploadedCount);
 
   if (searchResult.evidenceQuality === "weak" && !hasUploadedContext) {
-    pendingWeakAnswers.set(sessionId, {
+    pendingWeakAnswers.set(pendingWeakAnswerKey, {
       answer,
       evidenceSeverity: searchResult.evidenceQuality,
     });
-
-    appendHistory(sessionId, "human", promptForRetrieval);
-    appendHistory(sessionId, "ai", answer);
+    await addChatMessage({
+      sessionId,
+      chatId,
+      role: "user",
+      content: promptForRetrieval,
+      metadata: {
+        attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
+      },
+    });
+    await addChatMessage({
+      sessionId,
+      chatId,
+      role: "assistant",
+      content: answer,
+      metadata: {
+        evidenceSeverity: searchResult.evidenceQuality,
+        upload: uploadInfo,
+        retrieval: retrievalDetails,
+      },
+    });
 
     json(res, 200, {
       sessionId,
+      chatId,
+      chatName,
       answer:
         "Evidence quality is WEAK for this topic. The generated answer may be unreliable. Do you want to see it? Use /yes to show it, or /no or /skip to hide it.",
       evidenceSeverity: "warn",
@@ -791,29 +835,65 @@ async function handlePrompt(req, res) {
         pending: true,
       },
       upload: uploadInfo,
-      retrieval: createSimilarityDetails(searchResult.results, {
-        maxSimilarities: runtimeConfig.maxSimilarities,
-        cosineLimit: runtimeConfig.cosineLimit,
-      }),
+      retrieval: retrievalDetails,
     });
     return;
   }
 
-  appendHistory(sessionId, "human", promptForRetrieval);
-  appendHistory(sessionId, "ai", answer);
+  await addChatMessage({
+    sessionId,
+    chatId,
+    role: "user",
+    content: promptForRetrieval,
+    metadata: {
+      attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
+    },
+  });
+  await addChatMessage({
+    sessionId,
+    chatId,
+    role: "assistant",
+    content: answer,
+    metadata: {
+      evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
+      upload: uploadInfo,
+      retrieval: retrievalDetails,
+    },
+  });
 
   json(res, 200, {
     sessionId,
+    chatId,
+    chatName,
     answer,
     evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     upload: uploadInfo,
-    retrieval: hasUploadedContext
-      ? null
-      : createSimilarityDetails(searchResult.results, {
-        maxSimilarities: runtimeConfig.maxSimilarities,
-        cosineLimit: runtimeConfig.cosineLimit,
-      }),
+    retrieval: hasUploadedContext ? null : retrievalDetails,
+  });
+}
+
+async function handleMessages(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
+  const chatId = String(url.searchParams.get("chatId") || "default-chat").trim() || "default-chat";
+  const limitParam = Number.parseInt(String(url.searchParams.get("limit") || ""), 10);
+  const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : null;
+
+  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
+  const rows = await listChatMessages({ sessionId, chatId, limit });
+
+  json(res, 200, {
+    sessionId,
+    chatId,
+    chatName,
+    totalMessages: rows.length,
+    messages: rows.map((row) => ({
+      role: row.role,
+      content: row.content,
+      metadata: row.metadata || {},
+      createdAt: row.created_at,
+    })),
   });
 }
 
@@ -836,6 +916,7 @@ async function handleStatus(_req, res) {
     },
     retrieval: {
       collection: COLLECTION_NAME,
+      historyMessages: runtimeConfig.historyMessages,
       qdrantUrl: QDRANT_URL,
       maxSimilarities: runtimeConfig.maxSimilarities,
       minSimilarities: runtimeConfig.minSimilarities,
@@ -885,6 +966,7 @@ const server = http.createServer(async (req, res) => {
 
     const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
     const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
+    const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
 
     if (req.method === "GET" && isStatusRoute) {
@@ -894,6 +976,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && isFilesRoute) {
       await handleFiles(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && isMessagesRoute) {
+      await handleMessages(req, res);
       return;
     }
 
@@ -930,10 +1017,26 @@ const server = http.createServer(async (req, res) => {
 
 await ensureDatabaseReady();
 await initializeStateDefaults({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+await initializeRuntimeConfigDefaults({
+  historyMessages: HISTORY_MESSAGES,
+  maxSimilarities: MAX_SIMILARITIES,
+  minSimilarities: MIN_SIMILARITIES,
+  cosineLimit: COSINE_LIMIT,
+});
 const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
 uiMode = persistedSelections.uiMode;
 assistantMode = normalizeAssistantMode(persistedSelections.assistantMode);
 profileId = normalizeProfile(persistedSelections.profileId);
+const persistedRuntimeConfig = await getRuntimeConfigState({
+  historyMessages: runtimeConfig.historyMessages,
+  maxSimilarities: runtimeConfig.maxSimilarities,
+  minSimilarities: runtimeConfig.minSimilarities,
+  cosineLimit: runtimeConfig.cosineLimit,
+});
+setRuntimeConfigValue("history messages", persistedRuntimeConfig.historyMessages);
+setRuntimeConfigValue("max similarities", persistedRuntimeConfig.maxSimilarities);
+setRuntimeConfigValue("min similarities", persistedRuntimeConfig.minSimilarities);
+setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);

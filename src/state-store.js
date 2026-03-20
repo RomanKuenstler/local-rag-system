@@ -17,6 +17,24 @@ export async function initializeStateDefaults({ uiMode, assistantMode, profileId
   }
 }
 
+export async function initializeRuntimeConfigDefaults({ historyMessages, maxSimilarities, minSimilarities, cosineLimit }) {
+  const defaults = [
+    ["history_messages", { value: historyMessages }],
+    ["max_similarities", { value: maxSimilarities }],
+    ["min_similarities", { value: minSimilarities }],
+    ["cosine_limit", { value: cosineLimit }],
+  ];
+
+  for (const [key, value] of defaults) {
+    await dbQuery(
+      `INSERT INTO app_settings (setting_key, setting_value)
+       VALUES ($1, $2::jsonb)
+       ON CONFLICT (setting_key) DO NOTHING`,
+      [key, JSON.stringify(value)]
+    );
+  }
+}
+
 export async function getSelectionState(fallbacks) {
   const result = await dbQuery(
     "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
@@ -40,6 +58,102 @@ export async function updateSetting(key, value) {
            updated_at = NOW()`,
     [key, JSON.stringify({ value })]
   );
+}
+
+export async function getRuntimeConfigState(fallbacks) {
+  const result = await dbQuery(
+    "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
+    [["history_messages", "max_similarities", "min_similarities", "cosine_limit"]]
+  );
+
+  const map = new Map(result.rows.map((row) => [row.setting_key, row.setting_value?.value]));
+  return {
+    historyMessages: Number.parseInt(String(map.get("history_messages") ?? fallbacks.historyMessages), 10),
+    maxSimilarities: Number.parseInt(String(map.get("max_similarities") ?? fallbacks.maxSimilarities), 10),
+    minSimilarities: Number.parseInt(String(map.get("min_similarities") ?? fallbacks.minSimilarities), 10),
+    cosineLimit: Number.parseFloat(String(map.get("cosine_limit") ?? fallbacks.cosineLimit)),
+  };
+}
+
+export async function ensureChatContext({ sessionId, chatId, chatName = null }) {
+  await dbQuery(
+    `INSERT INTO chat_sessions (id, updated_at)
+     VALUES ($1, NOW())
+     ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
+    [sessionId]
+  );
+
+  await dbQuery(
+    `INSERT INTO chats (id, session_id, name, updated_at)
+     VALUES ($1, $2, COALESCE($3, CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), NOW())
+     ON CONFLICT (id) DO UPDATE SET session_id = EXCLUDED.session_id, updated_at = NOW()`,
+    [chatId, sessionId, chatName]
+  );
+
+  const result = await dbQuery(
+    "SELECT name FROM chats WHERE id = $1",
+    [chatId]
+  );
+  return result.rows[0]?.name || null;
+}
+
+export async function addChatMessage({ sessionId, chatId, role, content, metadata = {} }) {
+  await dbQuery(
+    `INSERT INTO chat_messages (session_id, chat_id, role, content, metadata)
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [sessionId, chatId, role, content, JSON.stringify(metadata || {})]
+  );
+
+  await dbQuery("UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1", [sessionId]);
+  await dbQuery("UPDATE chats SET updated_at = NOW() WHERE id = $1", [chatId]);
+}
+
+export async function listChatMessages({ sessionId, chatId, limit = null }) {
+  const hasLimit = Number.isInteger(limit) && limit > 0;
+  const result = hasLimit
+    ? await dbQuery(
+      `SELECT role, content, metadata, created_at
+       FROM (
+         SELECT id, role, content, metadata, created_at
+         FROM chat_messages
+         WHERE session_id = $1 AND chat_id = $2
+         ORDER BY created_at DESC, id DESC
+         LIMIT $3
+       ) recent
+       ORDER BY created_at ASC, id ASC`,
+      [sessionId, chatId, limit]
+    )
+    : await dbQuery(
+      `SELECT role, content, metadata, created_at
+       FROM chat_messages
+       WHERE session_id = $1 AND chat_id = $2
+       ORDER BY created_at ASC, id ASC`,
+      [sessionId, chatId]
+    );
+
+  return result.rows;
+}
+
+export async function listRecentPromptHistory({ sessionId, chatId, limit }) {
+  const safeLimit = Math.max(0, Number.parseInt(String(limit || 0), 10));
+  if (safeLimit === 0) {
+    return [];
+  }
+
+  const result = await dbQuery(
+    `SELECT role, content
+     FROM (
+       SELECT id, role, content
+       FROM chat_messages
+       WHERE session_id = $1 AND chat_id = $2
+       ORDER BY created_at DESC, id DESC
+       LIMIT $3
+     ) recent
+     ORDER BY id ASC`,
+    [sessionId, chatId, safeLimit]
+  );
+
+  return result.rows.map((row) => [row.role === "assistant" ? "ai" : "human", row.content]);
 }
 
 export async function getIndexStateMap() {

@@ -136,6 +136,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/messages") {
+      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages") });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/prompt") {
       await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt" });
       return;
