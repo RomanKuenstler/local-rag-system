@@ -49,11 +49,15 @@ function startHealthServer() {
     }
 
     if (req.method === "GET" && url.pathname === "/internal/embedder/status") {
-      json(res, 200, {
-        ok: true,
-        service: "embedder",
-        intervalSeconds: EMBED_INTERVAL_SECONDS,
-        embeddingStatus: readEmbeddingStatus(),
+      readEmbeddingStatus().then((embeddingStatus) => {
+        json(res, 200, {
+          ok: true,
+          service: "embedder",
+          intervalSeconds: EMBED_INTERVAL_SECONDS,
+          embeddingStatus,
+        });
+      }).catch((error) => {
+        json(res, 500, { ok: false, error: error.message });
       });
       return;
     }

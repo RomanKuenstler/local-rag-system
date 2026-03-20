@@ -1,3 +1,4 @@
+import { ensureDatabaseReady, pingDatabase } from "./src/db.js";
 import http from "http";
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
@@ -102,6 +103,15 @@ async function handleStatus(req, res) {
   json(res, 200, responsePayload);
 }
 
+async function getDbHealth() {
+  try {
+    await pingDatabase();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -132,11 +142,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/healthz") {
-      json(res, 200, {
-        ok: true,
+      const db = await getDbHealth();
+      json(res, db.ok ? 200 : 503, {
+        ok: db.ok,
         service: "backend-api",
         retrieverBaseUrl: RETRIEVER_BASE_URL,
         embedderBaseUrl: EMBEDDER_BASE_URL,
+        postgres: db,
       });
       return;
     }
@@ -149,6 +161,8 @@ const server = http.createServer(async (req, res) => {
     });
   }
 });
+
+await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
