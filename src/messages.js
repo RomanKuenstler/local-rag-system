@@ -67,7 +67,26 @@ USER QUESTION
 ${userMessage}`;
 }
 
-export function buildSystemInfoMessage({ appName, appVersion, uiMode, assistantMode, profileId, chatModelName, embeddingModelName, qdrantUrl, collectionName, contentPath, embeddableExtensions, chatHistoryDir }) {
+export function buildSystemInfoMessage({
+  appName,
+  appVersion,
+  uiMode,
+  assistantMode,
+  profileId,
+  chatModelName,
+  embeddingModelName,
+  qdrantUrl,
+  collectionName,
+  contentPath,
+  embeddableExtensions,
+  chatHistoryDir,
+  indexStateFile,
+  embeddingStatusFile,
+  postgresHost,
+  postgresPort,
+  postgresDb,
+  postgresUser,
+}) {
   return [
     "System info:",
     `- app: ${appName} ${appVersion}`,
@@ -78,8 +97,11 @@ export function buildSystemInfoMessage({ appName, appVersion, uiMode, assistantM
     `- embedding model: ${embeddingModelName || "unknown"}`,
     `- vector db: qdrant (${qdrantUrl})`,
     `- collection: ${collectionName}`,
+    `- postgres: ${postgresUser}@${postgresHost}:${postgresPort}/${postgresDb}`,
     `- content path: ${contentPath}`,
     `- embeddable extensions: ${embeddableExtensions.join(", ")}`,
+    `- index state file: ${indexStateFile}`,
+    `- embedding status file: ${embeddingStatusFile}`,
     `- chat history dir: ${chatHistoryDir}`,
   ].join("\n");
 }

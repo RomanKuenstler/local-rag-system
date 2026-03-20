@@ -21,6 +21,10 @@ import {
   MAX_SIMILARITIES,
   MIN_SIMILARITIES,
   PDF_MIN_EXTRACTED_CHARS,
+  POSTGRES_DB,
+  POSTGRES_HOST,
+  POSTGRES_PORT,
+  POSTGRES_USER,
   QDRANT_URL,
   validateRetrievalConfig,
 } from "./src/config.js";
@@ -478,6 +482,12 @@ while (!exit) {
       contentPath: CONTENT_PATH,
       embeddableExtensions: EMBEDDABLE_EXTENSIONS,
       chatHistoryDir: CHAT_HISTORY_DIR,
+      indexStateFile: INDEX_STATE_FILE,
+      embeddingStatusFile: EMBEDDING_STATUS_FILE,
+      postgresHost: POSTGRES_HOST,
+      postgresPort: POSTGRES_PORT,
+      postgresDb: POSTGRES_DB,
+      postgresUser: POSTGRES_USER,
     }));
     continue;
   }

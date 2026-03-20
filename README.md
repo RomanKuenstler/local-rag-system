@@ -8,6 +8,7 @@ This project runs five services with Docker Compose:
 - **backend**: frontend-facing API that orchestrates calls to internal services.
 - **embedder**: continuously indexes files from `./data` into vectors.
 - **qdrant**: stores embeddings and metadata.
+- **postgres**: stores chat history, runtime settings, and indexed file metadata.
 - **retriever**: API-oriented retrieval + answer service.
 - **webui**: very small React chat UI served by nginx; `/api` is reverse-proxied to the backend service.
 
@@ -30,6 +31,7 @@ The web UI is intentionally minimal for now:
 - prompt input + send button
 - **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, up to 3 files)
 - status badges for retriever, embedding state, and embedded file count
+- `/info` panel with grouped runtime details (models, Qdrant collection, Postgres connection, and state-file paths)
 
 ## Quick start
 

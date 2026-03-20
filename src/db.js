@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
+import { POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER } from "./config.js";
 
 const { Pool } = pg;
 
@@ -33,11 +34,11 @@ async function resolveMigrationsDir() {
 function getPool() {
   if (!pool) {
     pool = new Pool({
-      host: process.env.POSTGRES_HOST || "postgres",
-      port: parseInt(process.env.POSTGRES_PORT || "5432", 10),
-      user: process.env.POSTGRES_USER || "rag",
+      host: POSTGRES_HOST,
+      port: POSTGRES_PORT,
+      user: POSTGRES_USER,
       password: process.env.POSTGRES_PASSWORD || "rag",
-      database: process.env.POSTGRES_DB || "rag",
+      database: POSTGRES_DB,
     });
   }
   return pool;

@@ -148,6 +148,11 @@ export function renderPanelContent({
             null,
             React.createElement("span", { className: `status-badge ${embedderStatus}` }, embedderStatus)
           )
+        ),
+        React.createElement(
+          "p",
+          { className: "config-help" },
+          "Includes runtime model selection, vector/postgres storage wiring, and state-file paths."
         )
       ),
       ...parsedInfoGroups.map((group) => React.createElement(
