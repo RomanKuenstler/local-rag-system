@@ -75,14 +75,6 @@ function App() {
   const isRagMode = currentUiMode === "rag";
   const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
 
-  function buildComposerUserMessage(prompt, promptFiles) {
-    const safePrompt = String(prompt || "").trim();
-    const files = Array.isArray(promptFiles) ? promptFiles : [];
-    if (files.length === 0) return safePrompt;
-    const attachedNames = files.map((file) => file.name).join(", ");
-    return `${safePrompt}\n\nAttached file${files.length > 1 ? "s" : ""}: ${attachedNames}`;
-  }
-
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
       return { tone: "warning", label: "Warning" };
@@ -272,7 +264,9 @@ function App() {
       setAttachmentNotice("");
     }
     if (!isPanelCommand && !isSlashCommand) {
-      setMessages((prev) => prev.concat(createMessage("user", buildComposerUserMessage(prompt, selectedPromptFiles))));
+      setMessages((prev) => prev.concat(createMessage("user", prompt, {
+        attachedFiles: selectedPromptFiles.map((file) => file.name),
+      })));
     }
 
     setInputValue("");
@@ -756,7 +750,27 @@ function App() {
                   )
                   : message.role === "assistant"
                     ? renderAssistantMarkdown(message.text)
-                    : React.createElement("p", null, message.text)
+                    : React.createElement(
+                      "div",
+                      { className: "user-message-content" },
+                      React.createElement("p", null, message.text),
+                      Array.isArray(message.attachedFiles) && message.attachedFiles.length > 0
+                        ? React.createElement(
+                          "div",
+                          { className: "user-attachment-box" },
+                          React.createElement(
+                            "small",
+                            { className: "user-attachment-label" },
+                            `Attached file${message.attachedFiles.length > 1 ? "s" : ""}`
+                          ),
+                          React.createElement(
+                            "ul",
+                            { className: "user-attachment-list" },
+                            ...message.attachedFiles.map((fileName) => React.createElement("li", { key: `${message.id}-${fileName}` }, fileName))
+                          )
+                        )
+                        : null
+                    )
               );
             })
         ),
@@ -787,7 +801,7 @@ function App() {
                 "data-testid": "composer-attach-button",
                 title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
               },
-              icon("M16.5 6.5a4.5 4.5 0 0 0-6.36 0l-6 6a3.5 3.5 0 1 0 4.95 4.95l7.36-7.36-1.41-1.42-7.36 7.36a1.5 1.5 0 1 1-2.12-2.12l6-6a2.5 2.5 0 0 1 3.54 3.54l-6.72 6.72 1.41 1.42 6.72-6.72a4.5 4.5 0 0 0 0-6.37")
+              icon("M8 7.5v8a4 4 0 0 0 8 0v-9a2.5 2.5 0 0 0-5 0V15a1 1 0 0 0 2 0V8.5h1.8V15a2.8 2.8 0 0 1-5.6 0V6.5a4.3 4.3 0 1 1 8.6 0v9a5.8 5.8 0 0 1-11.6 0v-8z")
             ),
             React.createElement("textarea", {
               ref: composerInputRef,
