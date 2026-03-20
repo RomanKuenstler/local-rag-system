@@ -222,6 +222,9 @@ Containers used:
 | `retriever` | Interactive assistant (retrieval + answering) |
 | `embedder`  | Background indexing and embedding worker |
 | `qdrant`  | Vector database                                    |
+| `postgres` | Runtime state, chat history, and file/index metadata |
+| `backend` | Frontend-facing API orchestrating retriever/embedder |
+| `webui` | Browser chat interface with `/api` reverse proxy |
 
 Docker also runs the **LLM models** through Docker Model Runner.
 
@@ -360,10 +363,10 @@ docker compose build --no-cache
 
 ## Use the AI System
 
-Start both services:
+Start all services:
 
 ```
-docker compose up -d retriever embedder qdrant
+docker compose up -d retriever embedder qdrant postgres backend webui
 ```
 
 Open the interactive retriever shell:
@@ -395,6 +398,15 @@ Limits:
 - max **3 files** per prompt
 - attachments are included only for that single prompt submission
 - slash commands are still text-only (no attachments)
+
+### WebUI `/info` dialog
+
+Use `/info` from the WebUI chat to open the info dialog. It now groups operational details into:
+
+- App (ui mode, assistant mode, profile)
+- Models (chat + embedding model names)
+- Storage (Qdrant + Postgres connection target, collection, content path)
+- State (index state file, embedding status file, chat history path)
 
 You can now interact with the retriever.
 

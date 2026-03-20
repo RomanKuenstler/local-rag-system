@@ -17,6 +17,10 @@
 - Mapped `./upload` into the retriever container (`/app/upload`) so host-side files are immediately available to `/upload`.
 
 ### Changed
+- Expanded `/info` system details to include Postgres connection target and local state-file paths.
+- Updated WebUI info parsing/grouping so the info dialog surfaces Storage + State details (including Postgres).
+- Refactored database connection config to reuse shared config exports.
+- Updated README and DOCUMENTATION to reflect the Postgres-backed state layer and richer `/info` dialog.
 - Refactored WebUI prompt-attachment handling into shared validation rules and helper functions for maintainability.
 - Updated README and DOCUMENTATION usage guidance for WebUI prompt attachments.
 - Retriever now blocks user prompts until embedder status is `ready`, with clear waiting/error guidance messages.
