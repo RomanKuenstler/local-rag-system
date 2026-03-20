@@ -75,6 +75,25 @@ function App() {
   const isRagMode = currentUiMode === "rag";
   const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
 
+  function getMessageBadge(message) {
+    if (message.interaction?.type === "weak_confirmation") {
+      return { tone: "warning", label: "Warning" };
+    }
+    if (message.evidenceSeverity === "source_attached" || message.upload?.uploadedCount > 0) {
+      return { tone: "source", label: "Source: attached file" };
+    }
+    if (message.responseType) {
+      return { tone: "system", label: "System Message" };
+    }
+    if (message.evidenceSeverity) {
+      return {
+        tone: String(message.evidenceSeverity).toLowerCase(),
+        label: `evidence: ${formatSeverityLabel(message.evidenceSeverity)}`,
+      };
+    }
+    return null;
+  }
+
   async function refreshStatus() {
     try {
       const [statusRes, filesRes] = await Promise.all([
@@ -234,12 +253,20 @@ function App() {
 
   async function sendRawPrompt(rawPrompt, promptFiles = []) {
     const prompt = String(rawPrompt || "").trim();
+    const isSlashCommand = prompt.startsWith("/");
     const isPanelCommand = PANEL_COMMANDS.has(prompt.toLowerCase());
     const hasPromptFiles = Array.isArray(promptFiles) && promptFiles.length > 0;
     if (!prompt || isSending) return;
 
-    if (!isPanelCommand) {
-      setMessages((prev) => prev.concat(createMessage("user", prompt)));
+    const selectedPromptFiles = hasPromptFiles ? [...promptFiles] : [];
+    if (hasPromptFiles || attachedPromptFiles.length > 0) {
+      setAttachedPromptFiles([]);
+      setAttachmentNotice("");
+    }
+    if (!isPanelCommand && !isSlashCommand) {
+      setMessages((prev) => prev.concat(createMessage("user", prompt, {
+        attachedFiles: selectedPromptFiles.map((file) => file.name),
+      })));
     }
 
     setInputValue("");
@@ -266,7 +293,7 @@ function App() {
         throw new Error("File attachments are only supported for normal chat prompts, not slash commands.");
       }
 
-      const uploadedFilesPayload = isPanelCommand ? [] : await buildUploadedFilesPayload(promptFiles);
+      const uploadedFilesPayload = isPanelCommand ? [] : await buildUploadedFilesPayload(selectedPromptFiles);
       const response = await fetch(`${API_BASE_URL}/api/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -300,6 +327,8 @@ function App() {
             evidenceSeverity: payload.evidenceSeverity || null,
             responseType: payload.responseType || null,
             retrieval: payload.retrieval || null,
+            interaction: payload.interaction || null,
+            upload: payload.upload || null,
             isPending: false,
           };
         }));
@@ -318,10 +347,6 @@ function App() {
         };
       }));
     } finally {
-      if (hasPromptFiles) {
-        setAttachedPromptFiles([]);
-        setAttachmentNotice("");
-      }
       setIsSending(false);
       await refreshStatus();
     }
@@ -643,32 +668,39 @@ function App() {
           { className: "chat" },
           !isEmbeddingReady && !isLoadingStatus
             ? null
-            : messages.map((message, index) => React.createElement(
-              "article",
-              {
-                key: message.id,
-                className: `msg ${message.role}${message.isPending ? " pending" : ""}`,
-                ref: index === messages.length - 1 ? lastMessageRef : null,
-              },
-              React.createElement(
-                "div",
-                { className: "msg-header" },
-                React.createElement("span", null, message.role === "user" ? "You" : "Assistant"),
-                message.evidenceSeverity
-                  ? React.createElement(
-                    "small",
-                    { className: `evidence-pill ${message.evidenceSeverity}` },
-                    `evidence: ${formatSeverityLabel(message.evidenceSeverity)}`
-                  )
-                  : null
-              ),
+            : messages.map((message, index) => {
+              const messageBadge = getMessageBadge(message);
+              return React.createElement(
+                "article",
+                {
+                  key: message.id,
+                  className: `msg ${message.role}${message.isPending ? " pending" : ""}`,
+                  ref: index === messages.length - 1 ? lastMessageRef : null,
+                },
+                React.createElement(
+                  "div",
+                  { className: "msg-header" },
+                  React.createElement("span", null, message.role === "user" ? "You" : "Assistant"),
+                  messageBadge
+                    ? React.createElement(
+                      "small",
+                      { className: `evidence-pill ${messageBadge.tone}` },
+                      messageBadge.label
+                    )
+                    : null
+                ),
               message.responseType
                 ? React.createElement(
                   "div",
                   { className: `msg-command ${message.responseType}` },
                   React.createElement("pre", null, message.text)
                 )
-                : message.role === "assistant" && isRagMode && message.retrieval
+                : message.role === "assistant"
+                  && isRagMode
+                  && message.retrieval
+                  && message.interaction?.type !== "weak_confirmation"
+                  && message.evidenceSeverity !== "source_attached"
+                  && !(message.upload?.uploadedCount > 0)
                   ? React.createElement(
                     "div",
                     { className: "assistant-rag-layout" },
@@ -718,8 +750,29 @@ function App() {
                   )
                   : message.role === "assistant"
                     ? renderAssistantMarkdown(message.text)
-                    : React.createElement("p", null, message.text)
-            ))
+                    : React.createElement(
+                      "div",
+                      { className: "user-message-content" },
+                      React.createElement("p", null, message.text),
+                      Array.isArray(message.attachedFiles) && message.attachedFiles.length > 0
+                        ? React.createElement(
+                          "div",
+                          { className: "user-attachment-box" },
+                          React.createElement(
+                            "small",
+                            { className: "user-attachment-label" },
+                            `Attached file${message.attachedFiles.length > 1 ? "s" : ""}`
+                          ),
+                          React.createElement(
+                            "ul",
+                            { className: "user-attachment-list" },
+                            ...message.attachedFiles.map((fileName) => React.createElement("li", { key: `${message.id}-${fileName}` }, fileName))
+                          )
+                        )
+                        : null
+                    )
+              );
+            })
         ),
         React.createElement(
           "form",
@@ -748,8 +801,7 @@ function App() {
                 "data-testid": "composer-attach-button",
                 title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
               },
-              icon("M16.5 6.5a4.5 4.5 0 0 0-6.36 0l-6 6a3.5 3.5 0 0 0 4.95 4.95l6.01-6.01 1.41 1.42-6.01 6.01a5.5 5.5 0 0 1-7.78-7.78l6-6a6.5 6.5 0 0 1 9.2 9.2l-6.01 6a3.5 3.5 0 0 1-4.95-4.95l5.3-5.3 1.41 1.42-5.3 5.3a1.5 1.5 0 0 0 2.12 2.12l6.01-6.01a4.5 4.5 0 0 0 0-6.36"),
-              React.createElement("span", null, "Attach")
+              icon("M8 7.5v8a4 4 0 0 0 8 0v-9a2.5 2.5 0 0 0-5 0V15a1 1 0 0 0 2 0V8.5h1.8V15a2.8 2.8 0 0 1-5.6 0V6.5a4.3 4.3 0 1 1 8.6 0v9a5.8 5.8 0 0 1-11.6 0v-8z")
             ),
             React.createElement("textarea", {
               ref: composerInputRef,

@@ -782,7 +782,9 @@ async function handlePrompt(req, res) {
 
   const answer = String(assistantResponse.content || "").trim();
 
-  if (searchResult.evidenceQuality === "weak") {
+  const hasUploadedContext = Boolean(uploadInfo?.uploadedCount);
+
+  if (searchResult.evidenceQuality === "weak" && !hasUploadedContext) {
     pendingWeakAnswers.set(sessionId, {
       answer,
       evidenceSeverity: searchResult.evidenceQuality,
@@ -816,13 +818,15 @@ async function handlePrompt(req, res) {
   json(res, 200, {
     sessionId,
     answer,
-    evidenceSeverity: searchResult.evidenceQuality,
+    evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     upload: uploadInfo,
-    retrieval: createSimilarityDetails(searchResult.results, {
-      maxSimilarities: runtimeConfig.maxSimilarities,
-      cosineLimit: runtimeConfig.cosineLimit,
-    }),
+    retrieval: hasUploadedContext
+      ? null
+      : createSimilarityDetails(searchResult.results, {
+        maxSimilarities: runtimeConfig.maxSimilarities,
+        cosineLimit: runtimeConfig.cosineLimit,
+      }),
   });
 }
 

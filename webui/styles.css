@@ -415,9 +415,38 @@ body {
 .evidence-pill.high,.evidence-pill.strong,.evidence-pill.sufficient,.evidence-pill.ok { border-color: rgba(22,163,74,.35); background: rgba(22,163,74,.1); color: #166534; }
 .evidence-pill.medium,.evidence-pill.warn,.evidence-pill.partial,.evidence-pill.moderate { border-color: rgba(234,88,12,.35); background: rgba(249,115,22,.12); color: #9a3412; }
 .evidence-pill.low,.evidence-pill.error,.evidence-pill.unknown,.evidence-pill.critical,.evidence-pill.severe,.evidence-pill.weak { border-color: rgba(220,38,38,.35); background: rgba(239,68,68,.12); color: #991b1b; }
+.evidence-pill.warning { border-color: rgba(234,179,8,.45); background: rgba(250,204,21,.18); color: #854d0e; }
+.evidence-pill.source,.evidence-pill.system { border-color: rgba(59,130,246,.38); background: rgba(59,130,246,.12); color: #1d4ed8; }
 .msg-command { border: 1px solid #e5e7eb; background: #ffffff; border-radius: 12px; padding: 0.6rem 0.7rem; }
 .msg-command pre { margin: 0; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size: .82rem; line-height: 1.45; white-space: pre-wrap; }
 .msg p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
+.user-message-content { display: grid; gap: 0.55rem; }
+.user-attachment-box {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 10px;
+  background: rgba(253, 253, 253, 0.75);
+  padding: 0.5rem 0.6rem;
+}
+.user-attachment-label {
+  display: block;
+  color: #64748b;
+  font-weight: 600;
+  margin-bottom: 0.22rem;
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.user-attachment-list {
+  margin: 0;
+  padding-left: 1rem;
+  color: #334155;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.user-attachment-list li {
+  margin: 0.08rem 0;
+  color: #1e293b;
+}
 .assistant-markdown > :first-child { margin-top: 0; }
 .assistant-markdown > :last-child { margin-bottom: 0; }
 .assistant-markdown p { margin: 0.45rem 0; line-height: 1.55; }
@@ -572,31 +601,25 @@ body {
   display: none;
 }
 .composer-attach-button {
-  border: 1px solid #e5e7eb;
-  background: #f8fafc;
-  padding: 0.34rem 0.62rem;
+  border: none;
+  background: transparent;
+  padding: 0.2rem 0.3rem;
   color: #334155;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 0.32rem;
   justify-content: center;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 550;
   flex-shrink: 0;
-  min-width: 5.15rem;
   align-self: center;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
 }
 .composer-attach-button:hover:not(:disabled) {
   color: #0f172a;
-  border-color: #cbd5e1;
-  background: #f1f5f9;
+  background: rgba(148, 163, 184, 0.12);
 }
 .composer-attach-button .icon {
-  width: 1.02rem;
-  height: 1.02rem;
+  width: 1.18rem;
+  height: 1.18rem;
 }
 
 input, textarea, button { font: inherit; }
