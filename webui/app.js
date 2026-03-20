@@ -124,7 +124,7 @@ function App() {
           const nextReady = newStatus?.embedding?.readiness?.ready === true;
 
           if (!previousReady && nextReady && !hasShownReadyGreeting) {
-            setMessages((prev) => prev.concat(createMessage("assistant", "How can I help you today?")));
+            setMessages((prev) => prev.concat(createMessage("assistant", "How can I help you today?", { isVolatile: true })));
             setHasShownReadyGreeting(true);
           }
 
@@ -170,7 +170,10 @@ function App() {
       })
       : [];
 
-    setMessages(normalized);
+    setMessages((previous) => {
+      const volatileMessages = previous.filter((message) => message.isVolatile);
+      return normalized.concat(volatileMessages);
+    });
   }
 
   useEffect(() => {
@@ -330,14 +333,17 @@ function App() {
       setMessages((prev) => prev.concat(createMessage(
         "assistant",
         "Embedding is still running. Please wait until indexing is finished before sending prompts.",
-        { evidenceSeverity: "warn" }
+        { evidenceSeverity: "warn", isVolatile: true }
       )));
       return;
     }
 
     setIsSending(true);
     const pendingMessageId = crypto.randomUUID();
-    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", { id: pendingMessageId, isPending: true })));
+    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
+      id: pendingMessageId,
+      isPending: true,
+    })));
 
     try {
       if (isPanelCommand && hasPromptFiles) {
@@ -397,6 +403,7 @@ function App() {
           responseType: null,
           retrieval: null,
           isPending: false,
+          isVolatile: true,
         };
       }));
     } finally {
@@ -448,7 +455,10 @@ function App() {
         configView: null,
       });
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
     } finally {
       setIsSending(false);
       await refreshStatus();
@@ -524,7 +534,10 @@ function App() {
       await fetchPanelCommand(command);
       await refreshCurrentPanel(panelData?.command);
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
     } finally {
       setIsSending(false);
       await refreshStatus();

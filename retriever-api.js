@@ -775,6 +775,10 @@ async function handlePrompt(req, res) {
   const searchResult = await searchKnowledgeBase(promptForRetrieval);
   const historyEntryLimit = runtimeConfig.historyMessages * 2;
   const chatHistory = await listRecentPromptHistory({ sessionId, chatId, limit: historyEntryLimit });
+  const retrievalDetails = createSimilarityDetails(searchResult.results, {
+    maxSimilarities: runtimeConfig.maxSimilarities,
+    cosineLimit: runtimeConfig.cosineLimit,
+  });
 
   const assistantResponse = await chatModel.invoke([
     ...buildSystemPromptLayers({
@@ -814,10 +818,7 @@ async function handlePrompt(req, res) {
       metadata: {
         evidenceSeverity: searchResult.evidenceQuality,
         upload: uploadInfo,
-        retrieval: createSimilarityDetails(searchResult.results, {
-          maxSimilarities: runtimeConfig.maxSimilarities,
-          cosineLimit: runtimeConfig.cosineLimit,
-        }),
+        retrieval: retrievalDetails,
       },
     });
 
@@ -834,20 +835,10 @@ async function handlePrompt(req, res) {
         pending: true,
       },
       upload: uploadInfo,
-      retrieval: createSimilarityDetails(searchResult.results, {
-        maxSimilarities: runtimeConfig.maxSimilarities,
-        cosineLimit: runtimeConfig.cosineLimit,
-      }),
+      retrieval: retrievalDetails,
     });
     return;
   }
-
-  const retrievalDetails = hasUploadedContext
-    ? null
-    : createSimilarityDetails(searchResult.results, {
-      maxSimilarities: runtimeConfig.maxSimilarities,
-      cosineLimit: runtimeConfig.cosineLimit,
-    });
 
   await addChatMessage({
     sessionId,
@@ -878,7 +869,7 @@ async function handlePrompt(req, res) {
     evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     upload: uploadInfo,
-    retrieval: retrievalDetails,
+    retrieval: hasUploadedContext ? null : retrievalDetails,
   });
 }
 
