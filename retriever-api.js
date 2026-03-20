@@ -12,7 +12,6 @@ import {
   COSINE_LIMIT,
   EMBEDDABLE_EXTENSIONS,
   HISTORY_MESSAGES,
-  INDEX_STATE_FILE,
   INDEX_SCHEMA_VERSION,
   MAX_SIMILARITIES,
   MAX_EMBEDDING_CHARS,
@@ -52,6 +51,14 @@ import {
   readEmbeddableFiles,
   readEmbeddingStatus,
 } from "./src/embedding-service.js";
+import { ensureDatabaseReady } from "./src/db.js";
+import {
+  getIndexStateMap,
+  getSelectionState,
+  initializeStateDefaults,
+  listFileMetadata,
+  updateSetting,
+} from "./src/state-store.js";
 import {
   normalizeIndexableFileByExtension,
   normalizeIndexableTextByExtension,
@@ -62,12 +69,16 @@ validateRetrievalConfig();
 
 const PORT = parseInt(process.env.RETRIEVER_API_PORT || "3000", 10);
 const HOST = process.env.RETRIEVER_API_HOST || "0.0.0.0";
-let assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
-let profileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
+const initialAssistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
+const initialProfileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
 const SUPPORTED_UI_MODES = new Set(["clean", "rag"]);
-let uiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim().toLowerCase())
+const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim().toLowerCase())
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
+
+let assistantMode = initialAssistantMode;
+let profileId = initialProfileId;
+let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
 
 const chatModel = createChatModel();
@@ -227,7 +238,7 @@ function buildWebConfigView() {
           { key: "max embedding chars", value: MAX_EMBEDDING_CHARS, editable: false },
           { key: "pdf min extracted chars", value: PDF_MIN_EXTRACTED_CHARS, editable: false },
           { key: "index schema version", value: INDEX_SCHEMA_VERSION, editable: false },
-          { key: "index state file", value: INDEX_STATE_FILE, editable: false },
+          { key: "state storage", value: "postgres", editable: false },
           { key: "chat history dir", value: CHAT_HISTORY_DIR, editable: false },
         ],
       },
@@ -258,7 +269,7 @@ async function buildLibraryInfoMessage() {
     ].join("\n");
   }
 
-  const indexState = readIndexState();
+  const indexState = await getIndexStateMap();
   const perFile = files.map((file) => ({
     ...file,
     chunkCount: fileToChunks(file).length,
@@ -293,7 +304,7 @@ async function buildLibraryInfoMessage() {
   return lines.join("\n");
 }
 
-function handlePromptCommand(prompt, sessionId) {
+async function handlePromptCommand(prompt, sessionId) {
   const normalizedPrompt = prompt.toLowerCase();
   const pendingWeakAnswer = pendingWeakAnswers.get(sessionId);
 
@@ -436,6 +447,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     uiMode = requestedMode;
+    await updateSetting("ui_mode", uiMode);
     return {
       statusCode: 200,
       payload: {
@@ -463,6 +475,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     assistantMode = normalizeAssistantMode(requestedMode);
+    await updateSetting("assistant_mode", assistantMode);
 
     return {
       statusCode: 200,
@@ -508,6 +521,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     profileId = normalizeProfile(requestedProfile);
+    await updateSetting("profile_id", profileId);
 
     return {
       statusCode: 200,
@@ -536,7 +550,6 @@ function handlePromptCommand(prompt, sessionId) {
           maxEmbeddingChars: MAX_EMBEDDING_CHARS,
           pdfMinExtractedChars: PDF_MIN_EXTRACTED_CHARS,
           indexSchemaVersion: INDEX_SCHEMA_VERSION,
-          indexStateFile: INDEX_STATE_FILE,
           chatHistoryDir: CHAT_HISTORY_DIR,
           temperature: process.env.OPTION_TEMPERATURE || "0.0",
           topP: process.env.OPTION_TOP_P || "0.5",
@@ -604,21 +617,8 @@ async function searchKnowledgeBase(prompt) {
   };
 }
 
-function readIndexState() {
-  try {
-    if (!fs.existsSync(INDEX_STATE_FILE)) {
-      return {};
-    }
-
-    return JSON.parse(fs.readFileSync(INDEX_STATE_FILE, "utf8"));
-  } catch (error) {
-    console.error(`Failed to read index state: ${error.message}`);
-    return {};
-  }
-}
-
-function getEmbeddingReadiness() {
-  const embeddingStatus = readEmbeddingStatus();
+async function getEmbeddingReadiness() {
+  const embeddingStatus = await readEmbeddingStatus();
 
   if (!embeddingStatus) {
     return {
@@ -709,7 +709,7 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const commandResult = handlePromptCommand(prompt, sessionId);
+  const commandResult = await handlePromptCommand(prompt, sessionId);
   if (commandResult) {
     if (commandResult.payload?.deferredCommand === "library_info") {
       commandResult.payload.answer = await buildLibraryInfoMessage();
@@ -720,7 +720,7 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const readiness = getEmbeddingReadiness();
+  const readiness = await getEmbeddingReadiness();
   if (!readiness.ready) {
     json(res, 503, {
       error: "Retriever not ready",
@@ -818,8 +818,8 @@ async function handlePrompt(req, res) {
 }
 
 async function handleStatus(_req, res) {
-  const readiness = getEmbeddingReadiness();
-  const embeddingStatus = readEmbeddingStatus();
+  const readiness = await getEmbeddingReadiness();
+  const embeddingStatus = await readEmbeddingStatus();
 
   json(res, 200, {
     app: {
@@ -849,23 +849,17 @@ async function handleStatus(_req, res) {
 }
 
 async function handleFiles(_req, res) {
-  const files = await readEmbeddableFiles();
-  const indexState = readIndexState();
+  const rows = await listFileMetadata();
 
-  const payload = files.map((file) => {
-    const chunkCount = fileToChunks(file).length;
-    const isEmbedded = indexState[file.relativePath] === file.hash;
-
-    return {
-      path: file.relativePath,
-      extension: file.extension,
-      sizeBytes: file.size,
-      lastModified: file.lastModified,
-      hash: file.hash,
-      chunkCount,
-      embedded: isEmbedded,
-    };
-  });
+  const payload = rows.map((row) => ({
+    path: row.file_path,
+    extension: row.extension,
+    sizeBytes: Number(row.size_bytes),
+    lastModified: row.last_modified,
+    hash: row.file_hash,
+    chunkCount: row.chunk_count,
+    embedded: row.embedded,
+  }));
 
   json(res, 200, {
     contentPath: CONTENT_PATH,
@@ -933,6 +927,13 @@ const server = http.createServer(async (req, res) => {
     });
   }
 });
+
+await ensureDatabaseReady();
+await initializeStateDefaults({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+uiMode = persistedSelections.uiMode;
+assistantMode = normalizeAssistantMode(persistedSelections.assistantMode);
+profileId = normalizeProfile(persistedSelections.profileId);
 
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);

@@ -10,6 +10,7 @@ COPY embedder.js ./
 COPY backend-api.js ./
 COPY retriever-api.js ./
 COPY src ./src
+COPY migrations ./migrations
 
 RUN groupadd --gid 1001 nodejs && \
     useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home ai
