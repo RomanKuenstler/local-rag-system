@@ -429,16 +429,24 @@ body {
 }
 .user-attachment-label {
   display: block;
-  color: #475569;
+  color: #64748b;
   font-weight: 600;
-  margin-bottom: 0.2rem;
+  margin-bottom: 0.22rem;
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .user-attachment-list {
   margin: 0;
   padding-left: 1rem;
+  color: #334155;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.user-attachment-list li {
+  margin: 0.08rem 0;
   color: #1e293b;
 }
-.user-attachment-list li { margin: 0.08rem 0; }
 .assistant-markdown > :first-child { margin-top: 0; }
 .assistant-markdown > :last-child { margin-bottom: 0; }
 .assistant-markdown p { margin: 0.45rem 0; line-height: 1.55; }
