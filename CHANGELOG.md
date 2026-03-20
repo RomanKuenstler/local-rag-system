@@ -1,6 +1,7 @@
 # CHANGELOG
 
 ### Added
+- Added a visible **Attach** action in the WebUI normal chat composer so prompt uploads are clearly discoverable.
 - Added embedding readiness status tracking via a shared status file so retriever can determine whether indexing is complete.
 - Added `DOCUMENTATION.md` with the previous full project documentation content.
 - Added a dedicated RAG TUI mode with similarity insights in responses.
@@ -16,6 +17,8 @@
 - Mapped `./upload` into the retriever container (`/app/upload`) so host-side files are immediately available to `/upload`.
 
 ### Changed
+- Refactored WebUI prompt-attachment handling into shared validation rules and helper functions for maintainability.
+- Updated README and DOCUMENTATION usage guidance for WebUI prompt attachments.
 - Retriever now blocks user prompts until embedder status is `ready`, with clear waiting/error guidance messages.
 - Updated `compose.yml` so `retriever` depends on `embedder` and both services share `EMBEDDING_STATUS_FILE`.
 - Split documentation: `README.md` is now concise, with detailed guidance moved to `DOCUMENTATION.md`.

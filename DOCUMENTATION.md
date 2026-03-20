@@ -378,6 +378,24 @@ Monitor background embedding:
 docker compose logs -f embedder
 ```
 
+### WebUI prompt attachments (normal chat view)
+
+In the browser UI (`http://localhost:5173`), the chat composer includes an **Attach** control next to the prompt input.
+
+Supported prompt-level attachment types:
+
+- `.md`
+- `.txt`
+- `.html`
+- `.htm`
+- `.pdf`
+
+Limits:
+
+- max **3 files** per prompt
+- attachments are included only for that single prompt submission
+- slash commands are still text-only (no attachments)
+
 You can now interact with the retriever.
 
 Example:

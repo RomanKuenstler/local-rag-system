@@ -1,7 +1,6 @@
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import {
   CHUNK_OVERLAP,
@@ -14,6 +13,7 @@ import {
   QDRANT_API_KEY,
   QDRANT_URL,
 } from "./config.js";
+import { createEmbeddingsModel } from "./model-clients.js";
 import {
   enforceEmbeddingSizeLimit,
   splitMarkdownBySectionsWithMetadata,
@@ -21,17 +21,7 @@ import {
 } from "./chunking.js";
 import { readTextFilesRecursively } from "./document-processing.js";
 
-export function createEmbeddingsModel() {
-  return new OpenAIEmbeddings({
-    model: process.env.MODEL_RUNNER_LLM_EMBEDDING || "ai/embeddinggemma:latest",
-    configuration: {
-      baseURL:
-        process.env.MODEL_RUNNER_BASE_URL ||
-        "http://localhost:12434/engines/llama.cpp/v1/",
-      apiKey: "",
-    },
-  });
-}
+export { createEmbeddingsModel };
 
 export function createQdrantClient() {
   return new QdrantClient({

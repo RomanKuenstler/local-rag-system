@@ -1,8 +1,19 @@
+x-node-service: &node-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  develop:
+    watch:
+      - action: sync
+        path: ./
+        target: /app
+        initial_sync: true
+        ignore:
+          - node_modules/
+
 services:
   retriever:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *node-service
     environment:
       APP_ROLE: retriever
       TERM: xterm-256color
@@ -21,12 +32,13 @@ services:
       INDEX_STATE_FILE: /app/state/.index-state.json
       EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       CHAT_HISTORY_DIR: /app/state/chat-history
+      RETRIEVER_API_PORT: 3000
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
       - rag_state:/app/state
-    stdin_open: true
-    tty: true
+    ports:
+      - "3000:3000"
     configs:
       - source: guardrails.md
         target: /app/guardrails.md
@@ -37,22 +49,13 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
-    develop:
-      watch:
-        - action: sync
-          path: ./
-          target: /app
-          initial_sync: true
-          ignore:
-            - node_modules/
+    command: ["npm", "run", "start:retriever:api"]
     depends_on:
       - qdrant
       - embedder
 
   embedder:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *node-service
     environment:
       APP_ROLE: embedder
       CONTENT_PATH: /app/data
@@ -70,16 +73,28 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
+    depends_on:
+      - qdrant
+
+  webui:
+    build:
+      context: ./webui
+      dockerfile: Dockerfile
+    environment:
+      UPSTREAM_API_URL: http://retriever:3000
+    ports:
+      - "5173:80"
     develop:
       watch:
         - action: sync
-          path: ./
-          target: /app
+          path: ./webui
+          target: /usr/share/nginx/html
           initial_sync: true
           ignore:
-            - node_modules/
+            - Dockerfile
+            - nginx.conf.template
     depends_on:
-      - qdrant
+      - retriever
 
   qdrant:
     image: qdrant/qdrant
@@ -95,7 +110,7 @@ volumes:
 
 models:
   chat-model:
-   model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
+    model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
   embedding-model:
     model: ai/embeddinggemma:latest
 

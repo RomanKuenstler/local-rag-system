@@ -7,6 +7,7 @@ RUN npm install
 
 COPY index.js ./
 COPY embedder.js ./
+COPY retriever-api.js ./
 COPY src ./src
 
 RUN groupadd --gid 1001 nodejs && \
