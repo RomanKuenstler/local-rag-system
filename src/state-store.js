@@ -75,7 +75,7 @@ export async function getRuntimeConfigState(fallbacks) {
   };
 }
 
-export async function ensureChatContext({ sessionId, chatId }) {
+export async function ensureChatContext({ sessionId, chatId, chatName = null }) {
   await dbQuery(
     `INSERT INTO chat_sessions (id, updated_at)
      VALUES ($1, NOW())
@@ -84,32 +84,52 @@ export async function ensureChatContext({ sessionId, chatId }) {
   );
 
   await dbQuery(
-    `INSERT INTO chats (id, session_id, updated_at)
-     VALUES ($1, $2, NOW())
+    `INSERT INTO chats (id, session_id, name, updated_at)
+     VALUES ($1, $2, COALESCE($3, CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), NOW())
      ON CONFLICT (id) DO UPDATE SET session_id = EXCLUDED.session_id, updated_at = NOW()`,
-    [chatId, sessionId]
+    [chatId, sessionId, chatName]
   );
+
+  const result = await dbQuery(
+    "SELECT name FROM chats WHERE id = $1",
+    [chatId]
+  );
+  return result.rows[0]?.name || null;
 }
 
-export async function addChatMessage({ sessionId, chatId, role, content }) {
+export async function addChatMessage({ sessionId, chatId, role, content, metadata = {} }) {
   await dbQuery(
-    `INSERT INTO chat_messages (session_id, chat_id, role, content)
-     VALUES ($1, $2, $3, $4)`,
-    [sessionId, chatId, role, content]
+    `INSERT INTO chat_messages (session_id, chat_id, role, content, metadata)
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [sessionId, chatId, role, content, JSON.stringify(metadata || {})]
   );
 
   await dbQuery("UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1", [sessionId]);
   await dbQuery("UPDATE chats SET updated_at = NOW() WHERE id = $1", [chatId]);
 }
 
-export async function listChatMessages({ sessionId, chatId }) {
-  const result = await dbQuery(
-    `SELECT role, content, created_at
-     FROM chat_messages
-     WHERE session_id = $1 AND chat_id = $2
-     ORDER BY created_at ASC, id ASC`,
-    [sessionId, chatId]
-  );
+export async function listChatMessages({ sessionId, chatId, limit = null }) {
+  const hasLimit = Number.isInteger(limit) && limit > 0;
+  const result = hasLimit
+    ? await dbQuery(
+      `SELECT role, content, metadata, created_at
+       FROM (
+         SELECT id, role, content, metadata, created_at
+         FROM chat_messages
+         WHERE session_id = $1 AND chat_id = $2
+         ORDER BY created_at DESC, id DESC
+         LIMIT $3
+       ) recent
+       ORDER BY created_at ASC, id ASC`,
+      [sessionId, chatId, limit]
+    )
+    : await dbQuery(
+      `SELECT role, content, metadata, created_at
+       FROM chat_messages
+       WHERE session_id = $1 AND chat_id = $2
+       ORDER BY created_at ASC, id ASC`,
+      [sessionId, chatId]
+    );
 
   return result.rows;
 }

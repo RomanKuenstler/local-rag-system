@@ -109,6 +109,10 @@ function getPendingWeakAnswerKey(sessionId, chatId) {
   return `${sessionId}::${chatId}`;
 }
 
+function generateChatName() {
+  return `chat-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function normalizePrompt(input) {
   return String(input || "").trim();
 }
@@ -704,13 +708,16 @@ async function handlePrompt(req, res) {
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
   const chatId = String(body.chatId || "default-chat").trim() || "default-chat";
   const uploadedFiles = Array.isArray(body.uploadedFiles) ? body.uploadedFiles : [];
+  const requestedAttachedFiles = Array.isArray(body.attachedFiles)
+    ? body.attachedFiles.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
 
   if (!prompt) {
     json(res, 400, { error: "Missing required field: prompt" });
     return;
   }
 
-  await ensureChatContext({ sessionId, chatId });
+  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -722,6 +729,7 @@ async function handlePrompt(req, res) {
   const commandResult = await handlePromptCommand(prompt, sessionId, chatId);
   if (commandResult) {
     commandResult.payload.chatId = chatId;
+    commandResult.payload.chatName = chatName;
     if (commandResult.payload?.deferredCommand === "library_info") {
       commandResult.payload.answer = await buildLibraryInfoMessage();
       delete commandResult.payload.deferredCommand;
@@ -789,12 +797,34 @@ async function handlePrompt(req, res) {
       answer,
       evidenceSeverity: searchResult.evidenceQuality,
     });
-    await addChatMessage({ sessionId, chatId, role: "user", content: promptForRetrieval });
-    await addChatMessage({ sessionId, chatId, role: "assistant", content: answer });
+    await addChatMessage({
+      sessionId,
+      chatId,
+      role: "user",
+      content: promptForRetrieval,
+      metadata: {
+        attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
+      },
+    });
+    await addChatMessage({
+      sessionId,
+      chatId,
+      role: "assistant",
+      content: answer,
+      metadata: {
+        evidenceSeverity: searchResult.evidenceQuality,
+        upload: uploadInfo,
+        retrieval: createSimilarityDetails(searchResult.results, {
+          maxSimilarities: runtimeConfig.maxSimilarities,
+          cosineLimit: runtimeConfig.cosineLimit,
+        }),
+      },
+    });
 
     json(res, 200, {
       sessionId,
       chatId,
+      chatName,
       answer:
         "Evidence quality is WEAK for this topic. The generated answer may be unreliable. Do you want to see it? Use /yes to show it, or /no or /skip to hide it.",
       evidenceSeverity: "warn",
@@ -812,22 +842,43 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  await addChatMessage({ sessionId, chatId, role: "user", content: promptForRetrieval });
-  await addChatMessage({ sessionId, chatId, role: "assistant", content: answer });
+  const retrievalDetails = hasUploadedContext
+    ? null
+    : createSimilarityDetails(searchResult.results, {
+      maxSimilarities: runtimeConfig.maxSimilarities,
+      cosineLimit: runtimeConfig.cosineLimit,
+    });
+
+  await addChatMessage({
+    sessionId,
+    chatId,
+    role: "user",
+    content: promptForRetrieval,
+    metadata: {
+      attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
+    },
+  });
+  await addChatMessage({
+    sessionId,
+    chatId,
+    role: "assistant",
+    content: answer,
+    metadata: {
+      evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
+      upload: uploadInfo,
+      retrieval: retrievalDetails,
+    },
+  });
 
   json(res, 200, {
     sessionId,
     chatId,
+    chatName,
     answer,
     evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     upload: uploadInfo,
-    retrieval: hasUploadedContext
-      ? null
-      : createSimilarityDetails(searchResult.results, {
-        maxSimilarities: runtimeConfig.maxSimilarities,
-        cosineLimit: runtimeConfig.cosineLimit,
-      }),
+    retrieval: retrievalDetails,
   });
 }
 
@@ -835,17 +886,21 @@ async function handleMessages(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
   const chatId = String(url.searchParams.get("chatId") || "default-chat").trim() || "default-chat";
+  const limitParam = Number.parseInt(String(url.searchParams.get("limit") || ""), 10);
+  const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : null;
 
-  await ensureChatContext({ sessionId, chatId });
-  const rows = await listChatMessages({ sessionId, chatId });
+  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
+  const rows = await listChatMessages({ sessionId, chatId, limit });
 
   json(res, 200, {
     sessionId,
     chatId,
+    chatName,
     totalMessages: rows.length,
     messages: rows.map((row) => ({
       role: row.role,
       content: row.content,
+      metadata: row.metadata || {},
       createdAt: row.created_at,
     })),
   });

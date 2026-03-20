@@ -1,0 +1,12 @@
+ALTER TABLE chats
+  ADD COLUMN IF NOT EXISTS name TEXT;
+
+UPDATE chats
+SET name = CONCAT('chat-', SUBSTRING(MD5(id), 1, 6))
+WHERE name IS NULL OR BTRIM(name) = '';
+
+ALTER TABLE chats
+  ALTER COLUMN name SET NOT NULL;
+
+ALTER TABLE chat_messages
+  ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;

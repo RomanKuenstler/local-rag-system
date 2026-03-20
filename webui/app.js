@@ -147,8 +147,9 @@ function App() {
   async function loadMessagesFromDb() {
     const sessionId = sessionIdRef.current;
     const chatId = chatIdRef.current;
+    const messageLoadLimit = 40;
     const response = await fetch(
-      `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}`
+      `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
     );
     const payload = await response.json();
     if (!response.ok) {
@@ -156,7 +157,17 @@ function App() {
     }
 
     const normalized = Array.isArray(payload.messages)
-      ? payload.messages.map((message) => createMessage(message.role, message.content))
+      ? payload.messages.map((message) => {
+        const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
+        return createMessage(message.role, message.content, {
+          evidenceSeverity: metadata.evidenceSeverity || null,
+          responseType: metadata.responseType || null,
+          retrieval: metadata.retrieval || null,
+          interaction: metadata.interaction || null,
+          upload: metadata.upload || null,
+          attachedFiles: Array.isArray(metadata.attachedFiles) ? metadata.attachedFiles : [],
+        });
+      })
       : [];
 
     setMessages(normalized);
@@ -341,6 +352,7 @@ function App() {
           prompt,
           sessionId: sessionIdRef.current,
           chatId: chatIdRef.current,
+          attachedFiles: selectedPromptFiles.map((file) => file.name),
           uploadedFiles: uploadedFilesPayload,
         }),
       });
