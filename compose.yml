@@ -1,8 +1,19 @@
+x-node-service: &node-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  develop:
+    watch:
+      - action: sync
+        path: ./
+        target: /app
+        initial_sync: true
+        ignore:
+          - node_modules/
+
 services:
   retriever:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *node-service
     environment:
       APP_ROLE: retriever
       TERM: xterm-256color
@@ -38,23 +49,13 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
-    develop:
-      watch:
-        - action: sync
-          path: ./
-          target: /app
-          initial_sync: true
-          ignore:
-            - node_modules/
     command: ["npm", "run", "start:retriever:api"]
     depends_on:
       - qdrant
       - embedder
 
   embedder:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *node-service
     environment:
       APP_ROLE: embedder
       CONTENT_PATH: /app/data
@@ -72,22 +73,15 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
-    develop:
-      watch:
-        - action: sync
-          path: ./
-          target: /app
-          initial_sync: true
-          ignore:
-            - node_modules/
     depends_on:
       - qdrant
-
 
   webui:
     build:
       context: ./webui
       dockerfile: Dockerfile
+    environment:
+      UPSTREAM_API_URL: http://retriever:3000
     ports:
       - "5173:80"
     develop:
@@ -98,7 +92,7 @@ services:
           initial_sync: true
           ignore:
             - Dockerfile
-            - nginx.conf
+            - nginx.conf.template
     depends_on:
       - retriever
 
@@ -116,7 +110,7 @@ volumes:
 
 models:
   chat-model:
-   model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
+    model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
   embedding-model:
     model: ai/embeddinggemma:latest
 

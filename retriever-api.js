@@ -2,7 +2,6 @@ import fs from "fs";
 import http from "http";
 import os from "os";
 import path from "path";
-import { ChatOpenAI } from "@langchain/openai";
 import {
   APP_NAME,
   APP_VERSION,
@@ -24,6 +23,7 @@ import {
   validateRetrievalConfig,
 } from "./src/config.js";
 import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
+import { createChatModel } from "./src/model-clients.js";
 import {
   DEFAULT_ASSISTANT_MODE,
   isAssistantModeSupported,
@@ -70,20 +70,7 @@ let uiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim()
   : "clean";
 const guardrailsText = loadGuardrails();
 
-const chatModel = new ChatOpenAI({
-  model:
-    process.env.MODEL_RUNNER_LLM_CHAT ||
-    "hf.co/qwen/qwen2.5-coder-3b-instruct-gguf:q4_k_m",
-  apiKey: "",
-  configuration: {
-    baseURL:
-      process.env.MODEL_RUNNER_BASE_URL ||
-      "http://localhost:12434/engines/llama.cpp/v1/",
-  },
-  temperature: parseFloat(process.env.OPTION_TEMPERATURE || "0.0"),
-  top_p: parseFloat(process.env.OPTION_TOP_P || "0.5"),
-  presencePenalty: parseFloat(process.env.OPTION_PRESENCE_PENALTY || "2.2"),
-});
+const chatModel = createChatModel();
 
 const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();

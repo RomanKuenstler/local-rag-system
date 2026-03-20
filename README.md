@@ -8,7 +8,7 @@ This project runs four services with Docker Compose:
 - **embedder**: continuously indexes files from `./data` into vectors.
 - **qdrant**: stores embeddings and metadata.
 - **retriever**: API-oriented retrieval + answer service.
-- **webui**: very small React chat UI that talks to retriever APIs.
+- **webui**: very small React chat UI served by nginx; `/api` is reverse-proxied to the active API service (currently retriever).
 
 ## Documentation
 
@@ -37,7 +37,7 @@ docker compose up -d qdrant embedder retriever webui
 ```
 
 - Retriever API: `http://localhost:3000`
-- Web UI: `http://localhost:5173`
+- Web UI: `http://localhost:5173` (same-origin `/api` proxy to `retriever:3000`)
 
 ## Example API calls
 
