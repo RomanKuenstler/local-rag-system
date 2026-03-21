@@ -114,6 +114,7 @@ function App() {
   const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
   const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
   const [isLoadingChats, setIsLoadingChats] = useState(false);
+  const [openChatMenuId, setOpenChatMenuId] = useState(null);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -311,6 +312,9 @@ function App() {
     function closeMenuOnOutside(event) {
       if (!menuRef.current?.contains(event.target)) {
         setIsMenuOpen(false);
+      }
+      if (!event.target.closest(".chat-item-actions")) {
+        setOpenChatMenuId(null);
       }
     }
 
@@ -917,6 +921,9 @@ function App() {
   const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
   const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
+  const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
+  const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
+  const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -1140,17 +1147,97 @@ function App() {
         isLoadingChats
           ? React.createElement("p", { className: "side-nav-loading" }, "Loading chats…")
           : null,
-        ...chatList.map((chat) => React.createElement(
-          "button",
-          {
-            key: chat.id,
-            type: "button",
-            className: `side-nav-chat-item${chat.id === activeChatId ? " active" : ""}`,
-            onClick: () => switchChat(chat.id),
-            disabled: isLoadingChats,
-          },
-          chat.name
-        ))
+        ...chatList.map((chat) => {
+          const isActiveChat = chat.id === activeChatId;
+          const isMenuOpenForChat = openChatMenuId === chat.id;
+          return React.createElement(
+            "div",
+            {
+              key: chat.id,
+              className: `side-nav-chat-row${isActiveChat ? " active" : ""}`,
+            },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: `side-nav-chat-item${isActiveChat ? " active" : ""}`,
+                onClick: () => switchChat(chat.id),
+                disabled: isLoadingChats,
+              },
+              chat.name
+            ),
+            React.createElement(
+              "div",
+              { className: "chat-item-actions" },
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "chat-item-actions-trigger",
+                  "aria-label": `Open actions for ${chat.name}`,
+                  "aria-haspopup": "menu",
+                  "aria-expanded": isMenuOpenForChat ? "true" : "false",
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    setOpenChatMenuId((previous) => previous === chat.id ? null : chat.id);
+                  },
+                },
+                icon(dotsIconPath)
+              ),
+              isMenuOpenForChat
+                ? React.createElement(
+                  "ul",
+                  { className: "chat-item-actions-menu", role: "menu" },
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        onClick: () => setOpenChatMenuId(null),
+                      },
+                      icon(renameIconPath),
+                      React.createElement("span", null, "Rename")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        onClick: () => setOpenChatMenuId(null),
+                      },
+                      icon(archiveIconPath),
+                      React.createElement("span", null, "Archive")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option delete",
+                        role: "menuitem",
+                        onClick: () => setOpenChatMenuId(null),
+                      },
+                      icon(trashIconPath),
+                      React.createElement("span", null, "Delete")
+                    )
+                  )
+                )
+                : null
+            )
+          );
+        })
       ),
       React.createElement(
         "div",
