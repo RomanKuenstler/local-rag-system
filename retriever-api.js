@@ -2,6 +2,7 @@ import fs from "fs";
 import http from "http";
 import os from "os";
 import path from "path";
+import crypto from "crypto";
 import {
   APP_NAME,
   APP_VERSION,
@@ -60,16 +61,22 @@ import {
 import { ensureDatabaseReady } from "./src/db.js";
 import {
   addChatMessage,
-  ensureChatContext,
+  createChat,
+  deleteChat,
+  ensureSessionExists,
   getRuntimeConfigState,
   getIndexStateMap,
   initializeRuntimeConfigDefaults,
   getSelectionState,
   initializeStateDefaults,
+  listSessionChats,
   listChatMessages,
   listRecentPromptHistory,
   listFileMetadata,
+  resolveSessionChatId,
+  setSessionActiveChat,
   updateSetting,
+  updateChatStatus,
 } from "./src/state-store.js";
 import {
   normalizeIndexableFileByExtension,
@@ -680,7 +687,7 @@ function json(res, statusCode, payload) {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(body);
@@ -718,7 +725,7 @@ async function handlePrompt(req, res) {
   const body = await readJsonBody(req);
   const prompt = normalizePrompt(body.prompt);
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
-  const chatId = String(body.chatId || "default-chat").trim() || "default-chat";
+  const requestedChatId = String(body.chatId || "").trim() || null;
   const uploadedFiles = Array.isArray(body.uploadedFiles) ? body.uploadedFiles : [];
   const requestedAttachedFiles = Array.isArray(body.attachedFiles)
     ? body.attachedFiles.map((name) => String(name || "").trim()).filter(Boolean)
@@ -729,7 +736,16 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
+  const resolvedChat = await resolveSessionChatId({ sessionId, requestedChatId, fallbackChatId: "default-chat" });
+  if (!resolvedChat) {
+    json(res, 409, {
+      error: "Chat is not active or cannot be resolved.",
+      sessionId,
+      chatId: requestedChatId,
+    });
+    return;
+  }
+  const { chatId, chatName } = resolvedChat;
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -888,11 +904,20 @@ async function handlePrompt(req, res) {
 async function handleMessages(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
-  const chatId = String(url.searchParams.get("chatId") || "default-chat").trim() || "default-chat";
+  const requestedChatId = String(url.searchParams.get("chatId") || "").trim() || null;
   const limitParam = Number.parseInt(String(url.searchParams.get("limit") || ""), 10);
   const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : null;
 
-  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
+  const resolvedChat = await resolveSessionChatId({ sessionId, requestedChatId, fallbackChatId: "default-chat" });
+  if (!resolvedChat) {
+    json(res, 409, {
+      error: "Chat is not active or cannot be resolved.",
+      sessionId,
+      chatId: requestedChatId,
+    });
+    return;
+  }
+  const { chatId, chatName } = resolvedChat;
   const rows = await listChatMessages({ sessionId, chatId, limit });
 
   json(res, 200, {
@@ -906,6 +931,137 @@ async function handleMessages(req, res) {
       metadata: row.metadata || {},
       createdAt: row.created_at,
     })),
+  });
+}
+
+async function handleListChats(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
+  const includeArchived = ["1", "true", "yes"].includes(
+    String(url.searchParams.get("includeArchived") || "").trim().toLowerCase()
+  );
+
+  const data = await listSessionChats({ sessionId, includeArchived });
+
+  json(res, 200, {
+    sessionId,
+    activeChatId: data.activeChatId,
+    chats: data.chats.map((chat) => ({
+      id: chat.id,
+      name: chat.name,
+      status: chat.status,
+      createdAt: chat.created_at,
+      updatedAt: chat.updated_at,
+      archivedAt: chat.archived_at,
+    })),
+    totalChats: data.chats.length,
+  });
+}
+
+async function handleCreateChat(req, res) {
+  const body = await readJsonBody(req);
+  const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+  const requestedName = String(body.name || "").trim() || null;
+  const chatId = String(body.chatId || "").trim() || crypto.randomUUID();
+  await ensureSessionExists(sessionId);
+  let created;
+  try {
+    created = await createChat({
+      sessionId,
+      chatId,
+      chatName: requestedName || generateChatName(),
+    });
+  } catch (error) {
+    if (error?.code === "23505") {
+      json(res, 409, { error: "Chat id already exists.", sessionId, chatId });
+      return;
+    }
+    throw error;
+  }
+
+  json(res, 201, {
+    sessionId,
+    activeChatId: chatId,
+    chat: {
+      id: created.id,
+      name: created.name,
+      status: created.status,
+      createdAt: created.created_at,
+      updatedAt: created.updated_at,
+      archivedAt: created.archived_at,
+    },
+  });
+}
+
+async function handlePatchChat(req, res, chatId) {
+  const body = await readJsonBody(req);
+  const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+  const action = String(body.action || "").trim().toLowerCase();
+
+  if (action === "switch") {
+    const selected = await setSessionActiveChat({ sessionId, chatId });
+    if (!selected) {
+      json(res, 404, { error: "Chat not found.", sessionId, chatId });
+      return;
+    }
+    if (selected.notSwitchable) {
+      json(res, 409, { error: "Cannot switch to archived chat.", sessionId, chatId });
+      return;
+    }
+    json(res, 200, {
+      sessionId,
+      activeChatId: chatId,
+      chat: {
+        id: selected.id,
+        name: selected.name,
+        status: selected.status,
+      },
+    });
+    return;
+  }
+
+  if (action === "archive" || action === "activate") {
+    const status = action === "archive" ? "archived" : "active";
+    const updated = await updateChatStatus({ sessionId, chatId, status });
+    if (!updated) {
+      json(res, 404, { error: "Chat not found.", sessionId, chatId });
+      return;
+    }
+    const listed = await listSessionChats({ sessionId, includeArchived: true });
+    json(res, 200, {
+      sessionId,
+      activeChatId: listed.activeChatId,
+      chat: {
+        id: updated.id,
+        name: updated.name,
+        status: updated.status,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+        archivedAt: updated.archived_at,
+      },
+    });
+    return;
+  }
+
+  json(res, 400, {
+    error: "Unsupported action. Use one of: switch, archive, activate.",
+  });
+}
+
+async function handleDeleteChat(req, res, chatId) {
+  const body = await readJsonBody(req);
+  const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+  const deleted = await deleteChat({ sessionId, chatId });
+  if (!deleted) {
+    json(res, 404, { error: "Chat not found.", sessionId, chatId });
+    return;
+  }
+  const listed = await listSessionChats({ sessionId, includeArchived: true });
+  json(res, 200, {
+    ok: true,
+    sessionId,
+    deletedChatId: chatId,
+    activeChatId: listed.activeChatId,
   });
 }
 
@@ -980,6 +1136,8 @@ const server = http.createServer(async (req, res) => {
     const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
     const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
+    const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
+    const chatRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)$/);
 
     if (req.method === "GET" && isStatusRoute) {
       await handleStatus(req, res);
@@ -993,6 +1151,26 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && isMessagesRoute) {
       await handleMessages(req, res);
+      return;
+    }
+
+    if (req.method === "GET" && isChatsRoute) {
+      await handleListChats(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && isChatsRoute) {
+      await handleCreateChat(req, res);
+      return;
+    }
+
+    if (req.method === "PATCH" && chatRouteMatch) {
+      await handlePatchChat(req, res, decodeURIComponent(chatRouteMatch[1]));
+      return;
+    }
+
+    if (req.method === "DELETE" && chatRouteMatch) {
+      await handleDeleteChat(req, res, decodeURIComponent(chatRouteMatch[1]));
       return;
     }
 
@@ -1053,6 +1231,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/messages, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/messages, POST /internal/retriever/prompt"
   );
 });

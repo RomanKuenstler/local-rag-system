@@ -35,6 +35,16 @@ const LIBRARY_UPLOAD_RULES = {
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 
+function buildChatNameFromId(chatId) {
+  const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
+  return `chat-${suffix}`;
+}
+
+function buildInitialChatList(activeChatId) {
+  const primaryId = String(activeChatId || "").trim() || `chat-${crypto.randomUUID()}`;
+  return [{ id: primaryId, name: buildChatNameFromId(primaryId) }];
+}
+
 function getOrCreatePersistentId(storageKey, fallbackPrefix) {
   try {
     const stored = window.localStorage.getItem(storageKey);
@@ -86,6 +96,9 @@ function App() {
   const [activeView, setActiveView] = useState(getInitialView);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
+  const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
+  const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
+  const [isLoadingChats, setIsLoadingChats] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -162,9 +175,9 @@ function App() {
     }
   }
 
-  async function loadMessagesFromDb() {
+  async function loadMessagesFromDb(explicitChatId = null) {
     const sessionId = sessionIdRef.current;
-    const chatId = chatIdRef.current;
+    const chatId = explicitChatId || chatIdRef.current;
     const messageLoadLimit = 40;
     const response = await fetch(
       `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
@@ -194,6 +207,44 @@ function App() {
     });
   }
 
+  async function refreshChats({ preferredChatId = null } = {}) {
+    const sessionId = sessionIdRef.current;
+    setIsLoadingChats(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to load chats");
+      }
+
+      const nextChats = Array.isArray(payload.chats)
+        ? payload.chats.map((chat) => ({
+          id: chat.id,
+          name: chat.name || buildChatNameFromId(chat.id),
+          status: chat.status || "active",
+        }))
+        : [];
+
+      const fallbackChatId = preferredChatId || payload.activeChatId || chatIdRef.current;
+      const nextActiveChat = nextChats.find((chat) => chat.id === fallbackChatId)
+        ? fallbackChatId
+        : (payload.activeChatId || nextChats[0]?.id || chatIdRef.current);
+
+      setChatList(nextChats.length > 0 ? nextChats : buildInitialChatList(nextActiveChat));
+      setActiveChatId(nextActiveChat);
+      chatIdRef.current = nextActiveChat;
+      try {
+        window.localStorage.setItem(CHAT_ID_STORAGE_KEY, nextActiveChat);
+      } catch {
+        // ignore storage write errors
+      }
+    } finally {
+      setIsLoadingChats(false);
+    }
+  }
+
   useEffect(() => {
     async function poll() {
       await refreshStatus();
@@ -209,8 +260,14 @@ function App() {
   }, [hasShownReadyGreeting]);
 
   useEffect(() => {
-    loadMessagesFromDb().catch(() => {
+    loadMessagesFromDb(activeChatId).catch(() => {
       setMessages([]);
+    });
+  }, [activeChatId]);
+
+  useEffect(() => {
+    refreshChats({ preferredChatId: chatIdRef.current }).catch(() => {
+      setChatList(buildInitialChatList(chatIdRef.current));
     });
   }, []);
 
@@ -763,6 +820,8 @@ function App() {
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
+  const plusChatIconPath = "M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1";
+  const settingsIconPath = "M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5";
   const fileUploadIconPath = "M11 18h2v-8h3l-4-4-4 4h3zm-6 2h14v-2H5z";
   const trashIconPath = "M9 3h6l1.4 2H20a1 1 0 1 1 0 2h-1v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4a1 1 0 1 1 0-2h3.6zM7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7zm3 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1m4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1";
   const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
@@ -853,6 +912,77 @@ function App() {
     window.location.hash = "";
   }
 
+  async function createNewChat() {
+    const sessionId = sessionIdRef.current;
+    setIsMenuOpen(false);
+    window.location.hash = "";
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to create new chat");
+      }
+
+      const newChatId = payload?.chat?.id || payload?.activeChatId;
+      if (!newChatId) {
+        throw new Error("Chat was created but no chat id was returned.");
+      }
+
+      setPanelData(null);
+      setMessages([]);
+      await refreshChats({ preferredChatId: newChatId });
+      await loadMessagesFromDb(newChatId).catch(() => {
+        setMessages([]);
+      });
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    }
+  }
+
+  async function switchChat(chatId) {
+    const selectedId = String(chatId || "").trim();
+    if (!selectedId || selectedId === activeChatId) {
+      return;
+    }
+    const sessionId = sessionIdRef.current;
+    setPanelData(null);
+    setIsMenuOpen(false);
+    window.location.hash = "";
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(selectedId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, action: "switch" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to switch chat");
+      }
+
+      await refreshChats({ preferredChatId: selectedId });
+      await loadMessagesFromDb(selectedId).catch(() => {
+        setMessages([]);
+      });
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    }
+  }
+
+  async function openSettingsDialog() {
+    setIsMenuOpen(false);
+    await sendRawPrompt("/config");
+  }
+
   return React.createElement(
     "div",
     { className: `page${panelData ? " modal-open" : ""}` },
@@ -873,15 +1003,78 @@ function App() {
           ? React.createElement(
             React.Fragment,
             null,
-            React.createElement(
-              "button",
-              { type: "button", className: "send header-chat-link", onClick: openChatPage },
-              icon(chatIconPath),
-              "Chat"
-            ),
             React.createElement("h2", { className: "header-title" }, "Library")
           )
           : null
+      )
+    ),
+    React.createElement(
+      "aside",
+      { className: "side-nav" },
+      React.createElement(
+        "div",
+        { className: "side-nav-top" },
+        React.createElement(
+          "button",
+          { type: "button", className: "side-nav-item", onClick: createNewChat },
+          icon(plusChatIconPath),
+          React.createElement("span", null, "New chat")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "side-nav-item",
+            onClick: activeView === "library" ? openChatPage : openLibraryPage,
+          },
+          icon(activeView === "library" ? chatIconPath : libraryIconPath),
+          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${panelData?.command === "/config" ? " active" : ""}`,
+            onClick: openSettingsDialog,
+            disabled: isSending || !isEmbeddingReady,
+          },
+          icon(settingsIconPath),
+          React.createElement("span", null, "Settings")
+        )
+      ),
+      React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
+      React.createElement(
+        "div",
+        { className: "side-nav-chat-list", role: "navigation", "aria-label": "Your chats" },
+        isLoadingChats
+          ? React.createElement("p", { className: "side-nav-loading" }, "Loading chats…")
+          : null,
+        ...chatList.map((chat) => React.createElement(
+          "button",
+          {
+            key: chat.id,
+            type: "button",
+            className: `side-nav-chat-item${chat.id === activeChatId ? " active" : ""}`,
+            onClick: () => switchChat(chat.id),
+            disabled: isLoadingChats,
+          },
+          chat.name
+        ))
+      ),
+      React.createElement(
+        "div",
+        { className: "side-nav-bottom" },
+        React.createElement("span", { className: "side-nav-bottom-label" }, "Menu"),
+        React.createElement(
+          "button",
+          {
+            className: "side-nav-menu-trigger",
+            type: "button",
+            onClick: () => setIsMenuOpen((current) => !current),
+            "aria-label": isMenuOpen ? "Close menu" : "Open menu",
+          },
+          icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
+        )
       )
     ),
     React.createElement(
@@ -1260,18 +1453,7 @@ function App() {
           )
         )
         : null,
-      React.createElement(
-        "button",
-        {
-          className: "floating-menu-toggle",
-          type: "button",
-          onClick: () => setIsMenuOpen((current) => !current),
-          "aria-label": isMenuOpen ? "Close menu" : "Open menu",
-        },
-        isMenuOpen
-          ? icon("M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.3l6.3 6.29 6.3-6.29z")
-          : icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
-      )
+      null
     ),
     activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
