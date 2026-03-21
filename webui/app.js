@@ -997,30 +997,32 @@ function App() {
                   );
                 })(),
                 React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
-                file.canDelete
-                  ? React.createElement(React.Fragment, null,
-                    React.createElement(
-                      "button",
-                      {
-                        type: "button",
-                        className: "library-delete-button",
-                        "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
-                        onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
-                      },
-                      icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
-                    ),
-                    React.createElement(
-                      "button",
-                      {
-                        type: "button",
-                        className: "library-delete-button",
-                        "aria-label": `Delete ${file.path}`,
-                        onClick: () => setDeleteConfirmFile(file),
-                      },
-                      icon(trashIconPath)
-                    )
+                React.createElement(
+                  "div",
+                  { className: "library-row-actions" },
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "library-toggle-button",
+                      "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
+                      onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
+                      disabled: !file.canDelete,
+                    },
+                    icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "library-delete-button",
+                      "aria-label": `Delete ${file.path}`,
+                      onClick: () => setDeleteConfirmFile(file),
+                      disabled: !file.canDelete,
+                    },
+                    icon(trashIconPath)
                   )
-                  : React.createElement("span", null, "—")
+                )
               ))
             )
           )
