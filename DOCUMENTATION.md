@@ -95,6 +95,10 @@ Your personal files become the **knowledge base** of the system.
 ├── PROMPTS.md         # Notes about prompts and prompt engineering
 ```
 
+> **Note:** this high-level structure block is intentionally simplified for beginners.
+> For a maintainer-grade, current file/folder map (including `src/`, `webui/`, API
+> boundaries, and where to implement specific features), see **`DEVELOPERS.md`**.
+
 ---
 
 # System Architecture

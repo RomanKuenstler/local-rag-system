@@ -75,6 +75,7 @@ import {
   listFileMetadata,
   resolveSessionChatId,
   setSessionActiveChat,
+  updateChatName,
   updateSetting,
   updateChatStatus,
 } from "./src/state-store.js";
@@ -1043,8 +1044,33 @@ async function handlePatchChat(req, res, chatId) {
     return;
   }
 
+  if (action === "rename") {
+    const nextName = String(body.name || "").trim();
+    if (!nextName) {
+      json(res, 400, { error: "Chat name is required for rename." });
+      return;
+    }
+    const updated = await updateChatName({ sessionId, chatId, name: nextName });
+    if (!updated) {
+      json(res, 404, { error: "Chat not found.", sessionId, chatId });
+      return;
+    }
+    json(res, 200, {
+      sessionId,
+      chat: {
+        id: updated.id,
+        name: updated.name,
+        status: updated.status,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+        archivedAt: updated.archived_at,
+      },
+    });
+    return;
+  }
+
   json(res, 400, {
-    error: "Unsupported action. Use one of: switch, archive, activate.",
+    error: "Unsupported action. Use one of: switch, archive, activate, rename.",
   });
 }
 
@@ -1063,6 +1089,54 @@ async function handleDeleteChat(req, res, chatId) {
     deletedChatId: chatId,
     activeChatId: listed.activeChatId,
   });
+}
+
+async function handleDownloadChat(req, res, chatId) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
+  const listed = await listSessionChats({ sessionId, includeArchived: true });
+  const selectedChat = listed.chats.find((chat) => chat.id === chatId);
+  if (!selectedChat) {
+    json(res, 404, { error: "Chat not found.", sessionId, chatId });
+    return;
+  }
+
+  const rows = await listChatMessages({ sessionId, chatId, limit: null });
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    sessionId,
+    chat: {
+      id: selectedChat.id,
+      name: selectedChat.name,
+      status: selectedChat.status,
+      createdAt: selectedChat.created_at,
+      updatedAt: selectedChat.updated_at,
+      archivedAt: selectedChat.archived_at,
+    },
+    messages: rows.map((row) => ({
+      id: row.id,
+      role: row.role,
+      content: row.content,
+      metadata: row.metadata || {},
+      createdAt: row.created_at,
+    })),
+  };
+
+  const safeName = String(selectedChat.name || selectedChat.id || "chat")
+    .replace(/[^a-z0-9-_]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "chat";
+  const filename = `${safeName}.json`;
+
+  res.writeHead(200, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Disposition": `attachment; filename=\"${filename}\"`,
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  });
+  res.end(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
 async function handleStatus(_req, res) {
@@ -1138,6 +1212,7 @@ const server = http.createServer(async (req, res) => {
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
     const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
     const chatRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)$/);
+    const chatDownloadRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)\/download$/);
 
     if (req.method === "GET" && isStatusRoute) {
       await handleStatus(req, res);
@@ -1166,6 +1241,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "PATCH" && chatRouteMatch) {
       await handlePatchChat(req, res, decodeURIComponent(chatRouteMatch[1]));
+      return;
+    }
+
+    if (req.method === "GET" && chatDownloadRouteMatch) {
+      await handleDownloadChat(req, res, decodeURIComponent(chatDownloadRouteMatch[1]));
       return;
     }
 
@@ -1231,6 +1311,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/messages, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/messages, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, POST /internal/retriever/prompt"
   );
 });

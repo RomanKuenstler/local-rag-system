@@ -252,6 +252,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname.startsWith("/api/chats/") && url.pathname.endsWith("/download")) {
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+      });
+      return;
+    }
+
     if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/chats/")) {
       await proxyRetriever({
         req,
@@ -291,5 +300,5 @@ await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/messages, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });

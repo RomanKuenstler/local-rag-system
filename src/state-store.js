@@ -236,6 +236,23 @@ export async function updateChatStatus({ sessionId, chatId, status }) {
   return chat;
 }
 
+export async function updateChatName({ sessionId, chatId, name }) {
+  const nextName = String(name || "").trim();
+  if (!nextName) {
+    return null;
+  }
+
+  const result = await dbQuery(
+    `UPDATE chats
+     SET name = $3,
+         updated_at = NOW()
+     WHERE session_id = $1 AND id = $2
+     RETURNING id, name, status, created_at, updated_at, archived_at`,
+    [sessionId, chatId, nextName]
+  );
+  return result.rows[0] || null;
+}
+
 export async function deleteChat({ sessionId, chatId }) {
   const activeBeforeDelete = await dbQuery(
     "SELECT active_chat_id FROM chat_sessions WHERE id = $1",

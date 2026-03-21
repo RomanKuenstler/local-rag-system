@@ -1,6 +1,8 @@
 # CHANGELOG
 
 ### Added
+- Added `DEVELOPERS.md` with a maintainer-focused, detailed folder/file map and implementation guide.
+- Added chat export helper module `webui/chat-export.js` to keep frontend export/download logic modular.
 - Added a visible **Attach** action in the WebUI normal chat composer so prompt uploads are clearly discoverable.
 - Added embedding readiness status tracking via a shared status file so retriever can determine whether indexing is complete.
 - Added `DOCUMENTATION.md` with the previous full project documentation content.
@@ -17,6 +19,8 @@
 - Mapped `./upload` into the retriever container (`/app/upload`) so host-side files are immediately available to `/upload`.
 
 ### Changed
+- Refactored WebUI chat export/download logic out of `webui/app.js` into reusable helper functions.
+- Updated README and DOCUMENTATION to include current chat lifecycle features (rename/download/archive flows) and developer docs pointer.
 - Expanded `/info` system details to include Postgres connection target and local state-file paths.
 - Updated WebUI info parsing/grouping so the info dialog surfaces Storage + State details (including Postgres).
 - Refactored database connection config to reuse shared config exports.
