@@ -35,7 +35,7 @@ The web UI is intentionally minimal for now:
 - prompt input + send button
 - per-chat menu actions (rename, download, archive, delete)
 - archive management tab in Preferences (download / unarchive / delete archived chats)
-- **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, up to 3 files)
+- **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`, up to 3 files)
 - status badges for retriever, embedding state, and embedded file count
 - `/info` panel with grouped runtime details (models, Qdrant collection, Postgres connection, and state-file paths)
 

@@ -193,6 +193,82 @@ function extractTextFromHtml(html) {
   return deduplicateConsecutiveBlocks(blocks).join("\n\n");
 }
 
+function parseCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === "\"") {
+      if (inQuotes && nextChar === "\"") {
+        current += "\"";
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function extractTextFromCsv(csvContent) {
+  if (!csvContent || csvContent.trim() === "") {
+    return "";
+  }
+
+  const lines = csvContent
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length === 0) {
+    return "";
+  }
+
+  const rows = lines.map(parseCsvLine).map((row) => row.map((cell) => normalizeInlineText(cell)));
+  const header = rows[0];
+
+  if (header.length === 0) {
+    return "";
+  }
+
+  const markdownLines = [];
+  markdownLines.push(`| ${header.join(" | ")} |`);
+  markdownLines.push(`| ${header.map(() => "---").join(" | ")} |`);
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.every((cell) => !cell)) {
+      continue;
+    }
+
+    const padded = [...row];
+    while (padded.length < header.length) {
+      padded.push("");
+    }
+
+    markdownLines.push(`| ${padded.slice(0, header.length).join(" | ")} |`);
+  }
+
+  return markdownLines.join("\n");
+}
+
 function normalizePdfPageText(text) {
   if (!text) {
     return "";
@@ -397,6 +473,9 @@ export function extractIndexableTextByExtension(rawContent, extension) {
 
   if (extension === ".html" || extension === ".htm") {
     return extractTextFromHtml(rawContent);
+  }
+  if (extension === ".csv") {
+    return extractTextFromCsv(rawContent);
   }
 
   return rawContent;
