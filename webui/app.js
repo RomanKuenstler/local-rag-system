@@ -19,6 +19,11 @@ import {
   resizeComposerInput,
 } from "./utils.js";
 import { renderPanelContent } from "./panel-content.js";
+import {
+  buildChatDownloadFileName,
+  buildFallbackChatExportPayload,
+  triggerJsonDownload,
+} from "./chat-export.js";
 
 const UI_MODE_OPTIONS = [
   { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
@@ -1166,30 +1171,19 @@ function App() {
       const selectedChat = Array.isArray(chatListPayload.chats)
         ? chatListPayload.chats.find((entry) => entry.id === chat.id)
         : null;
-      const fallbackPayload = {
-        exportedAt: new Date().toISOString(),
+      const fallbackPayload = buildFallbackChatExportPayload({
         sessionId: sessionIdRef.current,
-        chat: selectedChat || { id: chat.id, name: chat.name, status: "active" },
-        messages: Array.isArray(messagesPayload.messages) ? messagesPayload.messages : [],
-      };
+        chat,
+        selectedChat,
+        messages: messagesPayload.messages,
+      });
       response = new Response(JSON.stringify(fallbackPayload, null, 2), {
         status: 200,
         headers: { "Content-Type": "application/json; charset=utf-8" },
       });
     }
     const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const safeName = String(chat.name || chat.id || "chat")
-      .replace(/[^a-z0-9-_]+/gi, "_")
-      .replace(/^_+|_+$/g, "")
-      .slice(0, 80) || "chat";
-    link.href = url;
-    link.download = `${safeName}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
+    triggerJsonDownload(blob, buildChatDownloadFileName(chat));
   }
 
   function openRenameDialog(chat) {
