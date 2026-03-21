@@ -173,7 +173,7 @@ body {
   border: none;
   background: transparent;
   cursor: pointer;
-  padding: 0.18rem;
+  padding: 0.3rem;
   line-height: 0;
 }
 .library-toggle-button { color: #475569; }
@@ -188,7 +188,7 @@ body {
 }
 .library-delete-button:hover { color: #b91c1c; }
 .library-toggle-button .icon,
-.library-delete-button .icon { width: 0.95rem; height: 0.95rem; }
+.library-delete-button .icon { width: 1.2rem; height: 1.2rem; }
 .library-delete-modal {
   width: min(92vw, 420px);
   background: #fff;
