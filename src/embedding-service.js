@@ -185,7 +185,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
     const managedFiles = await listManagedLibraryFilesWithStatus();
     const disabledPaths = new Set(
       managedFiles
-        .filter((file) => file.upload_status === "disabled")
+        .filter((file) => ["disabled", "removing"].includes(file.upload_status))
         .map((file) => file.file_path)
     );
     const activeFiles = files.filter((file) => !disabledPaths.has(file.relativePath));

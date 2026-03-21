@@ -135,7 +135,7 @@ export async function toggleManagedLibraryFile(filePath, enabled) {
     return { updated: false, reason: "not_found" };
   }
 
-  const nextStatus = enabled ? "uploaded" : "disabled";
+  const nextStatus = enabled ? "uploaded" : "removing";
   const updated = await setManagedLibraryFileStatus(file.file_path, nextStatus);
   if (!updated) {
     return { updated: false, reason: "not_found" };
