@@ -322,16 +322,17 @@ function App() {
     function handleEscape(event) {
       if (event.key === "Escape") {
         setPanelData(null);
+        setIsUnifiedDialogOpen(false);
       }
     }
 
-    if (panelData) {
+    if (panelData || isUnifiedDialogOpen) {
       document.addEventListener("keydown", handleEscape);
       return () => document.removeEventListener("keydown", handleEscape);
     }
 
     return undefined;
-  }, [panelData]);
+  }, [panelData, isUnifiedDialogOpen]);
 
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -1154,16 +1155,16 @@ function App() {
       React.createElement(
         "div",
         { className: "side-nav-bottom" },
-        React.createElement("span", { className: "side-nav-bottom-label" }, "Menu"),
         React.createElement(
-          "button",
-          {
-            className: "side-nav-menu-trigger",
-            type: "button",
-            onClick: () => setIsMenuOpen((current) => !current),
-            "aria-label": isMenuOpen ? "Close menu" : "Open menu",
-          },
-          icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
+          "div",
+          { className: "side-nav-user" },
+          React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+          React.createElement(
+            "div",
+            { className: "side-nav-user-meta" },
+            React.createElement("strong", null, "Username"),
+            React.createElement("small", null, "Account placeholder")
+          )
         )
       )
     ),
@@ -1500,6 +1501,16 @@ function App() {
     React.createElement(
       "div",
       { className: "floating-menu", ref: menuRef },
+      React.createElement(
+        "button",
+        {
+          className: "floating-menu-toggle",
+          type: "button",
+          onClick: () => setIsMenuOpen((current) => !current),
+          "aria-label": isMenuOpen ? "Close quick actions" : "Open quick actions",
+        },
+        icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
+      ),
       isMenuOpen
         ? React.createElement(
           "div",

@@ -147,27 +147,41 @@ body {
   bottom: 0;
   background: #ffffff;
   border-top: 1px solid #d4d4d8;
-  padding-top: 0.45rem;
-  display: flex;
-  justify-content: space-between;
+  padding-top: 0.5rem;
+}
+.side-nav-user {
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
+  gap: 0.55rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.5rem 0.55rem;
+  background: #f8fafc;
 }
-.side-nav-bottom-label {
-  font-size: 0.86rem;
-  color: #374151;
-  padding-left: 0.2rem;
-}
-.side-nav-menu-trigger {
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #111827;
+.side-nav-avatar-placeholder {
+  width: 2rem;
+  height: 2rem;
   border-radius: 999px;
-  width: 2.25rem;
-  height: 2.25rem;
-  padding: 0;
-  cursor: pointer;
+  border: 1px solid #cbd5e1;
   display: grid;
   place-items: center;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #475569;
+  background: #ffffff;
+}
+.side-nav-user-meta {
+  display: grid;
+  gap: 0.05rem;
+}
+.side-nav-user-meta strong {
+  font-size: 0.86rem;
+  color: #111827;
+}
+.side-nav-user-meta small {
+  font-size: 0.75rem;
+  color: #6b7280;
 }
 
 .topbar,
@@ -468,7 +482,7 @@ body {
 
 .panel-modal {
   width: min(920px, calc(100vw - 2rem));
-  max-height: min(82vh, 820px);
+  height: min(76vh, 760px);
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid rgba(203, 213, 225, 0.8);
   border-radius: 20px;
@@ -536,7 +550,7 @@ body {
   background: #eef2f7;
 }
 .panel-tab-button.active {
-  border-color: rgba(148, 163, 184, 0.45);
+  border-color: transparent;
   background: #e2e8f0;
 }
 .panel-modal-loading,
@@ -1078,7 +1092,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   left: 0.85rem;
   bottom: 1rem;
   z-index: 60;
-  display: grid;
+  display: none;
   gap: 0.45rem;
 }
 
@@ -1130,6 +1144,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .side-nav {
     display: none;
   }
+  .floating-menu {
+    display: grid;
+  }
   .workspace { grid-template-columns: 1fr; }
   .status-rail {
     order: -1;
@@ -1150,7 +1167,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   .side-nav { display: none; }
   .panel-modal {
     width: calc(100vw - 1rem);
-    max-height: 84vh;
+    height: 84vh;
     border-radius: 16px;
   }
   .panel-modal-tab-layout {
