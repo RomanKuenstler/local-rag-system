@@ -64,6 +64,7 @@ body {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #334155;
+  font-weight: 700;
 }
 .assistant-mode-menu {
   position: relative;
