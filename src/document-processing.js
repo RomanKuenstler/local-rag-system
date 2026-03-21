@@ -190,6 +190,13 @@ function extractTextFromHtml(html) {
     blocks.push(text);
   });
 
+  if (blocks.length === 0) {
+    const fallbackText = normalizeInlineText(root.text());
+    if (fallbackText) {
+      return fallbackText;
+    }
+  }
+
   return deduplicateConsecutiveBlocks(blocks).join("\n\n");
 }
 
@@ -431,6 +438,27 @@ async function extractTextFromEpub(filePath) {
     }
 
     sections.push(chapterText);
+  }
+
+  if (sections.length === 0) {
+    const fallbackEntries = entries
+      .map((entry) => entry.entryName)
+      .filter((name) => /\.(xhtml|html|htm)$/i.test(name))
+      .sort();
+
+    for (const entryName of fallbackEntries) {
+      const fallbackEntry = entryMap.get(entryName);
+      if (!fallbackEntry) {
+        continue;
+      }
+
+      const fallbackText = extractTextFromHtml(decodeZipEntry(fallbackEntry));
+      if (!fallbackText || shouldSkipEpubFrontMatter(entryName, fallbackText, 99)) {
+        continue;
+      }
+
+      sections.push(fallbackText);
+    }
   }
 
   return removeRepeatedBookChrome(sections).join("\n\n").trim();
