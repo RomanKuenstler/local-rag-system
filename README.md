@@ -22,6 +22,8 @@ Detailed documentation (architecture, setup details, internals) has been moved t
 - `POST /api/prompt`: send user prompt and receive answer + evidence severity.
 - `GET /api/status`: get basic system/readiness status.
 - `GET /api/files`: list embeddable files and embedding coverage.
+- `GET /api/chats`, `POST /api/chats`, `PATCH /api/chats/:chatId`, `DELETE /api/chats/:chatId`: manage multi-chat lifecycle per session (create, switch, archive, activate, delete).
+- `GET /api/messages`: fetch messages for a specific chat (or the session's active chat).
 - `GET /healthz`: lightweight liveness check.
 
 ## WebUI (frontend step 2)

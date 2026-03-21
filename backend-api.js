@@ -35,7 +35,7 @@ function readBody(req) {
 
 async function proxyRetriever({ req, res, targetPath }) {
   const method = req.method || "GET";
-  const body = method === "POST" ? await readBody(req) : undefined;
+  const body = ["POST", "PATCH", "DELETE"].includes(method) ? await readBody(req) : undefined;
 
   const upstreamResponse = await fetch(`${RETRIEVER_BASE_URL}${targetPath}`, {
     method,
@@ -247,6 +247,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/chats") {
+      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats") });
+      return;
+    }
+
+    if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/chats/")) {
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+      });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/prompt") {
       await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt" });
       return;
@@ -277,5 +291,5 @@ await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/messages, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
