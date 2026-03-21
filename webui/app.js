@@ -727,6 +727,8 @@ function App() {
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
   const fileUploadIconPath = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zm0 1.5L18.5 9H14zM11 17v-4.6l-1.7 1.7-1.4-1.4L12 8.6l4.1 4.1-1.4 1.4-1.7-1.7V17z";
+  const trashIconPath = "M9 3h6l1 2h4v2H4V5h4zm1 6h2v8h-2zm4 0h2v8h-2zM7 9h2v8H7z";
+  const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -901,7 +903,6 @@ function App() {
                 React.createElement("span", null, "Extension"),
                 React.createElement("span", null, "Embedded"),
                 React.createElement("span", null, "Updated"),
-                React.createElement("span", null, "Hash"),
                 React.createElement("span", null, "Action")
               ),
               ...libraryRows.map((file) => React.createElement(
@@ -936,10 +937,20 @@ function App() {
                 React.createElement(
                   "span",
                   null,
-                  React.createElement("span", { className: `status-badge ${file.embedded ? "active" : "pending"}` }, file.embedded ? "yes" : "no")
+                  React.createElement(
+                    "span",
+                    { className: `status-badge ${file.embedded ? "active" : "pending"} ${["embedding", "removing"].includes(file.uploadStatus) ? "with-spinner" : ""}` },
+                    ["embedding", "removing"].includes(file.uploadStatus)
+                      ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                      : null,
+                    file.uploadStatus === "embedding"
+                      ? "embedding"
+                      : file.uploadStatus === "removing"
+                        ? "removing"
+                        : file.embedded ? "yes" : "no"
+                  )
                 ),
                 React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
-                React.createElement("span", { className: "library-hash" }, file.hash || "n/a"),
                 file.canDelete
                   ? React.createElement(
                     "button",
@@ -949,7 +960,7 @@ function App() {
                       "aria-label": `Delete ${file.path}`,
                       onClick: () => setDeleteConfirmFile(file),
                     },
-                    icon("M9 3h6l1 2h4v2H4V5h4zm1 6h2v8h-2zm4 0h2v8h-2zM7 9h2v8H7z")
+                    icon(trashIconPath)
                   )
                   : React.createElement("span", null, "—")
               ))
@@ -1202,7 +1213,7 @@ function App() {
           : icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
       )
     ),
-    !isEmbeddingReady && !isLoadingStatus
+    activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
         "div",
         { className: "embedding-loading-overlay" },
@@ -1232,7 +1243,13 @@ function App() {
             onClick: (event) => event.stopPropagation(),
           },
           React.createElement("h4", null, "Delete file?"),
-          React.createElement("p", null, `Are you sure you want to delete '${deleteConfirmFile.path}'?`),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you want to delete ",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path),
+            "?"
+          ),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
@@ -1243,7 +1260,8 @@ function App() {
                 className: "library-delete-confirm",
                 onClick: confirmDeleteLibraryFile,
               },
-              "Yes, delete"
+              icon(trashIconPath),
+              "Delete"
             ),
             React.createElement(
               "button",
@@ -1252,7 +1270,8 @@ function App() {
                 className: "library-delete-cancel",
                 onClick: () => setDeleteConfirmFile(null),
               },
-              "No, keep"
+              icon(keepIconPath),
+              "Keep"
             )
           )
         )
