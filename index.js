@@ -112,7 +112,7 @@ const DEFAULT_SESSION_ID = "default-session-id";
 const SESSION_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, "-");
 const CHAT_HISTORY_FILE = path.join(CHAT_HISTORY_DIR, `session-${SESSION_TIMESTAMP}-${randomUUID()}.jsonl`);
 const UPLOAD_PATH = path.resolve(process.cwd(), "upload");
-const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".epub"]);
 
 function ensureUploadDirectory() {
   fs.mkdirSync(UPLOAD_PATH, { recursive: true });
@@ -565,7 +565,7 @@ while (!exit) {
     if (uploadedFiles.length === 0) {
       const reason =
         skippedFiles.length > 0
-          ? `Found unsupported or empty file types in ./upload (${skippedFiles.join(", ")}). Only .md, .txt, .html, .htm, and .pdf with indexable text are allowed.`
+          ? `Found unsupported or empty file types in ./upload (${skippedFiles.join(", ")}). Only .md, .txt, .html, .htm, .pdf, and .epub with indexable text are allowed.`
           : "No files found in ./upload.";
 
       ui.printAssistantMessage(`Nothing was uploaded. ${reason}`);

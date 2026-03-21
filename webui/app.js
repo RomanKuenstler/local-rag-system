@@ -31,11 +31,11 @@ const UI_MODE_OPTIONS = [
 ];
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
 };
 const LIBRARY_UPLOAD_RULES = {
   maxFiles: 10,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";

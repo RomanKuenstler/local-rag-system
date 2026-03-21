@@ -11,6 +11,7 @@ const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
 const RETRIEVER_BASE_URL = process.env.RETRIEVER_BASE_URL || "http://retriever:3000";
 const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "http://embedder:3200";
+const MAX_API_BODY_BYTES = Number.parseInt(process.env.MAX_API_BODY_BYTES || String(25 * 1024 * 1024), 10);
 
 function json(res, statusCode, payload) {
   res.writeHead(statusCode, {
@@ -25,7 +26,16 @@ function json(res, statusCode, payload) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    let sizeBytes = 0;
+
+    req.on("data", (chunk) => {
+      sizeBytes += chunk.length;
+      if (sizeBytes > MAX_API_BODY_BYTES) {
+        reject(new Error("Payload too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
       resolve(Buffer.concat(chunks).toString("utf8"));
     });
@@ -136,6 +146,10 @@ async function handleLibraryUpload(req, res) {
     });
     json(res, 201, { ok: true, file });
   } catch (error) {
+    if (error.message === "Payload too large") {
+      json(res, 413, { ok: false, error: error.message });
+      return;
+    }
     const statusCode = error.message === "File already exists." ? 409 : 400;
     json(res, statusCode, { ok: false, error: error.message });
   }
@@ -289,6 +303,13 @@ const server = http.createServer(async (req, res) => {
 
     json(res, 404, { error: "Not found" });
   } catch (error) {
+    if (error.message === "Payload too large") {
+      json(res, 413, {
+        error: error.message,
+      });
+      return;
+    }
+
     json(res, 502, {
       error: "Upstream request failed",
       details: error.message,

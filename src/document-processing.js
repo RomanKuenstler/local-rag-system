@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import AdmZip from "adm-zip";
 import * as cheerio from "cheerio";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import {
@@ -214,6 +215,151 @@ function normalizePdfPageText(text) {
   return cleaned;
 }
 
+function decodeZipEntry(entry) {
+  const data = entry.getData();
+  if (!data || data.length === 0) {
+    return "";
+  }
+
+  return data.toString("utf8");
+}
+
+function removeRepeatedBookChrome(sections) {
+  if (!Array.isArray(sections) || sections.length < 2) {
+    return sections;
+  }
+
+  const lineFrequency = new Map();
+  sections.forEach((section) => {
+    const uniqueLines = new Set(
+      section
+        .split("\n")
+        .map((line) => normalizeInlineText(line).toLowerCase())
+        .filter((line) => line.length >= 2 && line.length <= 120)
+    );
+
+    for (const line of uniqueLines) {
+      lineFrequency.set(line, (lineFrequency.get(line) || 0) + 1);
+    }
+  });
+
+  const repeatedLines = new Set(
+    Array.from(lineFrequency.entries())
+      .filter(([, frequency]) => frequency >= 3 && frequency >= Math.ceil(sections.length * 0.2))
+      .map(([line]) => line)
+  );
+
+  if (repeatedLines.size === 0) {
+    return sections;
+  }
+
+  return sections
+    .map((section, sectionIndex) =>
+      section
+        .split("\n")
+        .filter((line) => !repeatedLines.has(normalizeInlineText(line).toLowerCase()))
+        .join("\n")
+        .trim()
+    )
+    .filter(Boolean);
+}
+
+function shouldSkipEpubFrontMatter(href, sectionText, sectionIndex) {
+  const normalizedHref = href.toLowerCase();
+  const frontMatterByPath = [
+    "cover",
+    "titlepage",
+    "copyright",
+    "toc",
+    "contents",
+    "frontmatter",
+    "halftitle",
+  ];
+
+  if (frontMatterByPath.some((keyword) => normalizedHref.includes(keyword))) {
+    return true;
+  }
+
+  if (sectionIndex > 1) {
+    return false;
+  }
+
+  const normalizedText = normalizeInlineText(sectionText).toLowerCase();
+  const frontMatterByText = [
+    "table of contents",
+    "all rights reserved",
+    "copyright",
+    "isbn",
+  ];
+
+  return frontMatterByText.some((token) => normalizedText.includes(token));
+}
+
+async function extractTextFromEpub(filePath) {
+  const zip = new AdmZip(filePath);
+  const entries = zip.getEntries();
+  const entryMap = new Map(entries.map((entry) => [entry.entryName, entry]));
+
+  const containerEntry = entryMap.get("META-INF/container.xml");
+  if (!containerEntry) {
+    return "";
+  }
+
+  const containerXml = decodeZipEntry(containerEntry);
+  const containerDoc = cheerio.load(containerXml, { xmlMode: true });
+  const rootFilePath = containerDoc("rootfile").first().attr("full-path");
+
+  if (!rootFilePath || !entryMap.has(rootFilePath)) {
+    return "";
+  }
+
+  const packageDir = path.posix.dirname(rootFilePath);
+  const packageXml = decodeZipEntry(entryMap.get(rootFilePath));
+  const packageDoc = cheerio.load(packageXml, { xmlMode: true });
+
+  const manifestById = new Map();
+  packageDoc("manifest > item").each((_, item) => {
+    const id = packageDoc(item).attr("id");
+    const href = packageDoc(item).attr("href");
+    if (id && href) {
+      manifestById.set(id, href);
+    }
+  });
+
+  const spineHrefs = [];
+  packageDoc("spine > itemref").each((_, itemref) => {
+    const idref = packageDoc(itemref).attr("idref");
+    const href = idref ? manifestById.get(idref) : null;
+    if (href) {
+      spineHrefs.push(href);
+    }
+  });
+
+  const sections = [];
+
+  for (let index = 0; index < spineHrefs.length; index++) {
+    const href = spineHrefs[index];
+    const chapterPath = path.posix.normalize(path.posix.join(packageDir, href));
+    const chapterEntry = entryMap.get(chapterPath);
+    if (!chapterEntry) {
+      continue;
+    }
+
+    const chapterText = extractTextFromHtml(decodeZipEntry(chapterEntry));
+    if (!chapterText) {
+      continue;
+    }
+
+    if (shouldSkipEpubFrontMatter(href, chapterText, index)) {
+      continue;
+    }
+
+    sections.push(chapterText);
+  }
+
+  return removeRepeatedBookChrome(sections).join("\n\n").trim();
+}
+
 async function extractTextFromPdf(filePath) {
   const loadingTask = pdfjsLib.getDocument(filePath);
   const pdf = await loadingTask.promise;
@@ -265,6 +411,9 @@ export async function normalizeIndexableFileByExtension(filePath, extension, enc
 
   if (normalizedExtension === ".pdf") {
     return normalizeTextForIndexing(await extractTextFromPdf(filePath));
+  }
+  if (normalizedExtension === ".epub") {
+    return normalizeTextForIndexing(await extractTextFromEpub(filePath));
   }
 
   const rawContent = fs.readFileSync(filePath, encoding);
