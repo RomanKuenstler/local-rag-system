@@ -505,6 +505,48 @@ body {
   display: grid;
   gap: 0.75rem;
 }
+.panel-modal-with-tabs {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.panel-modal-tab-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+.panel-tab-nav {
+  border-right: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 0.75rem 0.6rem;
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+}
+.panel-tab-button {
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  color: #111827;
+  cursor: pointer;
+  font-weight: 520;
+}
+.panel-tab-button:hover:not(:disabled) {
+  background: #eef2f7;
+}
+.panel-tab-button.active {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: #e2e8f0;
+}
+.panel-modal-loading,
+.panel-modal-error {
+  margin: 0;
+  font-size: 0.92rem;
+}
+.panel-modal-error {
+  color: #b91c1c;
+}
 
 .info-groups,
 .assistant-mode-grid { display: grid; gap: 0.65rem; }
@@ -1110,5 +1152,13 @@ button:disabled { opacity: .5; cursor: not-allowed; }
     width: calc(100vw - 1rem);
     max-height: 84vh;
     border-radius: 16px;
+  }
+  .panel-modal-tab-layout {
+    grid-template-columns: 1fr;
+  }
+  .panel-tab-nav {
+    border-right: none;
+    border-bottom: 1px solid #e5e7eb;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

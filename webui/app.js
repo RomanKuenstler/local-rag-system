@@ -34,6 +34,12 @@ const LIBRARY_UPLOAD_RULES = {
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+const MENU_DIALOG_TABS = [
+  { id: "settings", label: "Settings", command: "/config" },
+  { id: "personalization", label: "Personalization", command: "/personalization" },
+  { id: "info", label: "Info", command: "/info" },
+  { id: "help", label: "Help", command: "/help" },
+];
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -71,6 +77,10 @@ function getCurrentUiModeFromInfoText(infoText) {
   return uiModeEntry?.value || "clean";
 }
 
+function getMenuTabById(tabId) {
+  return MENU_DIALOG_TABS.find((tab) => tab.id === tabId) || MENU_DIALOG_TABS[0];
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -93,6 +103,11 @@ function App() {
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
+  const [activeDialogTab, setActiveDialogTab] = useState("settings");
+  const [dialogTabPanels, setDialogTabPanels] = useState({});
+  const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
+  const [dialogTabError, setDialogTabError] = useState("");
   const [activeView, setActiveView] = useState(getInitialView);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
@@ -666,44 +681,108 @@ function App() {
     return payload;
   }
 
-  async function openPersonalizationPanel() {
-    if (isSending || !isEmbeddingReady) return;
+  function buildPanelDataFromCommand(command, payload) {
+    if (command === "/config") {
+      return {
+        id: crypto.randomUUID(),
+        command: "/config",
+        title: payload.responseType || "/config",
+        content: parsePanelText(payload.answer || ""),
+        severity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
+        configView: payload.configView || payload.webConfigView || null,
+      };
+    }
 
-    setIsMenuOpen(false);
+    if (command === "/info") {
+      return {
+        id: crypto.randomUUID(),
+        command: "/info",
+        title: payload.responseType || "/info",
+        content: parsePanelText(payload.answer || ""),
+        severity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
+        configView: payload.configView || payload.webConfigView || null,
+      };
+    }
+
+    if (command === "/help") {
+      return {
+        id: crypto.randomUUID(),
+        command: "/help",
+        title: payload.responseType || "/help",
+        content: parsePanelText(payload.answer || ""),
+        severity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
+        configView: payload.configView || payload.webConfigView || null,
+      };
+    }
+
+    return null;
+  }
+
+  async function loadUnifiedDialogTab(tabId, { forceReload = false } = {}) {
+    const selectedTab = getMenuTabById(tabId);
+    const existingPanel = dialogTabPanels[selectedTab.id];
+    setActiveDialogTab(selectedTab.id);
+    setDialogTabError("");
+    if (existingPanel && !forceReload) return;
+
+    if (!isEmbeddingReady) return;
     setIsSending(true);
+    setIsDialogTabLoading(true);
 
     try {
-      const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
-        fetchPanelCommand("/assistant"),
-        fetchPanelCommand("/profile"),
-        fetchPanelCommand("/info"),
-      ]);
-
-      setPanelData({
-        id: crypto.randomUUID(),
-        command: "/personalization",
-        title: "Personalization",
-        content: {
-          ui: {
-            currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
-            modes: UI_MODE_OPTIONS,
+      let nextPanel = null;
+      if (selectedTab.command === "/personalization") {
+        const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
+          fetchPanelCommand("/assistant"),
+          fetchPanelCommand("/profile"),
+          fetchPanelCommand("/info"),
+        ]);
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/personalization",
+          title: "Personalization",
+          content: {
+            ui: {
+              currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
+              modes: UI_MODE_OPTIONS,
+            },
+            assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+            profile: parseProfileContent(profilePayload.answer || ""),
           },
-          assistant: parseAssistantModeContent(assistantPayload.answer || ""),
-          profile: parseProfileContent(profilePayload.answer || ""),
-        },
-        severity: null,
-        responseType: null,
-        configView: null,
-      });
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else {
+        const payload = await fetchPanelCommand(selectedTab.command);
+        nextPanel = buildPanelDataFromCommand(selectedTab.command, payload);
+      }
+
+      if (nextPanel) {
+        setDialogTabPanels((previous) => ({ ...previous, [selectedTab.id]: nextPanel }));
+      }
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-        evidenceSeverity: "error",
-        isVolatile: true,
-      })));
+      setDialogTabError(error.message);
     } finally {
+      setIsDialogTabLoading(false);
       setIsSending(false);
       await refreshStatus();
     }
+  }
+
+  async function openUnifiedDialog(tabId) {
+    if (isSending || !isEmbeddingReady) return;
+    setIsMenuOpen(false);
+    setPanelData(null);
+    setIsUnifiedDialogOpen(true);
+    await loadUnifiedDialogTab(tabId);
+  }
+
+  async function openPersonalizationPanel() {
+    await openUnifiedDialog("personalization");
   }
 
   async function refreshCurrentPanel(activeCommand) {
@@ -773,7 +852,17 @@ function App() {
     setIsSending(true);
     try {
       await fetchPanelCommand(command);
-      await refreshCurrentPanel(panelData?.command);
+      if (isUnifiedDialogOpen) {
+        setDialogTabPanels((previous) => {
+          const nextPanels = { ...previous };
+          delete nextPanels.personalization;
+          delete nextPanels.info;
+          return nextPanels;
+        });
+        await loadUnifiedDialogTab(activeDialogTab, { forceReload: true });
+      } else {
+        await refreshCurrentPanel(panelData?.command);
+      }
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
         evidenceSeverity: "error",
@@ -836,22 +925,24 @@ function App() {
     });
   };
 
-  const panelTitle = getPanelTitle(panelData?.command);
+  const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
+  const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
+  const panelTitle = isUnifiedDialogOpen ? "Preferences" : getPanelTitle(panelData?.command);
 
-  const parsedAssistantPanel = panelData?.command === "/assistant"
-    ? parseAssistantModeContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedAssistantPanel = activeModalPanel?.command === "/assistant"
+    ? parseAssistantModeContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
-  const parsedProfilePanel = panelData?.command === "/profile"
-    ? parseProfileContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedProfilePanel = activeModalPanel?.command === "/profile"
+    ? parseProfileContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
-  const parsedInfoGroups = panelData?.command === "/info"
-    ? parseSystemInfoContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedInfoGroups = activeModalPanel?.command === "/info"
+    ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : [];
-  const parsedHelpPanel = panelData?.command === "/help" || panelData?.command === "?"
-    ? parseHelpContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedHelpPanel = activeModalPanel?.command === "/help" || activeModalPanel?.command === "?"
+    ? parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
-  const configSections = panelData?.command === "/config" && panelData.configView
-    ? panelData.configView.sections
+  const configSections = activeModalPanel?.command === "/config" && activeModalPanel.configView
+    ? activeModalPanel.configView.sections
     : [];
   const editableConfigRows = configSections.flatMap((section) => section.entries
     .filter((entry) => entry.editable)
@@ -979,13 +1070,12 @@ function App() {
   }
 
   async function openSettingsDialog() {
-    setIsMenuOpen(false);
-    await sendRawPrompt("/config");
+    await openUnifiedDialog("settings");
   }
 
   return React.createElement(
     "div",
-    { className: `page${panelData ? " modal-open" : ""}` },
+    { className: `page${panelData || isUnifiedDialogOpen ? " modal-open" : ""}` },
     React.createElement(
       "header",
       { className: "topbar" },
@@ -1034,7 +1124,7 @@ function App() {
           "button",
           {
             type: "button",
-            className: `side-nav-item${panelData?.command === "/config" ? " active" : ""}`,
+            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && activeDialogTab === "settings") ? " active" : ""}`,
             onClick: openSettingsDialog,
             disabled: isSending || !isEmbeddingReady,
           },
@@ -1416,7 +1506,7 @@ function App() {
           { className: "floating-menu-panel" },
           React.createElement(
             "button",
-            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/info"); }, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("info"), disabled: isSending || !isEmbeddingReady },
             icon("M11 17h2v-6h-2zm1-8a1.25 1.25 0 1 0 0 2.5A1.25 1.25 0 0 0 12 9m0 13A10 10 0 1 1 12 2a10 10 0 0 1 0 20"),
             "Info"
           ),
@@ -1441,13 +1531,13 @@ function App() {
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/config"); }, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("settings"), disabled: isSending || !isEmbeddingReady },
             icon("M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5"),
             "Settings"
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/help"); }, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("help"), disabled: isSending || !isEmbeddingReady },
             icon("M12 2 2 12l10 10 10-10Zm0 4.5a3 3 0 0 1 3 3c0 2.2-3 2.4-3 5h-2c0-3.4 3-3.8 3-5a1 1 0 0 0-2 0H9a3 3 0 0 1 3-3Zm-1 10h2v2h-2z"),
             "Help"
           )
@@ -1513,6 +1603,90 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    isUnifiedDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setIsUnifiedDialogOpen(false),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "panel-modal panel-modal-with-tabs",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Preferences dialog",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement(
+            "div",
+            { className: "panel-modal-head" },
+            React.createElement("strong", null, "Preferences"),
+            React.createElement(
+              "div",
+              { className: "panel-modal-head-actions" },
+              React.createElement(
+                "button",
+                {
+                  className: "panel-close",
+                  type: "button",
+                  onClick: () => setIsUnifiedDialogOpen(false),
+                  "aria-label": "Close preferences dialog",
+                },
+                "×"
+              )
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "panel-modal-tab-layout" },
+            React.createElement(
+              "nav",
+              { className: "panel-tab-nav", "aria-label": "Preferences sections" },
+              ...MENU_DIALOG_TABS.map((tab) => React.createElement(
+                "button",
+                {
+                  key: tab.id,
+                  type: "button",
+                  className: `panel-tab-button${tab.id === activeDialogTab ? " active" : ""}`,
+                  onClick: () => loadUnifiedDialogTab(tab.id),
+                  disabled: isDialogTabLoading && tab.id === activeDialogTab,
+                  "aria-current": tab.id === activeDialogTab ? "page" : undefined,
+                },
+                tab.label
+              ))
+            ),
+            React.createElement(
+              "div",
+              { className: "panel-modal-content" },
+              dialogTabError
+                ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
+                : isDialogTabLoading && !activeModalPanel
+                  ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
+                  : activeModalPanel
+                    ? renderPanelContent({
+                      panelData: activeModalPanel,
+                      parsedInfoGroups,
+                      parsedAssistantPanel,
+                      parsedProfilePanel,
+                      parsedHelpPanel,
+                      editableConfigRows,
+                      restartConfigRows,
+                      retrieverStatus,
+                      embedderStatus,
+                      isSending,
+                      isEmbeddingReady,
+                      submitConfigChange,
+                      applyPersonalizationChange,
+                      icon,
+                    })
+                    : React.createElement("p", null, "Select a section.")
             )
           )
         )
