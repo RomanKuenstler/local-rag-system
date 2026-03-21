@@ -68,6 +68,7 @@ import {
   getIndexStateMap,
   initializeRuntimeConfigDefaults,
   getSelectionState,
+  getSessionSetting,
   initializeStateDefaults,
   listSessionChats,
   listChatMessages,
@@ -77,6 +78,7 @@ import {
   setSessionActiveChat,
   updateChatName,
   updateSetting,
+  updateSessionSetting,
   updateChatStatus,
 } from "./src/state-store.js";
 import {
@@ -96,7 +98,6 @@ const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
 
-let assistantMode = initialAssistantMode;
 let profileId = initialProfileId;
 let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
@@ -371,6 +372,11 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   }
 
   if (normalizedPrompt === "/info") {
+    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }));
     return {
       statusCode: 200,
       payload: {
@@ -379,7 +385,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
           appName: APP_NAME,
           appVersion: APP_VERSION,
           uiMode,
-          assistantMode,
+          assistantMode: currentAssistantMode,
           profileId,
           chatModelName: chatModel.model,
           embeddingModelName: embeddingsModel.model,
@@ -416,6 +422,11 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
 
 
   if (normalizedPrompt === "/assistant") {
+    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }));
     const modes = listAssistantModes();
     return {
       statusCode: 200,
@@ -424,7 +435,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         answer: [
           "Assistant modes:",
           ...modes.map((mode) => `- ${mode.id}: ${mode.description}`),
-          `Current mode: ${assistantMode}`
+          `Current mode: ${currentAssistantMode}`
         ].join("\n"),
         evidenceSeverity: null,
         responseType: "assistant_mode",
@@ -491,14 +502,18 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
       };
     }
 
-    assistantMode = normalizeAssistantMode(requestedMode);
-    await updateSetting("assistant_mode", assistantMode);
+    const nextAssistantMode = normalizeAssistantMode(requestedMode);
+    await updateSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      value: nextAssistantMode,
+    });
 
     return {
       statusCode: 200,
       payload: {
         sessionId,
-        answer: `Assistant mode changed to: ${assistantMode}` ,
+        answer: `Assistant mode changed to: ${nextAssistantMode}` ,
         evidenceSeverity: "ok",
         responseType: "assistant_mode",
       },
@@ -751,6 +766,11 @@ async function handlePrompt(req, res) {
     return;
   }
   const { chatId, chatName } = resolvedChat;
+  const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+    sessionId,
+    settingName: "assistant_mode",
+    fallbackValue: initialAssistantMode,
+  }));
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -817,7 +837,7 @@ async function handlePrompt(req, res) {
     ...buildSystemPromptLayers({
       guardrailsText,
       ragContextPackage: searchResult.ragContextPackage,
-      assistantMode,
+      assistantMode: currentAssistantMode,
       profileId,
     }),
     ...chatHistory,
@@ -1144,6 +1164,15 @@ async function handleDownloadChat(req, res, chatId) {
 }
 
 async function handleStatus(_req, res) {
+  const url = new URL(_req.url, `http://${_req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "").trim();
+  const currentAssistantMode = sessionId
+    ? normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }))
+    : initialAssistantMode;
   const readiness = await getEmbeddingReadiness();
   const embeddingStatus = await readEmbeddingStatus();
 
@@ -1155,7 +1184,7 @@ async function handleStatus(_req, res) {
       uiMode,
     },
     assistant: {
-      mode: assistantMode,
+      mode: currentAssistantMode,
       profile: profileId,
       availableModes: listAssistantModes().map((mode) => ({ id: mode.id, label: mode.label })),
       availableProfiles: listProfiles().map((profile) => ({ id: profile.id, label: profile.label })),
@@ -1299,7 +1328,6 @@ await initializeRuntimeConfigDefaults({
 });
 const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
 uiMode = persistedSelections.uiMode;
-assistantMode = normalizeAssistantMode(persistedSelections.assistantMode);
 profileId = normalizeProfile(persistedSelections.profileId);
 const persistedRuntimeConfig = await getRuntimeConfigState({
   historyMessages: runtimeConfig.historyMessages,
