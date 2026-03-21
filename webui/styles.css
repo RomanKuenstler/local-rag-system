@@ -116,7 +116,7 @@ body {
 .library-table-head,
 .library-table-row {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) 1.1fr 0.9fr 0.65fr 0.7fr 0.9fr 1.4fr 1.2fr 0.5fr;
+  grid-template-columns: minmax(180px, 2fr) 1.1fr 0.9fr 0.65fr 0.7fr 1fr 1.4fr 0.5fr;
   gap: 0.7rem;
   align-items: center;
   padding: 0.55rem 0.7rem;
@@ -190,6 +190,19 @@ body {
   margin: 0;
   color: #475569;
   font-size: 0.92rem;
+  line-height: 1.45;
+}
+.library-delete-filename {
+  display: inline-block;
+  margin: 0.2rem 0 0;
+  padding: 0.18rem 0.42rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 .library-delete-actions {
   display: flex;
@@ -203,6 +216,9 @@ body {
   padding: 0.4rem 0.75rem;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .library-delete-confirm {
   background: #dc2626;
@@ -212,6 +228,19 @@ body {
 .library-delete-cancel {
   background: #fff;
   color: #111827;
+}
+.library-delete-confirm .icon,
+.library-delete-cancel .icon {
+  width: 0.86rem;
+  height: 0.86rem;
+}
+.status-badge.with-spinner {
+  gap: 0.35rem;
+}
+.spinner-inline {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-width: 1.8px;
 }
 
 .status-rail {

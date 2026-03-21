@@ -215,6 +215,8 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
       { jobId }
     );
     await clearManagedLibraryFileErrors(changedFiles.map((file) => file.relativePath));
+    await markManagedLibraryFilesStatus(removedFiles, "removing", { jobId });
+    await clearManagedLibraryFileErrors(removedFiles);
 
     if (changedFiles.length === 0 && removedFiles.length === 0) {
       logger("No indexing needed.");
