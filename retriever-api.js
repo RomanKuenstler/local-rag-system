@@ -107,6 +107,7 @@ const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
 const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".epub"]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
+const MAX_REQUEST_BODY_BYTES = Number.parseInt(process.env.MAX_REQUEST_BODY_BYTES || String(10 * 1024 * 1024), 10);
 const pendingWeakAnswers = new Map();
 const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
   historyMessages: HISTORY_MESSAGES,
@@ -697,12 +698,15 @@ function json(res, statusCode, payload) {
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let sizeBytes = 0;
 
     req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > 1_000_000) {
+      sizeBytes += chunk.length;
+      if (sizeBytes > MAX_REQUEST_BODY_BYTES) {
         reject(new Error("Payload too large"));
+        return;
       }
+      raw += chunk;
     });
 
     req.on("end", () => {
