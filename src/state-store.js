@@ -202,6 +202,106 @@ export async function listFileMetadata() {
   return result.rows;
 }
 
+export async function upsertManagedLibraryFile({
+  filePath,
+  originalName,
+  source = "webui",
+  sizeBytes,
+  status = "uploaded",
+}) {
+  await dbQuery(
+    `INSERT INTO library_managed_files (
+       file_path, original_name, source, upload_status, size_bytes, uploaded_at, embedded_at, last_error, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, NOW(), NULL, NULL, NOW())
+     ON CONFLICT (file_path) DO UPDATE SET
+       original_name = EXCLUDED.original_name,
+       source = EXCLUDED.source,
+       upload_status = EXCLUDED.upload_status,
+       size_bytes = EXCLUDED.size_bytes,
+       uploaded_at = NOW(),
+       embedded_at = NULL,
+       last_error = NULL,
+       updated_at = NOW()`,
+    [filePath, originalName, source, status, sizeBytes]
+  );
+}
+
+export async function markManagedLibraryFilesStatus(filePaths, status, { jobId = null, error = null } = {}) {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    return;
+  }
+
+  await dbQuery(
+    `UPDATE library_managed_files
+     SET upload_status = $2,
+         embedded_at = CASE WHEN $2 = 'ready' THEN NOW() ELSE embedded_at END,
+         last_error = CASE WHEN $3::text IS NULL THEN last_error ELSE $3::text END,
+         last_job_id = COALESCE($4::bigint, last_job_id),
+         updated_at = NOW()
+     WHERE file_path = ANY($1)`,
+    [filePaths, status, error, jobId]
+  );
+}
+
+export async function clearManagedLibraryFileErrors(filePaths) {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    return;
+  }
+
+  await dbQuery(
+    `UPDATE library_managed_files
+     SET last_error = NULL,
+         updated_at = NOW()
+     WHERE file_path = ANY($1)`,
+    [filePaths]
+  );
+}
+
+export async function markManagedLibraryFileDeleted(filePath) {
+  await dbQuery(
+    `UPDATE library_managed_files
+     SET upload_status = 'deleted',
+         updated_at = NOW()
+     WHERE file_path = $1`,
+    [filePath]
+  );
+}
+
+export async function getManagedLibraryFile(filePath) {
+  const result = await dbQuery(
+    `SELECT file_path, original_name, source, upload_status, size_bytes, uploaded_at, embedded_at, last_error, last_job_id, updated_at
+     FROM library_managed_files
+     WHERE file_path = $1`,
+    [filePath]
+  );
+  return result.rows[0] || null;
+}
+
+export async function listManagedLibraryFilesWithStatus() {
+  const result = await dbQuery(
+    `SELECT
+       m.file_path,
+       m.original_name,
+       m.source,
+       m.upload_status,
+       m.size_bytes,
+       m.uploaded_at,
+       m.embedded_at,
+       m.last_error,
+       m.last_job_id,
+       m.updated_at,
+       f.extension,
+       f.last_modified,
+       f.file_hash,
+       f.chunk_count,
+       f.embedded
+     FROM library_managed_files m
+     LEFT JOIN file_metadata f ON f.file_path = m.file_path
+     ORDER BY m.updated_at DESC, m.file_path ASC`
+  );
+  return result.rows;
+}
+
 export async function markIndexingStarted(startedAt) {
   const job = await dbQuery(
     `INSERT INTO indexing_jobs (status, started_at, updated_at)
