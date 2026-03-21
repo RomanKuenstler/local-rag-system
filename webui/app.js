@@ -31,7 +31,7 @@ const UI_MODE_OPTIONS = [
 ];
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv"],
 };
 const LIBRARY_UPLOAD_RULES = {
   maxFiles: 10,

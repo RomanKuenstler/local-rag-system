@@ -105,7 +105,7 @@ const chatModel = createChatModel();
 
 const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
-const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".epub"]);
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".csv"]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
 const MAX_REQUEST_BODY_BYTES = Number.parseInt(process.env.MAX_REQUEST_BODY_BYTES || String(10 * 1024 * 1024), 10);
 const pendingWeakAnswers = new Map();
@@ -158,7 +158,7 @@ async function normalizeUploadedPromptFile(file) {
   }
 
   let content = "";
-  if (extension === ".pdf" || extension === ".epub") {
+  if (extension === ".pdf") {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-rag-upload-"));
     const tempPath = path.join(tempDir, name);
 
