@@ -1154,7 +1154,7 @@ function App() {
             "div",
             {
               key: chat.id,
-              className: `side-nav-chat-row${isActiveChat ? " active" : ""}`,
+              className: `side-nav-chat-row${isActiveChat ? " active" : ""}${isMenuOpenForChat ? " menu-open" : ""}`,
             },
             React.createElement(
               "button",
