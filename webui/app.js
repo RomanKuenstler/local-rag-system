@@ -115,6 +115,7 @@ function App() {
   const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
   const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
   const [isLoadingChats, setIsLoadingChats] = useState(false);
+  const [volatileChat, setVolatileChat] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [renameDialogChat, setRenameDialogChat] = useState(null);
   const [renameInputValue, setRenameInputValue] = useState("");
@@ -133,6 +134,9 @@ function App() {
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
   const isRagMode = currentUiMode === "rag";
   const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
+  const displayedChatList = volatileChat
+    ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
+    : chatList;
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -604,6 +608,32 @@ function App() {
       return;
     }
 
+    if (volatileChat && chatIdRef.current === volatileChat.id) {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/chats`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: sessionIdRef.current,
+            chatId: volatileChat.id,
+            name: volatileChat.name,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to create chat");
+        }
+        setVolatileChat(null);
+        await refreshChats({ preferredChatId: volatileChat.id });
+      } catch (error) {
+        setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+          evidenceSeverity: "error",
+          isVolatile: true,
+        })));
+        return;
+      }
+    }
+
     setIsSending(true);
     const pendingMessageId = crypto.randomUUID();
     setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
@@ -1046,44 +1076,35 @@ function App() {
     window.location.hash = "";
   }
 
+  function createVolatileChat() {
+    const draftId = `chat-${crypto.randomUUID()}`;
+    const draftChat = { id: draftId, name: buildChatNameFromId(draftId), status: "active" };
+    setVolatileChat(draftChat);
+    setActiveChatId(draftId);
+    chatIdRef.current = draftId;
+    setMessages([]);
+    setPanelData(null);
+    setOpenChatMenuId(null);
+    try {
+      window.localStorage.setItem(CHAT_ID_STORAGE_KEY, draftId);
+    } catch {
+      // ignore storage write errors
+    }
+  }
+
   async function createNewChat() {
-    const sessionId = sessionIdRef.current;
     setIsMenuOpen(false);
     window.location.hash = "";
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/chats`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to create new chat");
-      }
-
-      const newChatId = payload?.chat?.id || payload?.activeChatId;
-      if (!newChatId) {
-        throw new Error("Chat was created but no chat id was returned.");
-      }
-
-      setPanelData(null);
-      setMessages([]);
-      await refreshChats({ preferredChatId: newChatId });
-      await loadMessagesFromDb(newChatId).catch(() => {
-        setMessages([]);
-      });
-    } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-        evidenceSeverity: "error",
-        isVolatile: true,
-      })));
-    }
+    createVolatileChat();
   }
 
   async function switchChat(chatId) {
     const selectedId = String(chatId || "").trim();
     if (!selectedId || selectedId === activeChatId) {
       return;
+    }
+    if (volatileChat && selectedId !== volatileChat.id) {
+      setVolatileChat(null);
     }
     const sessionId = sessionIdRef.current;
     setPanelData(null);
@@ -1110,6 +1131,33 @@ function App() {
         isVolatile: true,
       })));
     }
+  }
+
+  async function downloadChat(chat) {
+    if (!chat?.id) return;
+    if (volatileChat?.id === chat.id) {
+      throw new Error("Send at least one message to save this chat before downloading.");
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.error || "Failed to download chat.");
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safeName = String(chat.name || chat.id || "chat")
+      .replace(/[^a-z0-9-_]+/gi, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80) || "chat";
+    link.href = url;
+    link.download = `${safeName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   }
 
   function openRenameDialog(chat) {
@@ -1336,7 +1384,7 @@ function App() {
         isLoadingChats
           ? React.createElement("p", { className: "side-nav-loading" }, "Loading chats…")
           : null,
-        ...chatList.map((chat) => {
+        ...displayedChatList.map((chat) => {
           const isActiveChat = chat.id === activeChatId;
           const isMenuOpenForChat = openChatMenuId === chat.id;
           return React.createElement(
@@ -1401,7 +1449,17 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option",
                         role: "menuitem",
-                        onClick: () => setOpenChatMenuId(null),
+                        onClick: async () => {
+                          setOpenChatMenuId(null);
+                          try {
+                            await downloadChat(chat);
+                          } catch (error) {
+                            setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                              evidenceSeverity: "error",
+                              isVolatile: true,
+                            })));
+                          }
+                        },
                       },
                       icon(downloadIconPath),
                       React.createElement("span", null, "Download")
@@ -1977,7 +2035,7 @@ function App() {
       ? React.createElement(
         "div",
         {
-          className: "panel-modal-backdrop",
+          className: "panel-modal-backdrop panel-modal-backdrop-elevated",
           onClick: () => {
             if (isChatActionPending) return;
             setDeleteConfirmChat(null);
@@ -2118,9 +2176,18 @@ function App() {
                                 {
                                   type: "button",
                                   className: "library-toggle-button",
-                                  title: "Download chat (coming soon)",
+                                  title: "Download chat",
                                   "aria-label": `Download ${chat.name}`,
-                                  onClick: () => {},
+                                  onClick: async () => {
+                                    try {
+                                      await downloadChat(chat);
+                                    } catch (error) {
+                                      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                                        evidenceSeverity: "error",
+                                        isVolatile: true,
+                                      })));
+                                    }
+                                  },
                                 },
                                 icon(downloadIconPath)
                               ),

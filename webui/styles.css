@@ -659,6 +659,9 @@ body {
   place-items: center;
   background: rgba(15, 23, 42, 0.18);
 }
+.panel-modal-backdrop-elevated {
+  z-index: 95;
+}
 
 .panel-modal {
   width: min(920px, calc(100vw - 2rem));
