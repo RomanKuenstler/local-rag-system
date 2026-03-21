@@ -1082,6 +1082,10 @@ function App() {
   }
 
   function createVolatileChat() {
+    if (volatileChat?.id) {
+      const previousVolatileId = volatileChat.id;
+      setChatList((previous) => previous.filter((chat) => chat.id !== previousVolatileId));
+    }
     const draftId = `chat-${crypto.randomUUID()}`;
     const draftChat = { id: draftId, name: buildChatNameFromId(draftId), status: "active" };
     setVolatileChat(draftChat);
@@ -1109,7 +1113,9 @@ function App() {
       return;
     }
     if (volatileChat && selectedId !== volatileChat.id) {
+      const volatileId = volatileChat.id;
       setVolatileChat(null);
+      setChatList((previous) => previous.filter((chat) => chat.id !== volatileId));
     }
     const sessionId = sessionIdRef.current;
     setPanelData(null);
