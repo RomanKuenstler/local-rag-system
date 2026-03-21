@@ -1003,12 +1003,6 @@ function App() {
           ? React.createElement(
             React.Fragment,
             null,
-            React.createElement(
-              "button",
-              { type: "button", className: "send header-chat-link", onClick: openChatPage },
-              icon(chatIconPath),
-              "Chat"
-            ),
             React.createElement("h2", { className: "header-title" }, "Library")
           )
           : null
@@ -1030,7 +1024,7 @@ function App() {
           "button",
           {
             type: "button",
-            className: `side-nav-item${activeView === "library" ? " active" : ""}`,
+            className: "side-nav-item",
             onClick: activeView === "library" ? openChatPage : openLibraryPage,
           },
           icon(activeView === "library" ? chatIconPath : libraryIconPath),
