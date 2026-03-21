@@ -1,1 +1,1 @@
-https://docs.docker.com/guides/kube-deploy/
+https://docs.docker.com/reference/cli/docker/image/inspect/
