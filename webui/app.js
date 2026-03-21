@@ -934,22 +934,29 @@ function App() {
                 React.createElement("span", null, formatBytes(file.sizeBytes)),
                 React.createElement("span", null, String(file.chunkCount ?? "0")),
                 React.createElement("span", null, file.extension || "n/a"),
-                React.createElement(
-                  "span",
-                  null,
-                  React.createElement(
+                (() => {
+                  const embeddingInProgress = ["uploading", "uploaded", "embedding"].includes(String(file.uploadStatus));
+                  const removingInProgress = file.uploadStatus === "removing"
+                    || (file.uploadStatus === "deleted" && Boolean(file.embedded));
+                  const showProgress = embeddingInProgress || removingInProgress;
+                  const embeddedLabel = embeddingInProgress
+                    ? "embedding"
+                    : removingInProgress
+                      ? "removing"
+                      : file.embedded ? "yes" : "no";
+                  return React.createElement(
                     "span",
-                    { className: `status-badge ${file.embedded ? "active" : "pending"} ${["embedding", "removing"].includes(file.uploadStatus) ? "with-spinner" : ""}` },
-                    ["embedding", "removing"].includes(file.uploadStatus)
-                      ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
-                      : null,
-                    file.uploadStatus === "embedding"
-                      ? "embedding"
-                      : file.uploadStatus === "removing"
-                        ? "removing"
-                        : file.embedded ? "yes" : "no"
-                  )
-                ),
+                    null,
+                    React.createElement(
+                      "span",
+                      { className: `status-badge ${file.embedded ? "active" : "pending"} ${showProgress ? "with-spinner" : ""}` },
+                      showProgress
+                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                        : null,
+                      embeddedLabel
+                    )
+                  );
+                })(),
                 React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
                 file.canDelete
                   ? React.createElement(
