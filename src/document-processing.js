@@ -336,7 +336,7 @@ function removeRepeatedBookChrome(sections) {
     return sections;
   }
 
-  return sections
+  const cleanedSections = sections
     .map((section, sectionIndex) =>
       section
         .split("\n")
@@ -345,6 +345,12 @@ function removeRepeatedBookChrome(sections) {
         .trim()
     )
     .filter(Boolean);
+
+  if (cleanedSections.length === 0) {
+    return sections.filter((section) => normalizeInlineText(section).length > 0);
+  }
+
+  return cleanedSections;
 }
 
 function shouldSkipEpubFrontMatter(href, sectionText, sectionIndex) {
