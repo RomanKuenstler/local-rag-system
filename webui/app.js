@@ -38,6 +38,7 @@ const MENU_DIALOG_TABS = [
   { id: "settings", label: "Settings", command: "/config" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
   { id: "info", label: "Info", command: "/info" },
+  { id: "archive", label: "Archive" },
   { id: "help", label: "Help", command: "/help" },
 ];
 
@@ -765,6 +766,34 @@ function App() {
           responseType: null,
           configView: null,
         };
+      } else if (selectedTab.id === "archive") {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load archived chats");
+        }
+        const archivedRows = Array.isArray(payload.chats)
+          ? payload.chats
+            .filter((chat) => chat.status === "archived")
+            .map((chat) => ({
+              id: chat.id,
+              name: chat.name || buildChatNameFromId(chat.id),
+              archivedAt: chat.archivedAt || null,
+            }))
+          : [];
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/archive",
+          title: "Archive",
+          content: {
+            rows: archivedRows,
+          },
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
       } else {
         const payload = await fetchPanelCommand(selectedTab.command);
         nextPanel = buildPanelDataFromCommand(selectedTab.command, payload);
@@ -925,6 +954,7 @@ function App() {
   const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
   const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
+  const downloadIconPath = "M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4 2.3 2.3V4a1 1 0 0 1 1-1M4 17h16v4H4z";
   const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
@@ -940,6 +970,7 @@ function App() {
   const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
   const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
   const panelTitle = isUnifiedDialogOpen ? "Preferences" : getPanelTitle(panelData?.command);
+  const archivedChatRows = Array.isArray(activeUnifiedPanel?.content?.rows) ? activeUnifiedPanel.content.rows : [];
 
   const parsedAssistantPanel = activeModalPanel?.command === "/assistant"
     ? parseAssistantModeContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
@@ -1122,6 +1153,12 @@ function App() {
     }
   }
 
+  async function refreshArchiveTabIfOpen() {
+    if (isUnifiedDialogOpen && activeDialogTab === "archive") {
+      await loadUnifiedDialogTab("archive", { forceReload: true });
+    }
+  }
+
   async function archiveChat(chatId) {
     if (!chatId || isChatActionPending) return;
     setIsChatActionPending(true);
@@ -1143,6 +1180,7 @@ function App() {
       if (payload?.activeChatId) {
         await loadMessagesFromDb(payload.activeChatId).catch(() => setMessages([]));
       }
+      await refreshArchiveTabIfOpen();
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
         evidenceSeverity: "error",
@@ -1174,6 +1212,35 @@ function App() {
       } else {
         setMessages([]);
       }
+      await refreshArchiveTabIfOpen();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function unarchiveChat(chatId) {
+    if (!chatId || isChatActionPending) return;
+    setIsChatActionPending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "activate",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to unarchive chat");
+      }
+      await refreshChats({ preferredChatId: activeChatId });
+      await refreshArchiveTabIfOpen();
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
         evidenceSeverity: "error",
@@ -1992,7 +2059,70 @@ function App() {
                 ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
                 : isDialogTabLoading && !activeModalPanel
                   ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
-                  : activeModalPanel
+                  : activeDialogTab === "archive"
+                    ? React.createElement(
+                      "section",
+                      { className: "archive-table-wrapper" },
+                      React.createElement(
+                        "div",
+                        { className: "archive-table", role: "table", "aria-label": "Archived chats" },
+                        React.createElement(
+                          "div",
+                          { className: "archive-table-head", role: "row" },
+                          React.createElement("strong", { role: "columnheader" }, "Chat name"),
+                          React.createElement("strong", { role: "columnheader" }, "Archived at"),
+                          React.createElement("strong", { role: "columnheader" }, "Actions")
+                        ),
+                        archivedChatRows.length === 0
+                          ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
+                          : archivedChatRows.map((chat) => React.createElement(
+                            "div",
+                            { key: chat.id, className: "archive-table-row", role: "row" },
+                            React.createElement("strong", { className: "archive-chat-name" }, chat.name),
+                            React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
+                            React.createElement(
+                              "div",
+                              { className: "library-row-actions archive-row-actions" },
+                              React.createElement(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "library-toggle-button",
+                                  title: "Download chat (coming soon)",
+                                  "aria-label": `Download ${chat.name}`,
+                                  onClick: () => {},
+                                },
+                                icon(downloadIconPath)
+                              ),
+                              React.createElement(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "library-toggle-button",
+                                  title: "Unarchive chat",
+                                  "aria-label": `Unarchive ${chat.name}`,
+                                  onClick: () => unarchiveChat(chat.id),
+                                  disabled: isChatActionPending,
+                                },
+                                icon(keepIconPath)
+                              ),
+                              React.createElement(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "library-delete-button",
+                                  title: "Delete chat",
+                                  "aria-label": `Delete ${chat.name}`,
+                                  onClick: () => setDeleteConfirmChat(chat),
+                                  disabled: isChatActionPending,
+                                },
+                                icon(trashIconPath)
+                              )
+                            )
+                          ))
+                      )
+                    )
+                    : activeModalPanel
                     ? renderPanelContent({
                       panelData: activeModalPanel,
                       parsedInfoGroups,
