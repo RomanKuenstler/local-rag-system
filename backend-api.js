@@ -1,5 +1,6 @@
 import { ensureDatabaseReady, pingDatabase } from "./src/db.js";
 import http from "http";
+import { deleteManagedLibraryFile, listManagedLibraryFiles, saveManagedLibraryFile } from "./src/library-service.js";
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
@@ -10,7 +11,7 @@ function json(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(payload));
@@ -45,7 +46,7 @@ async function proxyRetriever({ req, res, targetPath }) {
   res.writeHead(upstreamResponse.status, {
     "Content-Type": contentType,
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(text);
@@ -112,6 +113,57 @@ async function getDbHealth() {
   }
 }
 
+async function handleLibraryUpload(req, res) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { error: "Invalid JSON payload" });
+    return;
+  }
+
+  try {
+    const file = await saveManagedLibraryFile({
+      fileName: body.name,
+      contentBase64: body.contentBase64,
+      overwrite: Boolean(body.overwrite),
+    });
+    json(res, 201, { ok: true, file });
+  } catch (error) {
+    const statusCode = error.message === "File already exists." ? 409 : 400;
+    json(res, statusCode, { ok: false, error: error.message });
+  }
+}
+
+async function handleLibraryDelete(url, res) {
+  const filePath = String(url.searchParams.get("path") || "");
+  if (!filePath) {
+    json(res, 400, { ok: false, error: "Missing 'path' query parameter." });
+    return;
+  }
+
+  const result = await deleteManagedLibraryFile(filePath);
+  if (!result.deleted) {
+    json(res, 404, { ok: false, error: "Managed file not found." });
+    return;
+  }
+
+  json(res, 200, { ok: true, path: result.path });
+}
+
+async function handleLibraryList(res) {
+  const files = await listManagedLibraryFiles();
+  json(res, 200, {
+    ok: true,
+    files,
+    total: files.length,
+    ready: files.filter((file) => file.uploadStatus === "ready").length,
+    embedding: files.filter((file) => file.uploadStatus === "embedding").length,
+    error: files.filter((file) => file.uploadStatus === "error").length,
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -133,6 +185,21 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/files") {
       await proxyRetriever({ req, res, targetPath: "/internal/retriever/files" });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/library/files") {
+      await handleLibraryList(res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/library/files") {
+      await handleLibraryUpload(req, res);
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/library/files") {
+      await handleLibraryDelete(url, res);
       return;
     }
 
@@ -171,5 +238,5 @@ await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, POST /api/prompt");
+  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST|DELETE /api/library/files, POST /api/prompt");
 });

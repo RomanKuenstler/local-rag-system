@@ -18,8 +18,10 @@ import {
 import { readTextFilesRecursively } from "./document-processing.js";
 import { ensureDatabaseReady } from "./db.js";
 import {
+  clearManagedLibraryFileErrors,
   getEmbeddingStatus,
   getIndexStateMap,
+  markManagedLibraryFilesStatus,
   markIndexingFinished,
   recordIndexingJobFile,
   markIndexingStarted,
@@ -207,6 +209,13 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
     logger(`Changed/new files: ${changedFiles.length}`);
     logger(`Removed files: ${removedFiles.length}`);
 
+    await markManagedLibraryFilesStatus(
+      changedFiles.map((file) => file.relativePath),
+      "embedding",
+      { jobId }
+    );
+    await clearManagedLibraryFileErrors(changedFiles.map((file) => file.relativePath));
+
     if (changedFiles.length === 0 && removedFiles.length === 0) {
       logger("No indexing needed.");
       logger("_______________________________________________________");
@@ -246,6 +255,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
           action: "delete",
           status: "success",
         });
+        await markManagedLibraryFilesStatus([removedFile], "deleted", { jobId });
       } catch (error) {
         console.error(`Failed removing ${removedFile}: ${error.message}`);
         await recordIndexingJobFile({
@@ -255,6 +265,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
           status: "error",
           error: error.message,
         });
+        await markManagedLibraryFilesStatus([removedFile], "error", { jobId, error: error.message });
       }
     }
 
@@ -271,6 +282,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
         if (chunkRecords.length === 0) {
           logger(`No chunks for file: ${file.relativePath}`);
           indexState[file.relativePath] = file.hash;
+          await markManagedLibraryFilesStatus([file.relativePath], "ready", { jobId });
           continue;
         }
 
@@ -301,6 +313,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
           status: "success",
           chunkCount: chunkRecords.length,
         });
+        await markManagedLibraryFilesStatus([file.relativePath], "ready", { jobId });
         logger(`Indexed ${chunkRecords.length} chunks: ${file.relativePath}`);
       } catch (error) {
         console.error(`Error indexing ${file.relativePath}: ${error.message}`);
@@ -311,6 +324,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
           status: "error",
           error: error.message,
         });
+        await markManagedLibraryFilesStatus([file.relativePath], "error", { jobId, error: error.message });
       }
     }
 

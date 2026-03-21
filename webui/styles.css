@@ -116,7 +116,7 @@ body {
 .library-table-head,
 .library-table-row {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) 0.9fr 0.65fr 0.7fr 0.9fr 1.4fr 1.2fr 0.5fr;
+  grid-template-columns: minmax(180px, 2fr) 1.1fr 0.9fr 0.65fr 0.7fr 0.9fr 1.4fr 1.2fr 0.5fr;
   gap: 0.7rem;
   align-items: center;
   padding: 0.55rem 0.7rem;
@@ -149,6 +149,20 @@ body {
   margin-left: auto;
   white-space: nowrap;
 }
+.library-notice {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #475569;
+}
+.library-status-cell {
+  display: grid;
+  gap: 0.2rem;
+}
+.library-row-error {
+  color: #991b1b;
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
 .library-delete-button {
   border: none;
   background: transparent;
@@ -159,6 +173,46 @@ body {
 }
 .library-delete-button:hover { color: #b91c1c; }
 .library-delete-button .icon { width: 0.95rem; height: 0.95rem; }
+.library-delete-modal {
+  width: min(92vw, 420px);
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+.library-delete-modal h4 {
+  margin: 0;
+  color: #111827;
+}
+.library-delete-modal p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.92rem;
+}
+.library-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.library-delete-confirm,
+.library-delete-cancel {
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  padding: 0.4rem 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.library-delete-confirm {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+}
+.library-delete-cancel {
+  background: #fff;
+  color: #111827;
+}
 
 .status-rail {
   position: sticky;
