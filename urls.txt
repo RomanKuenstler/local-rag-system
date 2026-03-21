@@ -1,1 +1,3 @@
-https://docs.docker.com/guides/kube-deploy/
+https://docs.docker.com/reference/cli/docker/image/save/
+https://docs.docker.com/reference/cli/docker/image/import/
+https://docs.docker.com/reference/cli/docker/image/load/
