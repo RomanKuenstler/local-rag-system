@@ -1253,9 +1253,8 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete ",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path),
-            "?"
+            "Are you sure you want to delete this file?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path)
           ),
           React.createElement(
             "div",
