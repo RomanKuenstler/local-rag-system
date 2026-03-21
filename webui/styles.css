@@ -488,7 +488,7 @@ body {
 .panel-modal-head strong { font-size: 1.02rem; }
 .panel-modal-head-actions { display: inline-flex; align-items: center; gap: 0.55rem; }
 .panel-close {
-  border: 1px solid #d1d5db;
+  border: none;
   background: #fff;
   border-radius: 999px;
   width: 2rem;
