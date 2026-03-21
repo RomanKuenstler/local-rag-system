@@ -115,6 +115,10 @@ function App() {
   const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [renameDialogChat, setRenameDialogChat] = useState(null);
+  const [renameInputValue, setRenameInputValue] = useState("");
+  const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
+  const [isChatActionPending, setIsChatActionPending] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -1077,6 +1081,109 @@ function App() {
     }
   }
 
+  function openRenameDialog(chat) {
+    setOpenChatMenuId(null);
+    setRenameDialogChat(chat);
+    setRenameInputValue(String(chat?.name || ""));
+  }
+
+  async function confirmRenameChat() {
+    const targetChat = renameDialogChat;
+    if (!targetChat || isChatActionPending) return;
+    const nextName = String(renameInputValue || "").trim();
+    if (!nextName) return;
+
+    setIsChatActionPending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "rename",
+          name: nextName,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to rename chat");
+      }
+
+      setRenameDialogChat(null);
+      setRenameInputValue("");
+      await refreshChats({ preferredChatId: activeChatId });
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function archiveChat(chatId) {
+    if (!chatId || isChatActionPending) return;
+    setIsChatActionPending(true);
+    setOpenChatMenuId(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "archive",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to archive chat");
+      }
+      await refreshChats({ preferredChatId: payload?.activeChatId || activeChatId });
+      if (payload?.activeChatId) {
+        await loadMessagesFromDb(payload.activeChatId).catch(() => setMessages([]));
+      }
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function confirmDeleteChat() {
+    const targetChat = deleteConfirmChat;
+    if (!targetChat || isChatActionPending) return;
+    setIsChatActionPending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionIdRef.current }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to delete chat");
+      }
+      setDeleteConfirmChat(null);
+      await refreshChats({ preferredChatId: payload?.activeChatId || activeChatId });
+      if (payload?.activeChatId) {
+        await loadMessagesFromDb(payload.activeChatId).catch(() => setMessages([]));
+      } else {
+        setMessages([]);
+      }
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
   async function openSettingsDialog() {
     await openUnifiedDialog("settings");
   }
@@ -1197,7 +1304,7 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option",
                         role: "menuitem",
-                        onClick: () => setOpenChatMenuId(null),
+                        onClick: () => openRenameDialog(chat),
                       },
                       icon(renameIconPath),
                       React.createElement("span", null, "Rename")
@@ -1212,7 +1319,7 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option",
                         role: "menuitem",
-                        onClick: () => setOpenChatMenuId(null),
+                        onClick: () => archiveChat(chat.id),
                       },
                       icon(archiveIconPath),
                       React.createElement("span", null, "Archive")
@@ -1227,7 +1334,10 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option delete",
                         role: "menuitem",
-                        onClick: () => setOpenChatMenuId(null),
+                        onClick: () => {
+                          setOpenChatMenuId(null);
+                          setDeleteConfirmChat(chat);
+                        },
                       },
                       icon(trashIconPath),
                       React.createElement("span", null, "Delete")
@@ -1701,6 +1811,121 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    renameDialogChat
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => {
+            if (isChatActionPending) return;
+            setRenameDialogChat(null);
+            setRenameInputValue("");
+          },
+        },
+        React.createElement(
+          "section",
+          {
+            className: "chat-rename-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Rename chat",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Rename"),
+          React.createElement("input", {
+            type: "text",
+            className: "chat-rename-input",
+            value: renameInputValue,
+            maxLength: 240,
+            autoFocus: true,
+            onChange: (event) => setRenameInputValue(event.target.value),
+          }),
+          React.createElement(
+            "div",
+            { className: "chat-rename-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "chat-rename-cancel",
+                onClick: () => {
+                  setRenameDialogChat(null);
+                  setRenameInputValue("");
+                },
+                disabled: isChatActionPending,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "chat-rename-save",
+                onClick: confirmRenameChat,
+                disabled: isChatActionPending || !String(renameInputValue || "").trim(),
+              },
+              icon(keepIconPath),
+              "Save"
+            )
+          )
+        )
+      )
+      : null,
+    deleteConfirmChat
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => {
+            if (isChatActionPending) return;
+            setDeleteConfirmChat(null);
+          },
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-delete-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Confirm chat deletion",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Delete chat?"),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you want to delete this chat?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmChat.name)
+          ),
+          React.createElement(
+            "div",
+            { className: "library-delete-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-cancel",
+                onClick: () => setDeleteConfirmChat(null),
+                disabled: isChatActionPending,
+              },
+              icon(keepIconPath),
+              "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteChat,
+                disabled: isChatActionPending,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )

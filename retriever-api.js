@@ -75,6 +75,7 @@ import {
   listFileMetadata,
   resolveSessionChatId,
   setSessionActiveChat,
+  updateChatName,
   updateSetting,
   updateChatStatus,
 } from "./src/state-store.js";
@@ -1043,8 +1044,33 @@ async function handlePatchChat(req, res, chatId) {
     return;
   }
 
+  if (action === "rename") {
+    const nextName = String(body.name || "").trim();
+    if (!nextName) {
+      json(res, 400, { error: "Chat name is required for rename." });
+      return;
+    }
+    const updated = await updateChatName({ sessionId, chatId, name: nextName });
+    if (!updated) {
+      json(res, 404, { error: "Chat not found.", sessionId, chatId });
+      return;
+    }
+    json(res, 200, {
+      sessionId,
+      chat: {
+        id: updated.id,
+        name: updated.name,
+        status: updated.status,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+        archivedAt: updated.archived_at,
+      },
+    });
+    return;
+  }
+
   json(res, 400, {
-    error: "Unsupported action. Use one of: switch, archive, activate.",
+    error: "Unsupported action. Use one of: switch, archive, activate, rename.",
   });
 }
 
