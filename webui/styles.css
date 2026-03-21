@@ -154,10 +154,8 @@ body {
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.55rem;
-  border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 0.5rem 0.55rem;
-  background: #f8fafc;
 }
 .side-nav-avatar-placeholder {
   width: 2rem;
