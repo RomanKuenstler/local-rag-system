@@ -28,6 +28,24 @@ const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
 };
+const LIBRARY_UPLOAD_RULES = {
+  maxFiles: 10,
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf"],
+};
+const SESSION_ID_STORAGE_KEY = "rag-session-id";
+const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+
+function getOrCreatePersistentId(storageKey, fallbackPrefix) {
+  try {
+    const stored = window.localStorage.getItem(storageKey);
+    if (stored) return stored;
+    const created = `${fallbackPrefix}-${crypto.randomUUID()}`;
+    window.localStorage.setItem(storageKey, created);
+    return created;
+  } catch {
+    return `${fallbackPrefix}-fallback`;
+  }
+}
 
 function getScoreSeverity(score) {
   if (!Number.isFinite(score)) return "unknown";
@@ -59,15 +77,22 @@ function App() {
   const [statusData, setStatusData] = useState(null);
   const [filesData, setFilesData] = useState(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
+  const [libraryManagedData, setLibraryManagedData] = useState(null);
+  const [libraryNotice, setLibraryNotice] = useState("");
+  const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
+  const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState(getInitialView);
+  const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
+  const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
   const promptFileInputRef = useRef(null);
+  const libraryFileInputRef = useRef(null);
   const menuRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
@@ -96,9 +121,10 @@ function App() {
 
   async function refreshStatus() {
     try {
-      const [statusRes, filesRes] = await Promise.all([
+      const [statusRes, filesRes, libraryRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/status`),
         fetch(`${API_BASE_URL}/api/files`),
+        fetch(`${API_BASE_URL}/api/library/files`),
       ]);
 
       if (statusRes.ok) {
@@ -108,7 +134,7 @@ function App() {
           const nextReady = newStatus?.embedding?.readiness?.ready === true;
 
           if (!previousReady && nextReady && !hasShownReadyGreeting) {
-            setMessages((prev) => prev.concat(createMessage("assistant", "How can I help you today?")));
+            setMessages((prev) => prev.concat(createMessage("assistant", "How can I help you today?", { isVolatile: true })));
             setHasShownReadyGreeting(true);
           }
 
@@ -120,12 +146,52 @@ function App() {
       if (filesRes.ok) {
         setFilesData(await filesRes.json());
       }
+
+      if (libraryRes.ok) {
+        const payload = await libraryRes.json();
+        setLibraryManagedData(payload);
+        const knownPaths = new Set(Array.isArray(payload.files) ? payload.files.map((file) => file.path) : []);
+        setPendingLibraryUploads((previous) => previous.filter((file) => !knownPaths.has(file.path)));
+      }
     } catch {
       setStatusData(null);
       setFilesData(null);
+      setLibraryManagedData(null);
     } finally {
       setIsLoadingStatus(false);
     }
+  }
+
+  async function loadMessagesFromDb() {
+    const sessionId = sessionIdRef.current;
+    const chatId = chatIdRef.current;
+    const messageLoadLimit = 40;
+    const response = await fetch(
+      `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload?.error || "Failed to load messages");
+    }
+
+    const normalized = Array.isArray(payload.messages)
+      ? payload.messages.map((message) => {
+        const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
+        return createMessage(message.role, message.content, {
+          evidenceSeverity: metadata.evidenceSeverity || null,
+          responseType: metadata.responseType || null,
+          retrieval: metadata.retrieval || null,
+          interaction: metadata.interaction || null,
+          upload: metadata.upload || null,
+          attachedFiles: Array.isArray(metadata.attachedFiles) ? metadata.attachedFiles : [],
+        });
+      })
+      : [];
+
+    setMessages((previous) => {
+      const volatileMessages = previous.filter((message) => message.isVolatile);
+      return normalized.concat(volatileMessages);
+    });
   }
 
   useEffect(() => {
@@ -141,6 +207,12 @@ function App() {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
   }, [hasShownReadyGreeting]);
+
+  useEffect(() => {
+    loadMessagesFromDb().catch(() => {
+      setMessages([]);
+    });
+  }, []);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -251,6 +323,172 @@ function App() {
     };
   }
 
+  function validateLibraryUploads(files) {
+    const selectedFiles = Array.isArray(files) ? files : [];
+    if (selectedFiles.length === 0) {
+      return { validFiles: [], notice: "No files selected." };
+    }
+
+    if (selectedFiles.length > LIBRARY_UPLOAD_RULES.maxFiles) {
+      return {
+        validFiles: [],
+        notice: `Please upload up to ${LIBRARY_UPLOAD_RULES.maxFiles} files at once.`,
+      };
+    }
+
+    const invalidFiles = selectedFiles.filter((file) => {
+      const extension = getFileExtension(file.name);
+      return !LIBRARY_UPLOAD_RULES.allowedExtensions.includes(extension);
+    });
+
+    if (invalidFiles.length > 0) {
+      return {
+        validFiles: [],
+        notice: `Unsupported extension: ${invalidFiles.map((file) => file.name).join(", ")}`,
+      };
+    }
+
+    return {
+      validFiles: selectedFiles,
+      notice: `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} queued for upload.`,
+    };
+  }
+
+  async function uploadLibraryFiles(files) {
+    const queued = files.map((file) => ({
+      tempId: crypto.randomUUID(),
+      path: `_library/${file.name}`,
+      originalName: file.name,
+      uploadStatus: "uploading",
+      embedded: false,
+      chunkCount: null,
+      sizeBytes: file.size,
+      extension: getFileExtension(file.name),
+      isVolatile: true,
+      lastError: null,
+      canDelete: false,
+      updatedAt: new Date().toISOString(),
+    }));
+    setPendingLibraryUploads((previous) => queued.concat(previous));
+
+    const uploadResults = await Promise.all(files.map(async (file) => {
+      const contentBase64 = await fileToBase64(file);
+      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: file.name,
+          contentBase64,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      return { ok: response.ok, payload, fileName: file.name };
+    }));
+
+    setPendingLibraryUploads((previous) => previous.map((row) => {
+      const result = uploadResults.find((item) => item.fileName === row.originalName);
+      if (!result) return row;
+      if (!result.ok) {
+        return {
+          ...row,
+          uploadStatus: "error",
+          lastError: result.payload?.error || "Upload failed",
+          canDelete: false,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return {
+        ...row,
+        path: result.payload?.file?.path || row.path,
+        uploadStatus: "embedding",
+        canDelete: true,
+        updatedAt: new Date().toISOString(),
+      };
+    }));
+
+    const failed = uploadResults.filter((result) => !result.ok).length;
+    setLibraryNotice(
+      failed > 0
+        ? `${failed} upload${failed > 1 ? "s" : ""} failed.`
+        : `Uploaded ${uploadResults.length} file${uploadResults.length > 1 ? "s" : ""}. Embedding started.`
+    );
+
+    await refreshStatus();
+  }
+
+  async function handleLibraryFileSelection(event) {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = "";
+
+    const validation = validateLibraryUploads(selectedFiles);
+    setLibraryNotice(validation.notice);
+    if (validation.validFiles.length === 0) {
+      return;
+    }
+
+    await uploadLibraryFiles(validation.validFiles);
+  }
+
+  async function confirmDeleteLibraryFile() {
+    const target = deleteConfirmFile;
+    setDeleteConfirmFile(null);
+    if (!target?.path) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/library/files?path=${encodeURIComponent(target.path)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Delete failed.");
+      }
+      setLibraryNotice(`Deleted ${target.path}.`);
+      setPendingLibraryUploads((previous) => previous.filter((file) => file.path !== target.path));
+      await refreshStatus();
+    } catch (error) {
+      setLibraryNotice(error.message || "Delete failed.");
+    }
+  }
+
+  async function toggleLibraryFile(file, action) {
+    if (!file?.path || !["disable", "activate"].includes(action)) {
+      return;
+    }
+
+    const pendingStatus = action === "disable" ? "removing" : "embedding";
+    setLibraryNotice(action === "disable" ? `Disabling ${file.path}...` : `Activating ${file.path}...`);
+    setLibraryManagedData((previous) => {
+      if (!previous?.files) return previous;
+      return {
+        ...previous,
+        files: previous.files.map((entry) => (
+          entry.path === file.path
+            ? { ...entry, uploadStatus: pendingStatus, embedded: action === "activate" }
+            : entry
+        )),
+      };
+    });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: file.path, action }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "File status update failed.");
+      }
+      setLibraryNotice(action === "disable" ? `Disabled ${file.path}.` : `Activated ${file.path}.`);
+      await refreshStatus();
+    } catch (error) {
+      setLibraryNotice(error.message || "File status update failed.");
+      await refreshStatus();
+    }
+  }
+
   async function sendRawPrompt(rawPrompt, promptFiles = []) {
     const prompt = String(rawPrompt || "").trim();
     const isSlashCommand = prompt.startsWith("/");
@@ -279,14 +517,17 @@ function App() {
       setMessages((prev) => prev.concat(createMessage(
         "assistant",
         "Embedding is still running. Please wait until indexing is finished before sending prompts.",
-        { evidenceSeverity: "warn" }
+        { evidenceSeverity: "warn", isVolatile: true }
       )));
       return;
     }
 
     setIsSending(true);
     const pendingMessageId = crypto.randomUUID();
-    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", { id: pendingMessageId, isPending: true })));
+    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
+      id: pendingMessageId,
+      isPending: true,
+    })));
 
     try {
       if (isPanelCommand && hasPromptFiles) {
@@ -299,7 +540,9 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt,
-          sessionId: "webui-default-session",
+          sessionId: sessionIdRef.current,
+          chatId: chatIdRef.current,
+          attachedFiles: selectedPromptFiles.map((file) => file.name),
           uploadedFiles: uploadedFilesPayload,
         }),
       });
@@ -344,10 +587,12 @@ function App() {
           responseType: null,
           retrieval: null,
           isPending: false,
+          isVolatile: true,
         };
       }));
     } finally {
       setIsSending(false);
+      await loadMessagesFromDb().catch(() => {});
       await refreshStatus();
     }
   }
@@ -356,7 +601,7 @@ function App() {
     const response = await fetch(`${API_BASE_URL}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: command, sessionId: "webui-default-session" }),
+      body: JSON.stringify({ prompt: command, sessionId: sessionIdRef.current, chatId: chatIdRef.current }),
     });
 
     const payload = await response.json();
@@ -394,7 +639,10 @@ function App() {
         configView: null,
       });
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
     } finally {
       setIsSending(false);
       await refreshStatus();
@@ -470,7 +718,10 @@ function App() {
       await fetchPanelCommand(command);
       await refreshCurrentPanel(panelData?.command);
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, { evidenceSeverity: "error" })));
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
     } finally {
       setIsSending(false);
       await refreshStatus();
@@ -512,7 +763,11 @@ function App() {
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
-  const fileUploadIconPath = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zm0 1.5L18.5 9H14zM11 17v-4.6l-1.7 1.7-1.4-1.4L12 8.6l4.1 4.1-1.4 1.4-1.7-1.7V17z";
+  const fileUploadIconPath = "M11 18h2v-8h3l-4-4-4 4h3zm-6 2h14v-2H5z";
+  const trashIconPath = "M9 3h6l1.4 2H20a1 1 0 1 1 0 2h-1v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4a1 1 0 1 1 0-2h3.6zM7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7zm3 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1m4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1";
+  const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
+  const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
+  const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -545,9 +800,46 @@ function App() {
   const restartConfigRows = configSections.flatMap((section) => section.entries
     .filter((entry) => !entry.editable)
     .map((entry) => ({ ...entry, section: section.label })));
-  const retrieverStatus = normalizeStatusBadge(statusData?.app?.role);
+  const retrieverStatus = normalizeStatusBadge(statusData?.services?.retriever?.role || statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
+  const managedLibraryFiles = Array.isArray(libraryManagedData?.files) ? libraryManagedData.files : [];
+  const managedByPath = new Map(managedLibraryFiles.map((file) => [file.path, file]));
+  const retrieverRows = libraryFiles.map((file) => {
+    const managed = managedByPath.get(file.path);
+    return {
+      path: file.path,
+      uploadStatus: managed?.uploadStatus || (file.embedded ? "ready" : "discovered"),
+      sizeBytes: file.sizeBytes,
+      chunkCount: file.chunkCount,
+      extension: file.extension,
+      embedded: Boolean(file.embedded),
+      hash: file.hash,
+      updatedAt: managed?.updatedAt || file.lastModified || null,
+      canDelete: Boolean(managed),
+      lastError: managed?.lastError || null,
+    };
+  });
+  const managedOnlyRows = managedLibraryFiles
+    .filter((managed) => !libraryFiles.some((file) => file.path === managed.path))
+    .map((managed) => ({
+      path: managed.path,
+      uploadStatus: managed.uploadStatus || "uploaded",
+      sizeBytes: managed.sizeBytes,
+      chunkCount: managed.chunkCount,
+      extension: managed.extension || getFileExtension(managed.originalName),
+      embedded: Boolean(managed.embedded),
+      hash: managed.hash,
+      updatedAt: managed.updatedAt || managed.uploadedAt || null,
+      canDelete: true,
+      lastError: managed.lastError || null,
+    }));
+  const dbRows = retrieverRows.concat(managedOnlyRows).sort((left, right) => {
+    const a = Date.parse(String(left.updatedAt || 0));
+    const b = Date.parse(String(right.updatedAt || 0));
+    return b - a;
+  });
+  const libraryRows = pendingLibraryUploads.concat(dbRows);
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
 
   function openLibraryPage() {
@@ -617,11 +909,26 @@ function App() {
               React.createElement("h4", null, "Embeddable files"),
               React.createElement(
                 "button",
-                { type: "button", className: "restart-button library-upload-button" },
+                {
+                  type: "button",
+                  className: "restart-button library-upload-button",
+                  onClick: () => libraryFileInputRef.current?.click(),
+                },
                 icon(fileUploadIconPath),
                 "Upload"
-              )
+              ),
+              React.createElement("input", {
+                ref: libraryFileInputRef,
+                type: "file",
+                className: "composer-file-input",
+                multiple: true,
+                accept: LIBRARY_UPLOAD_RULES.allowedExtensions.join(","),
+                onChange: handleLibraryFileSelection,
+                "aria-hidden": "true",
+                tabIndex: -1,
+              })
             ),
+            libraryNotice ? React.createElement("p", { className: "library-notice" }, libraryNotice) : null,
             React.createElement(
               "div",
               { className: "library-table", role: "table", "aria-label": "Library files" },
@@ -629,32 +936,92 @@ function App() {
                 "div",
                 { className: "library-table-head", role: "row" },
                 React.createElement("span", null, "File"),
+                React.createElement("span", null, "Status"),
                 React.createElement("span", null, "Size"),
                 React.createElement("span", null, "Chunks"),
                 React.createElement("span", null, "Extension"),
                 React.createElement("span", null, "Embedded"),
-                React.createElement("span", null, "Modified"),
-                React.createElement("span", null, "Hash"),
+                React.createElement("span", null, "Updated"),
                 React.createElement("span", null, "Action")
               ),
-              ...libraryFiles.map((file) => React.createElement(
+              ...libraryRows.map((file) => React.createElement(
                 "div",
-                { key: file.path, className: "library-table-row", role: "row" },
+                {
+                  key: `${file.path}-${file.uploadStatus}-${file.updatedAt || "n/a"}-${file.isVolatile ? "volatile" : "db"}`,
+                  className: "library-table-row",
+                  role: "row",
+                },
                 React.createElement("strong", { className: "library-path" }, file.path),
+                React.createElement(
+                  "span",
+                  { className: "library-status-cell" },
+                  React.createElement(
+                    "span",
+                    {
+                      className: `status-badge ${
+                        ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
+                          ? "active"
+                          : file.uploadStatus === "error"
+                            ? "error"
+                            : "pending"
+                      }`,
+                    },
+                    file.uploadStatus || "unknown"
+                  ),
+                  file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
+                ),
                 React.createElement("span", null, formatBytes(file.sizeBytes)),
                 React.createElement("span", null, String(file.chunkCount ?? "0")),
                 React.createElement("span", null, file.extension || "n/a"),
+                (() => {
+                  const embeddingInProgress = ["uploading", "uploaded", "embedding"].includes(String(file.uploadStatus));
+                  const removingInProgress = file.uploadStatus === "removing"
+                    || (file.uploadStatus === "deleted" && Boolean(file.embedded));
+                  const showProgress = embeddingInProgress || removingInProgress;
+                  const embeddedLabel = embeddingInProgress
+                    ? "embedding"
+                    : removingInProgress
+                      ? "removing"
+                      : file.embedded ? "yes" : "no";
+                  return React.createElement(
+                    "span",
+                    null,
+                    React.createElement(
+                      "span",
+                      { className: `status-badge ${file.embedded ? "active" : "pending"} ${showProgress ? "with-spinner" : ""}` },
+                      showProgress
+                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                        : null,
+                      embeddedLabel
+                    )
+                  );
+                })(),
+                React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
                 React.createElement(
-                  "span",
-                  null,
-                  React.createElement("span", { className: `status-badge ${file.embedded ? "active" : "pending"}` }, file.embedded ? "yes" : "no")
-                ),
-                React.createElement("span", null, file.lastModified ? new Date(file.lastModified).toISOString() : "n/a"),
-                React.createElement("span", { className: "library-hash" }, file.hash || "n/a"),
-                React.createElement(
-                  "button",
-                  { type: "button", className: "library-delete-button", "aria-label": `Delete ${file.path}` },
-                  icon("M9 3h6l1 2h4v2H4V5h4zm1 6h2v8h-2zm4 0h2v8h-2zM7 9h2v8H7z")
+                  "div",
+                  { className: "library-row-actions" },
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "library-toggle-button",
+                      "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
+                      onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
+                      disabled: !file.canDelete,
+                    },
+                    icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                  ),
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "library-delete-button",
+                      "aria-label": `Delete ${file.path}`,
+                      onClick: () => setDeleteConfirmFile(file),
+                      disabled: !file.canDelete,
+                    },
+                    icon(trashIconPath)
+                  )
                 )
               ))
             )
@@ -668,14 +1035,14 @@ function App() {
           { className: "chat" },
           !isEmbeddingReady && !isLoadingStatus
             ? null
-            : messages.map((message, index) => {
+            : messages.slice(-20).map((message, index, visibleMessages) => {
               const messageBadge = getMessageBadge(message);
               return React.createElement(
                 "article",
                 {
                   key: message.id,
                   className: `msg ${message.role}${message.isPending ? " pending" : ""}`,
-                  ref: index === messages.length - 1 ? lastMessageRef : null,
+                  ref: index === visibleMessages.length - 1 ? lastMessageRef : null,
                 },
                 React.createElement(
                   "div",
@@ -906,7 +1273,7 @@ function App() {
           : icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
       )
     ),
-    !isEmbeddingReady && !isLoadingStatus
+    activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
         "div",
         { className: "embedding-loading-overlay" },
@@ -916,6 +1283,56 @@ function App() {
           React.createElement("span", { className: "spinner", "aria-hidden": "true" }),
           React.createElement("strong", null, "Embedding in progress"),
           React.createElement("p", null, "Your documents are being indexed. You can browse dialogs while indexing completes.")
+        )
+      )
+      : null,
+    deleteConfirmFile
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setDeleteConfirmFile(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-delete-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Confirm library file deletion",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Delete file?"),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you want to delete this file?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path)
+          ),
+          React.createElement(
+            "div",
+            { className: "library-delete-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteLibraryFile,
+              },
+              icon(trashIconPath),
+              "Delete"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-cancel",
+                onClick: () => setDeleteConfirmFile(null),
+              },
+              icon(keepIconPath),
+              "Keep"
+            )
+          )
         )
       )
       : null,

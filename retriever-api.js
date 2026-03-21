@@ -12,12 +12,17 @@ import {
   COSINE_LIMIT,
   EMBEDDABLE_EXTENSIONS,
   HISTORY_MESSAGES,
-  INDEX_STATE_FILE,
   INDEX_SCHEMA_VERSION,
+  INDEX_STATE_FILE,
   MAX_SIMILARITIES,
   MAX_EMBEDDING_CHARS,
   MIN_SIMILARITIES,
+  EMBEDDING_STATUS_FILE,
   PDF_MIN_EXTRACTED_CHARS,
+  POSTGRES_DB,
+  POSTGRES_HOST,
+  POSTGRES_PORT,
+  POSTGRES_USER,
   QDRANT_URL,
   CHAT_HISTORY_DIR,
   validateRetrievalConfig,
@@ -52,6 +57,20 @@ import {
   readEmbeddableFiles,
   readEmbeddingStatus,
 } from "./src/embedding-service.js";
+import { ensureDatabaseReady } from "./src/db.js";
+import {
+  addChatMessage,
+  ensureChatContext,
+  getRuntimeConfigState,
+  getIndexStateMap,
+  initializeRuntimeConfigDefaults,
+  getSelectionState,
+  initializeStateDefaults,
+  listChatMessages,
+  listRecentPromptHistory,
+  listFileMetadata,
+  updateSetting,
+} from "./src/state-store.js";
 import {
   normalizeIndexableFileByExtension,
   normalizeIndexableTextByExtension,
@@ -62,12 +81,16 @@ validateRetrievalConfig();
 
 const PORT = parseInt(process.env.RETRIEVER_API_PORT || "3000", 10);
 const HOST = process.env.RETRIEVER_API_HOST || "0.0.0.0";
-let assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
-let profileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
+const initialAssistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
+const initialProfileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
 const SUPPORTED_UI_MODES = new Set(["clean", "rag"]);
-let uiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim().toLowerCase())
+const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim().toLowerCase())
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
+
+let assistantMode = initialAssistantMode;
+let profileId = initialProfileId;
+let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
 
 const chatModel = createChatModel();
@@ -76,7 +99,6 @@ const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
 const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
-const sessionMemory = new Map();
 const pendingWeakAnswers = new Map();
 const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
   historyMessages: HISTORY_MESSAGES,
@@ -89,22 +111,12 @@ function stripAnsi(text) {
   return String(text || "").replace(/\u001b\[[0-9;]*m/g, "");
 }
 
-function getSessionHistory(sessionId) {
-  if (!sessionMemory.has(sessionId)) {
-    sessionMemory.set(sessionId, []);
-  }
-
-  return sessionMemory.get(sessionId);
+function getPendingWeakAnswerKey(sessionId, chatId) {
+  return `${sessionId}::${chatId}`;
 }
 
-function appendHistory(sessionId, role, content) {
-  const history = getSessionHistory(sessionId);
-  history.push([role, content]);
-
-  const maxHistoryEntries = runtimeConfig.historyMessages * 2;
-  if (history.length > maxHistoryEntries) {
-    history.splice(0, history.length - maxHistoryEntries);
-  }
+function generateChatName() {
+  return `chat-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function normalizePrompt(input) {
@@ -227,7 +239,7 @@ function buildWebConfigView() {
           { key: "max embedding chars", value: MAX_EMBEDDING_CHARS, editable: false },
           { key: "pdf min extracted chars", value: PDF_MIN_EXTRACTED_CHARS, editable: false },
           { key: "index schema version", value: INDEX_SCHEMA_VERSION, editable: false },
-          { key: "index state file", value: INDEX_STATE_FILE, editable: false },
+          { key: "state storage", value: "postgres", editable: false },
           { key: "chat history dir", value: CHAT_HISTORY_DIR, editable: false },
         ],
       },
@@ -258,7 +270,7 @@ async function buildLibraryInfoMessage() {
     ].join("\n");
   }
 
-  const indexState = readIndexState();
+  const indexState = await getIndexStateMap();
   const perFile = files.map((file) => ({
     ...file,
     chunkCount: fileToChunks(file).length,
@@ -293,13 +305,14 @@ async function buildLibraryInfoMessage() {
   return lines.join("\n");
 }
 
-function handlePromptCommand(prompt, sessionId) {
+async function handlePromptCommand(prompt, sessionId, chatId) {
   const normalizedPrompt = prompt.toLowerCase();
-  const pendingWeakAnswer = pendingWeakAnswers.get(sessionId);
+  const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
+  const pendingWeakAnswer = pendingWeakAnswers.get(pendingWeakAnswerKey);
 
   if (pendingWeakAnswer) {
     if (["/yes", "/y"].includes(normalizedPrompt)) {
-      pendingWeakAnswers.delete(sessionId);
+      pendingWeakAnswers.delete(pendingWeakAnswerKey);
       return {
         statusCode: 200,
         payload: {
@@ -311,7 +324,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     if (["/no", "/skip"].includes(normalizedPrompt)) {
-      pendingWeakAnswers.delete(sessionId);
+      pendingWeakAnswers.delete(pendingWeakAnswerKey);
       return {
         statusCode: 200,
         payload: {
@@ -366,6 +379,12 @@ function handlePromptCommand(prompt, sessionId) {
           contentPath: CONTENT_PATH,
           embeddableExtensions: EMBEDDABLE_EXTENSIONS,
           chatHistoryDir: CHAT_HISTORY_DIR,
+          indexStateFile: INDEX_STATE_FILE,
+          embeddingStatusFile: EMBEDDING_STATUS_FILE,
+          postgresHost: POSTGRES_HOST,
+          postgresPort: POSTGRES_PORT,
+          postgresDb: POSTGRES_DB,
+          postgresUser: POSTGRES_USER,
         }),
         evidenceSeverity: null,
         responseType: "system_info",
@@ -436,6 +455,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     uiMode = requestedMode;
+    await updateSetting("ui_mode", uiMode);
     return {
       statusCode: 200,
       payload: {
@@ -463,6 +483,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     assistantMode = normalizeAssistantMode(requestedMode);
+    await updateSetting("assistant_mode", assistantMode);
 
     return {
       statusCode: 200,
@@ -508,6 +529,7 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     profileId = normalizeProfile(requestedProfile);
+    await updateSetting("profile_id", profileId);
 
     return {
       statusCode: 200,
@@ -536,7 +558,6 @@ function handlePromptCommand(prompt, sessionId) {
           maxEmbeddingChars: MAX_EMBEDDING_CHARS,
           pdfMinExtractedChars: PDF_MIN_EXTRACTED_CHARS,
           indexSchemaVersion: INDEX_SCHEMA_VERSION,
-          indexStateFile: INDEX_STATE_FILE,
           chatHistoryDir: CHAT_HISTORY_DIR,
           temperature: process.env.OPTION_TEMPERATURE || "0.0",
           topP: process.env.OPTION_TOP_P || "0.5",
@@ -564,6 +585,21 @@ function handlePromptCommand(prompt, sessionId) {
     }
 
     const update = setRuntimeConfigValue(parsed.configName, parsed.rawValue);
+    const runtimeSettingKeyMap = {
+      "history messages": "history_messages",
+      "max similarities": "max_similarities",
+      "min similarities": "min_similarities",
+      "cosine limit": "cosine_limit",
+    };
+    const normalizedConfigName = String(parsed.configName || "").trim().toLowerCase().replace(/\s+/g, " ");
+    if (update.ok && runtimeSettingKeyMap[normalizedConfigName]) {
+      await updateSetting(runtimeSettingKeyMap[normalizedConfigName], runtimeConfig[{
+        "history messages": "historyMessages",
+        "max similarities": "maxSimilarities",
+        "min similarities": "minSimilarities",
+        "cosine limit": "cosineLimit",
+      }[normalizedConfigName]]);
+    }
 
     return {
       statusCode: update.ok ? 200 : 400,
@@ -604,21 +640,8 @@ async function searchKnowledgeBase(prompt) {
   };
 }
 
-function readIndexState() {
-  try {
-    if (!fs.existsSync(INDEX_STATE_FILE)) {
-      return {};
-    }
-
-    return JSON.parse(fs.readFileSync(INDEX_STATE_FILE, "utf8"));
-  } catch (error) {
-    console.error(`Failed to read index state: ${error.message}`);
-    return {};
-  }
-}
-
-function getEmbeddingReadiness() {
-  const embeddingStatus = readEmbeddingStatus();
+async function getEmbeddingReadiness() {
+  const embeddingStatus = await readEmbeddingStatus();
 
   if (!embeddingStatus) {
     return {
@@ -695,12 +718,18 @@ async function handlePrompt(req, res) {
   const body = await readJsonBody(req);
   const prompt = normalizePrompt(body.prompt);
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+  const chatId = String(body.chatId || "default-chat").trim() || "default-chat";
   const uploadedFiles = Array.isArray(body.uploadedFiles) ? body.uploadedFiles : [];
+  const requestedAttachedFiles = Array.isArray(body.attachedFiles)
+    ? body.attachedFiles.map((name) => String(name || "").trim()).filter(Boolean)
+    : [];
 
   if (!prompt) {
     json(res, 400, { error: "Missing required field: prompt" });
     return;
   }
+
+  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -709,8 +738,10 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const commandResult = handlePromptCommand(prompt, sessionId);
+  const commandResult = await handlePromptCommand(prompt, sessionId, chatId);
   if (commandResult) {
+    commandResult.payload.chatId = chatId;
+    commandResult.payload.chatName = chatName;
     if (commandResult.payload?.deferredCommand === "library_info") {
       commandResult.payload.answer = await buildLibraryInfoMessage();
       delete commandResult.payload.deferredCommand;
@@ -720,7 +751,7 @@ async function handlePrompt(req, res) {
     return;
   }
 
-  const readiness = getEmbeddingReadiness();
+  const readiness = await getEmbeddingReadiness();
   if (!readiness.ready) {
     json(res, 503, {
       error: "Retriever not ready",
@@ -754,7 +785,12 @@ async function handlePrompt(req, res) {
   }
 
   const searchResult = await searchKnowledgeBase(promptForRetrieval);
-  const chatHistory = getSessionHistory(sessionId);
+  const historyEntryLimit = runtimeConfig.historyMessages * 2;
+  const chatHistory = await listRecentPromptHistory({ sessionId, chatId, limit: historyEntryLimit });
+  const retrievalDetails = createSimilarityDetails(searchResult.results, {
+    maxSimilarities: runtimeConfig.maxSimilarities,
+    cosineLimit: runtimeConfig.cosineLimit,
+  });
 
   const assistantResponse = await chatModel.invoke([
     ...buildSystemPromptLayers({
@@ -768,20 +804,40 @@ async function handlePrompt(req, res) {
   ]);
 
   const answer = String(assistantResponse.content || "").trim();
+  const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
 
   const hasUploadedContext = Boolean(uploadInfo?.uploadedCount);
 
   if (searchResult.evidenceQuality === "weak" && !hasUploadedContext) {
-    pendingWeakAnswers.set(sessionId, {
+    pendingWeakAnswers.set(pendingWeakAnswerKey, {
       answer,
       evidenceSeverity: searchResult.evidenceQuality,
     });
-
-    appendHistory(sessionId, "human", promptForRetrieval);
-    appendHistory(sessionId, "ai", answer);
+    await addChatMessage({
+      sessionId,
+      chatId,
+      role: "user",
+      content: promptForRetrieval,
+      metadata: {
+        attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
+      },
+    });
+    await addChatMessage({
+      sessionId,
+      chatId,
+      role: "assistant",
+      content: answer,
+      metadata: {
+        evidenceSeverity: searchResult.evidenceQuality,
+        upload: uploadInfo,
+        retrieval: retrievalDetails,
+      },
+    });
 
     json(res, 200, {
       sessionId,
+      chatId,
+      chatName,
       answer:
         "Evidence quality is WEAK for this topic. The generated answer may be unreliable. Do you want to see it? Use /yes to show it, or /no or /skip to hide it.",
       evidenceSeverity: "warn",
@@ -791,35 +847,71 @@ async function handlePrompt(req, res) {
         pending: true,
       },
       upload: uploadInfo,
-      retrieval: createSimilarityDetails(searchResult.results, {
-        maxSimilarities: runtimeConfig.maxSimilarities,
-        cosineLimit: runtimeConfig.cosineLimit,
-      }),
+      retrieval: retrievalDetails,
     });
     return;
   }
 
-  appendHistory(sessionId, "human", promptForRetrieval);
-  appendHistory(sessionId, "ai", answer);
+  await addChatMessage({
+    sessionId,
+    chatId,
+    role: "user",
+    content: promptForRetrieval,
+    metadata: {
+      attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
+    },
+  });
+  await addChatMessage({
+    sessionId,
+    chatId,
+    role: "assistant",
+    content: answer,
+    metadata: {
+      evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
+      upload: uploadInfo,
+      retrieval: retrievalDetails,
+    },
+  });
 
   json(res, 200, {
     sessionId,
+    chatId,
+    chatName,
     answer,
     evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     upload: uploadInfo,
-    retrieval: hasUploadedContext
-      ? null
-      : createSimilarityDetails(searchResult.results, {
-        maxSimilarities: runtimeConfig.maxSimilarities,
-        cosineLimit: runtimeConfig.cosineLimit,
-      }),
+    retrieval: hasUploadedContext ? null : retrievalDetails,
+  });
+}
+
+async function handleMessages(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
+  const chatId = String(url.searchParams.get("chatId") || "default-chat").trim() || "default-chat";
+  const limitParam = Number.parseInt(String(url.searchParams.get("limit") || ""), 10);
+  const limit = Number.isInteger(limitParam) && limitParam > 0 ? limitParam : null;
+
+  const chatName = await ensureChatContext({ sessionId, chatId, chatName: generateChatName() });
+  const rows = await listChatMessages({ sessionId, chatId, limit });
+
+  json(res, 200, {
+    sessionId,
+    chatId,
+    chatName,
+    totalMessages: rows.length,
+    messages: rows.map((row) => ({
+      role: row.role,
+      content: row.content,
+      metadata: row.metadata || {},
+      createdAt: row.created_at,
+    })),
   });
 }
 
 async function handleStatus(_req, res) {
-  const readiness = getEmbeddingReadiness();
-  const embeddingStatus = readEmbeddingStatus();
+  const readiness = await getEmbeddingReadiness();
+  const embeddingStatus = await readEmbeddingStatus();
 
   json(res, 200, {
     app: {
@@ -836,6 +928,7 @@ async function handleStatus(_req, res) {
     },
     retrieval: {
       collection: COLLECTION_NAME,
+      historyMessages: runtimeConfig.historyMessages,
       qdrantUrl: QDRANT_URL,
       maxSimilarities: runtimeConfig.maxSimilarities,
       minSimilarities: runtimeConfig.minSimilarities,
@@ -849,23 +942,17 @@ async function handleStatus(_req, res) {
 }
 
 async function handleFiles(_req, res) {
-  const files = await readEmbeddableFiles();
-  const indexState = readIndexState();
+  const rows = await listFileMetadata();
 
-  const payload = files.map((file) => {
-    const chunkCount = fileToChunks(file).length;
-    const isEmbedded = indexState[file.relativePath] === file.hash;
-
-    return {
-      path: file.relativePath,
-      extension: file.extension,
-      sizeBytes: file.size,
-      lastModified: file.lastModified,
-      hash: file.hash,
-      chunkCount,
-      embedded: isEmbedded,
-    };
-  });
+  const payload = rows.map((row) => ({
+    path: row.file_path,
+    extension: row.extension,
+    sizeBytes: Number(row.size_bytes),
+    lastModified: row.last_modified,
+    hash: row.file_hash,
+    chunkCount: row.chunk_count,
+    embedded: row.embedded,
+  }));
 
   json(res, 200, {
     contentPath: CONTENT_PATH,
@@ -889,17 +976,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/status") {
+    const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
+    const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
+    const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
+    const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
+
+    if (req.method === "GET" && isStatusRoute) {
       await handleStatus(req, res);
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/files") {
+    if (req.method === "GET" && isFilesRoute) {
       await handleFiles(req, res);
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/prompt") {
+    if (req.method === "GET" && isMessagesRoute) {
+      await handleMessages(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && isPromptRoute) {
       await handlePrompt(req, res);
       return;
     }
@@ -930,7 +1027,32 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+await ensureDatabaseReady();
+await initializeStateDefaults({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+await initializeRuntimeConfigDefaults({
+  historyMessages: HISTORY_MESSAGES,
+  maxSimilarities: MAX_SIMILARITIES,
+  minSimilarities: MIN_SIMILARITIES,
+  cosineLimit: COSINE_LIMIT,
+});
+const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+uiMode = persistedSelections.uiMode;
+assistantMode = normalizeAssistantMode(persistedSelections.assistantMode);
+profileId = normalizeProfile(persistedSelections.profileId);
+const persistedRuntimeConfig = await getRuntimeConfigState({
+  historyMessages: runtimeConfig.historyMessages,
+  maxSimilarities: runtimeConfig.maxSimilarities,
+  minSimilarities: runtimeConfig.minSimilarities,
+  cosineLimit: runtimeConfig.cosineLimit,
+});
+setRuntimeConfigValue("history messages", persistedRuntimeConfig.historyMessages);
+setRuntimeConfigValue("max similarities", persistedRuntimeConfig.maxSimilarities);
+setRuntimeConfigValue("min similarities", persistedRuntimeConfig.minSimilarities);
+setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
+
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, POST /api/prompt");
+  console.log(
+    "Endpoints: GET /api/status, GET /api/files, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, POST /internal/retriever/prompt"
+  );
 });

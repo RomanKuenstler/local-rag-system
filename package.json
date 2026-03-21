@@ -11,12 +11,14 @@
     "@qdrant/qdrant-js": "^1.17.0",
     "cheerio": "^1.2.0",
     "pdfjs-dist": "^5.5.207",
-    "chalk": "^5.6.2"
+    "chalk": "^5.6.2",
+    "pg": "^8.16.3"
   },
   "scripts": {
-    "lint": "node --check index.js embedder.js retriever-api.js src/*.js",
+    "lint": "node --check index.js embedder.js backend-api.js retriever-api.js src/*.js",
     "start:retriever": "node index.js",
     "start:retriever:api": "node retriever-api.js",
+    "start:backend:api": "node backend-api.js",
     "start:embedder": "node embedder.js"
   }
 }

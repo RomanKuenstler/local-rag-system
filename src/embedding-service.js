@@ -1,5 +1,3 @@
-import fs from "fs";
-import path from "path";
 import { randomUUID } from "crypto";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import {
@@ -8,8 +6,6 @@ import {
   COLLECTION_NAME,
   CONTENT_PATH,
   EMBEDDABLE_EXTENSIONS,
-  INDEX_STATE_FILE,
-  EMBEDDING_STATUS_FILE,
   QDRANT_API_KEY,
   QDRANT_URL,
 } from "./config.js";
@@ -20,6 +16,19 @@ import {
   splitTextIntoOverlappingChunks,
 } from "./chunking.js";
 import { readTextFilesRecursively } from "./document-processing.js";
+import { ensureDatabaseReady } from "./db.js";
+import {
+  clearManagedLibraryFileErrors,
+  getEmbeddingStatus,
+  getIndexStateMap,
+  listManagedLibraryFilesWithStatus,
+  markManagedLibraryFilesStatus,
+  markIndexingFinished,
+  recordIndexingJobFile,
+  markIndexingStarted,
+  removeDeletedMetadata,
+  upsertFileMetadata,
+} from "./state-store.js";
 
 export { createEmbeddingsModel };
 
@@ -31,63 +40,13 @@ export function createQdrantClient() {
   });
 }
 
-function ensureParentDirectory(filePath) {
-  const parent = path.dirname(filePath);
-  fs.mkdirSync(parent, { recursive: true });
-}
-
-function writeFileAtomic(filePath, content) {
-  ensureParentDirectory(filePath);
-  const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmpPath, content, "utf8");
-  fs.renameSync(tmpPath, filePath);
-}
-
-
-function writeEmbeddingStatus(status) {
+export async function readEmbeddingStatus() {
   try {
-    const payload = {
-      ...status,
-      updatedAt: new Date().toISOString(),
-    };
-
-    writeFileAtomic(EMBEDDING_STATUS_FILE, JSON.stringify(payload, null, 2));
-  } catch (error) {
-    console.error(`Failed to save embedding status: ${error.message}`);
-  }
-}
-
-export function readEmbeddingStatus() {
-  try {
-    if (!fs.existsSync(EMBEDDING_STATUS_FILE)) {
-      return null;
-    }
-
-    return JSON.parse(fs.readFileSync(EMBEDDING_STATUS_FILE, "utf8"));
+    await ensureDatabaseReady();
+    return await getEmbeddingStatus();
   } catch (error) {
     console.error(`Failed to load embedding status: ${error.message}`);
     return null;
-  }
-}
-
-function loadIndexState() {
-  try {
-    if (!fs.existsSync(INDEX_STATE_FILE)) {
-      return {};
-    }
-
-    return JSON.parse(fs.readFileSync(INDEX_STATE_FILE, "utf8"));
-  } catch (error) {
-    console.error(`Failed to load index state: ${error.message}`);
-    return {};
-  }
-}
-
-function saveIndexState(state) {
-  try {
-    writeFileAtomic(INDEX_STATE_FILE, JSON.stringify(state, null, 2));
-  } catch (error) {
-    console.error(`Failed to save index state: ${error.message}`);
   }
 }
 
@@ -209,14 +168,12 @@ export async function readEmbeddableFiles() {
 }
 
 export async function indexChangedDocuments({ logger = console.log } = {}) {
+  await ensureDatabaseReady();
   const embeddingsModel = createEmbeddingsModel();
   const qdrant = createQdrantClient();
 
   const startedAt = new Date().toISOString();
-  writeEmbeddingStatus({
-    status: "running",
-    startedAt,
-  });
+  const jobId = await markIndexingStarted(startedAt);
 
   try {
     logger("_______________________________________________________");
@@ -225,6 +182,16 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
 
     const files = await readEmbeddableFiles();
     logger(`Files found: ${files.length}`);
+    const managedFiles = await listManagedLibraryFilesWithStatus();
+    const disabledPaths = new Set(
+      managedFiles
+        .filter((file) => ["disabled", "removing"].includes(file.upload_status))
+        .map((file) => file.file_path)
+    );
+    const activeFiles = files.filter((file) => !disabledPaths.has(file.relativePath));
+    const activeFilePathSet = new Set(activeFiles.map((file) => file.relativePath));
+
+    const indexState = await getIndexStateMap();
 
     if (files.length === 0) {
       logger("No files found to index.");
@@ -232,50 +199,50 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
       const summary = {
         filesFound: 0,
         changedFiles: [],
-        removedFiles: [],
+        removedFiles: Object.keys(indexState),
         indexedCount: 0,
-        removedCount: 0,
+        removedCount: Object.keys(indexState).length,
         skipped: true,
       };
 
-      writeEmbeddingStatus({
-        status: "ready",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        summary,
-      });
-
+      await removeDeletedMetadata(Object.keys(indexState));
+      await markIndexingFinished({ jobId, status: "ready", startedAt, summary });
       return summary;
     }
 
-    const indexState = loadIndexState();
-    const changedFiles = files.filter((file) => indexState[file.relativePath] !== file.hash);
+    const changedFiles = activeFiles.filter((file) => indexState[file.relativePath] !== file.hash);
     const removedFiles = Object.keys(indexState).filter(
-      (relativePath) => !files.some((file) => file.relativePath === relativePath)
+      (relativePath) => !activeFilePathSet.has(relativePath)
     );
+    const disabledRemovedFiles = removedFiles.filter((filePath) => disabledPaths.has(filePath));
+    const deletedRemovedFiles = removedFiles.filter((filePath) => !disabledPaths.has(filePath));
 
     logger(`Changed/new files: ${changedFiles.length}`);
     logger(`Removed files: ${removedFiles.length}`);
+
+    await markManagedLibraryFilesStatus(
+      changedFiles.map((file) => file.relativePath),
+      "embedding",
+      { jobId }
+    );
+    await clearManagedLibraryFileErrors(changedFiles.map((file) => file.relativePath));
+    await markManagedLibraryFilesStatus(removedFiles, "removing", { jobId });
+    await clearManagedLibraryFileErrors(removedFiles);
 
     if (changedFiles.length === 0 && removedFiles.length === 0) {
       logger("No indexing needed.");
       logger("_______________________________________________________");
       const summary = {
         filesFound: files.length,
-        changedFiles,
-        removedFiles,
+        changedFiles: changedFiles.map((file) => file.relativePath),
+        removedFiles: [...removedFiles],
         indexedCount: 0,
         removedCount: 0,
         skipped: true,
       };
 
-      writeEmbeddingStatus({
-        status: "ready",
-        startedAt,
-        finishedAt: new Date().toISOString(),
-        summary,
-      });
-
+      await upsertFileMetadata(files, indexState);
+      await markIndexingFinished({ jobId, status: "ready", startedAt, summary });
       return summary;
     }
 
@@ -295,21 +262,41 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
         await deletePointsBySource(qdrant, removedFile);
         delete indexState[removedFile];
         removedCount++;
+        await recordIndexingJobFile({
+          jobId,
+          filePath: removedFile,
+          action: "delete",
+          status: "success",
+        });
+        const removalStatus = disabledPaths.has(removedFile) ? "disabled" : "deleted";
+        await markManagedLibraryFilesStatus([removedFile], removalStatus, { jobId });
       } catch (error) {
         console.error(`Failed removing ${removedFile}: ${error.message}`);
+        await recordIndexingJobFile({
+          jobId,
+          filePath: removedFile,
+          action: "delete",
+          status: "error",
+          error: error.message,
+        });
+        await markManagedLibraryFilesStatus([removedFile], "error", { jobId, error: error.message });
       }
     }
 
     let indexedCount = 0;
+    const chunkCounts = {};
+
     for (const file of changedFiles) {
       try {
         logger(`Indexing file: ${file.relativePath}`);
         await deletePointsBySource(qdrant, file.relativePath);
 
         const chunkRecords = fileToChunks(file).filter((chunk) => chunk.text?.trim());
+        chunkCounts[file.relativePath] = chunkRecords.length;
         if (chunkRecords.length === 0) {
           logger(`No chunks for file: ${file.relativePath}`);
           indexState[file.relativePath] = file.hash;
+          await markManagedLibraryFilesStatus([file.relativePath], "ready", { jobId });
           continue;
         }
 
@@ -333,41 +320,48 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
         await qdrant.upsert(COLLECTION_NAME, { wait: true, points });
         indexState[file.relativePath] = file.hash;
         indexedCount++;
+        await recordIndexingJobFile({
+          jobId,
+          filePath: file.relativePath,
+          action: "upsert",
+          status: "success",
+          chunkCount: chunkRecords.length,
+        });
+        await markManagedLibraryFilesStatus([file.relativePath], "ready", { jobId });
         logger(`Indexed ${chunkRecords.length} chunks: ${file.relativePath}`);
       } catch (error) {
         console.error(`Error indexing ${file.relativePath}: ${error.message}`);
+        await recordIndexingJobFile({
+          jobId,
+          filePath: file.relativePath,
+          action: "upsert",
+          status: "error",
+          error: error.message,
+        });
+        await markManagedLibraryFilesStatus([file.relativePath], "error", { jobId, error: error.message });
       }
     }
 
-    saveIndexState(indexState);
-    logger("Index state saved");
+    await removeDeletedMetadata(removedFiles);
+    await upsertFileMetadata(files, indexState, chunkCounts);
+    logger("Index state saved to Postgres");
     logger("_______________________________________________________");
 
     const summary = {
       filesFound: files.length,
-      changedFiles,
-      removedFiles,
+      changedFiles: changedFiles.map((file) => file.relativePath),
+      removedFiles: [...removedFiles],
       indexedCount,
       removedCount,
+      disabledRemovedCount: disabledRemovedFiles.length,
+      deletedRemovedCount: deletedRemovedFiles.length,
       skipped: false,
     };
 
-    writeEmbeddingStatus({
-      status: "ready",
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      summary,
-    });
-
+    await markIndexingFinished({ jobId, status: "ready", startedAt, summary });
     return summary;
   } catch (error) {
-    writeEmbeddingStatus({
-      status: "error",
-      startedAt,
-      finishedAt: new Date().toISOString(),
-      error: error.message,
-    });
-
+    await markIndexingFinished({ jobId, status: "error", startedAt, summary: null, error: error.message });
     throw error;
   }
 }

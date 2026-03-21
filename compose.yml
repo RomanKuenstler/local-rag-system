@@ -12,6 +12,31 @@ x-node-service: &node-service
           - node_modules/
 
 services:
+  backend:
+    <<: *node-service
+    environment:
+      APP_ROLE: backend
+      BACKEND_API_PORT: 3100
+      RETRIEVER_BASE_URL: http://retriever:3000
+      EMBEDDER_BASE_URL: http://embedder:3200
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "3100:3100"
+    command: ["npm", "run", "start:backend:api"]
+    depends_on:
+      retriever:
+        condition: service_started
+      embedder:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
   retriever:
     <<: *node-service
     environment:
@@ -25,20 +50,21 @@ services:
       CHUNK_OVERLAP: 100
       MAX_EMBEDDING_CHARS: 400
       PDF_MIN_EXTRACTED_CHARS: 100
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
       OPTION_TEMPERATURE: 0.0
       OPTION_TOP_P: 0.9
       OPTION_PRESENCE_PENALTY: 2.2
       CONTENT_PATH: /app/data
-      INDEX_STATE_FILE: /app/state/.index-state.json
-      EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       CHAT_HISTORY_DIR: /app/state/chat-history
       RETRIEVER_API_PORT: 3000
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
       - rag_state:/app/state
-    ports:
-      - "3000:3000"
     configs:
       - source: guardrails.md
         target: /app/guardrails.md
@@ -51,21 +77,29 @@ services:
         model_var: MODEL_RUNNER_LLM_EMBEDDING
     command: ["npm", "run", "start:retriever:api"]
     depends_on:
-      - qdrant
-      - embedder
+      qdrant:
+        condition: service_started
+      embedder:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   embedder:
     <<: *node-service
     environment:
       APP_ROLE: embedder
       CONTENT_PATH: /app/data
-      INDEX_STATE_FILE: /app/state/.index-state.json
-      EMBEDDING_STATUS_FILE: /app/state/.embedding-status.json
       EMBED_INTERVAL_SECONDS: 15
+      EMBEDDER_HEALTH_PORT: 3200
       CHUNK_SIZE: 600
       CHUNK_OVERLAP: 100
       MAX_EMBEDDING_CHARS: 400
       PDF_MIN_EXTRACTED_CHARS: 100
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
     volumes:
       - ./data:/app/data
       - rag_state:/app/state
@@ -74,14 +108,17 @@ services:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   webui:
     build:
       context: ./webui
       dockerfile: Dockerfile
     environment:
-      UPSTREAM_API_URL: http://retriever:3000
+      UPSTREAM_API_URL: http://backend:3100
     ports:
       - "5173:80"
     develop:
@@ -94,7 +131,24 @@ services:
             - Dockerfile
             - nginx.conf.template
     depends_on:
-      - retriever
+      - backend
+
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   qdrant:
     image: qdrant/qdrant
@@ -107,6 +161,7 @@ services:
 volumes:
   qdrant_data:
   rag_state:
+  postgres_data:
 
 models:
   chat-model:

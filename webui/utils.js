@@ -109,7 +109,11 @@ export function parseSystemInfoContent(text) {
     },
     {
       title: "Storage",
-      keys: ["vector db", "collection", "content path", "embeddable extensions", "chat history dir"],
+      keys: ["vector db", "collection", "postgres", "content path", "embeddable extensions"],
+    },
+    {
+      title: "State",
+      keys: ["index state file", "embedding status file", "chat history dir"],
     },
   ];
 
