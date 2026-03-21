@@ -19,6 +19,11 @@ import {
   resizeComposerInput,
 } from "./utils.js";
 import { renderPanelContent } from "./panel-content.js";
+import {
+  buildChatDownloadFileName,
+  buildFallbackChatExportPayload,
+  triggerJsonDownload,
+} from "./chat-export.js";
 
 const UI_MODE_OPTIONS = [
   { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
@@ -34,6 +39,23 @@ const LIBRARY_UPLOAD_RULES = {
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+const MENU_DIALOG_TABS = [
+  { id: "settings", label: "Settings", command: "/config" },
+  { id: "personalization", label: "Personalization", command: "/personalization" },
+  { id: "info", label: "Info", command: "/info" },
+  { id: "archive", label: "Archive" },
+  { id: "help", label: "Help", command: "/help" },
+];
+
+function buildChatNameFromId(chatId) {
+  const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
+  return `chat-${suffix}`;
+}
+
+function buildInitialChatList(activeChatId) {
+  const primaryId = String(activeChatId || "").trim() || `chat-${crypto.randomUUID()}`;
+  return [{ id: primaryId, name: buildChatNameFromId(primaryId) }];
+}
 
 function getOrCreatePersistentId(storageKey, fallbackPrefix) {
   try {
@@ -61,6 +83,10 @@ function getCurrentUiModeFromInfoText(infoText) {
   return uiModeEntry?.value || "clean";
 }
 
+function getMenuTabById(tabId) {
+  return MENU_DIALOG_TABS.find((tab) => tab.id === tabId) || MENU_DIALOG_TABS[0];
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -83,9 +109,23 @@ function App() {
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
+  const [activeDialogTab, setActiveDialogTab] = useState("settings");
+  const [dialogTabPanels, setDialogTabPanels] = useState({});
+  const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
+  const [dialogTabError, setDialogTabError] = useState("");
   const [activeView, setActiveView] = useState(getInitialView);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
+  const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
+  const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
+  const [isLoadingChats, setIsLoadingChats] = useState(false);
+  const [volatileChat, setVolatileChat] = useState(null);
+  const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [renameDialogChat, setRenameDialogChat] = useState(null);
+  const [renameInputValue, setRenameInputValue] = useState("");
+  const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
+  const [isChatActionPending, setIsChatActionPending] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -94,11 +134,15 @@ function App() {
   const promptFileInputRef = useRef(null);
   const libraryFileInputRef = useRef(null);
   const menuRef = useRef(null);
+  const volatileChatCreatePromiseRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
   const isRagMode = currentUiMode === "rag";
   const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
+  const displayedChatList = volatileChat
+    ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
+    : chatList;
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -162,9 +206,9 @@ function App() {
     }
   }
 
-  async function loadMessagesFromDb() {
+  async function loadMessagesFromDb(explicitChatId = null) {
     const sessionId = sessionIdRef.current;
-    const chatId = chatIdRef.current;
+    const chatId = explicitChatId || chatIdRef.current;
     const messageLoadLimit = 40;
     const response = await fetch(
       `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
@@ -188,10 +232,45 @@ function App() {
       })
       : [];
 
-    setMessages((previous) => {
-      const volatileMessages = previous.filter((message) => message.isVolatile);
-      return normalized.concat(volatileMessages);
-    });
+    setMessages(normalized);
+  }
+
+  async function refreshChats({ preferredChatId = null } = {}) {
+    const sessionId = sessionIdRef.current;
+    setIsLoadingChats(true);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to load chats");
+      }
+
+      const nextChats = Array.isArray(payload.chats)
+        ? payload.chats.map((chat) => ({
+          id: chat.id,
+          name: chat.name || buildChatNameFromId(chat.id),
+          status: chat.status || "active",
+        }))
+        : [];
+
+      const fallbackChatId = preferredChatId || payload.activeChatId || chatIdRef.current;
+      const nextActiveChat = nextChats.find((chat) => chat.id === fallbackChatId)
+        ? fallbackChatId
+        : (payload.activeChatId || nextChats[0]?.id || chatIdRef.current);
+
+      setChatList(nextChats.length > 0 ? nextChats : buildInitialChatList(nextActiveChat));
+      setActiveChatId(nextActiveChat);
+      chatIdRef.current = nextActiveChat;
+      try {
+        window.localStorage.setItem(CHAT_ID_STORAGE_KEY, nextActiveChat);
+      } catch {
+        // ignore storage write errors
+      }
+    } finally {
+      setIsLoadingChats(false);
+    }
   }
 
   useEffect(() => {
@@ -209,8 +288,14 @@ function App() {
   }, [hasShownReadyGreeting]);
 
   useEffect(() => {
-    loadMessagesFromDb().catch(() => {
+    loadMessagesFromDb(activeChatId).catch(() => {
       setMessages([]);
+    });
+  }, [activeChatId]);
+
+  useEffect(() => {
+    refreshChats({ preferredChatId: chatIdRef.current }).catch(() => {
+      setChatList(buildInitialChatList(chatIdRef.current));
     });
   }, []);
 
@@ -240,6 +325,9 @@ function App() {
       if (!menuRef.current?.contains(event.target)) {
         setIsMenuOpen(false);
       }
+      if (!event.target.closest(".chat-item-actions")) {
+        setOpenChatMenuId(null);
+      }
     }
 
     document.addEventListener("pointerdown", closeMenuOnOutside);
@@ -250,16 +338,17 @@ function App() {
     function handleEscape(event) {
       if (event.key === "Escape") {
         setPanelData(null);
+        setIsUnifiedDialogOpen(false);
       }
     }
 
-    if (panelData) {
+    if (panelData || isUnifiedDialogOpen) {
       document.addEventListener("keydown", handleEscape);
       return () => document.removeEventListener("keydown", handleEscape);
     }
 
     return undefined;
-  }, [panelData]);
+  }, [panelData, isUnifiedDialogOpen]);
 
   function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -522,6 +611,39 @@ function App() {
       return;
     }
 
+    if (volatileChat && chatIdRef.current === volatileChat.id) {
+      try {
+        if (!volatileChatCreatePromiseRef.current) {
+          volatileChatCreatePromiseRef.current = (async () => {
+            const response = await fetch(`${API_BASE_URL}/api/chats`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: sessionIdRef.current,
+                chatId: volatileChat.id,
+                name: volatileChat.name,
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok && response.status !== 409) {
+              throw new Error(payload?.error || "Failed to create chat");
+            }
+          })();
+        }
+        await volatileChatCreatePromiseRef.current;
+        setVolatileChat(null);
+        await refreshChats({ preferredChatId: volatileChat.id });
+      } catch (error) {
+        setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+          evidenceSeverity: "error",
+          isVolatile: true,
+        })));
+        return;
+      } finally {
+        volatileChatCreatePromiseRef.current = null;
+      }
+    }
+
     setIsSending(true);
     const pendingMessageId = crypto.randomUUID();
     setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
@@ -609,44 +731,136 @@ function App() {
     return payload;
   }
 
-  async function openPersonalizationPanel() {
-    if (isSending || !isEmbeddingReady) return;
+  function buildPanelDataFromCommand(command, payload) {
+    if (command === "/config") {
+      return {
+        id: crypto.randomUUID(),
+        command: "/config",
+        title: payload.responseType || "/config",
+        content: parsePanelText(payload.answer || ""),
+        severity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
+        configView: payload.configView || payload.webConfigView || null,
+      };
+    }
 
-    setIsMenuOpen(false);
+    if (command === "/info") {
+      return {
+        id: crypto.randomUUID(),
+        command: "/info",
+        title: payload.responseType || "/info",
+        content: parsePanelText(payload.answer || ""),
+        severity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
+        configView: payload.configView || payload.webConfigView || null,
+      };
+    }
+
+    if (command === "/help") {
+      return {
+        id: crypto.randomUUID(),
+        command: "/help",
+        title: payload.responseType || "/help",
+        content: parsePanelText(payload.answer || ""),
+        severity: payload.evidenceSeverity || null,
+        responseType: payload.responseType || null,
+        configView: payload.configView || payload.webConfigView || null,
+      };
+    }
+
+    return null;
+  }
+
+  async function loadUnifiedDialogTab(tabId, { forceReload = false } = {}) {
+    const selectedTab = getMenuTabById(tabId);
+    const existingPanel = dialogTabPanels[selectedTab.id];
+    setActiveDialogTab(selectedTab.id);
+    setDialogTabError("");
+    if (existingPanel && !forceReload) return;
+
+    if (!isEmbeddingReady) return;
     setIsSending(true);
+    setIsDialogTabLoading(true);
 
     try {
-      const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
-        fetchPanelCommand("/assistant"),
-        fetchPanelCommand("/profile"),
-        fetchPanelCommand("/info"),
-      ]);
-
-      setPanelData({
-        id: crypto.randomUUID(),
-        command: "/personalization",
-        title: "Personalization",
-        content: {
-          ui: {
-            currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
-            modes: UI_MODE_OPTIONS,
+      let nextPanel = null;
+      if (selectedTab.command === "/personalization") {
+        const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
+          fetchPanelCommand("/assistant"),
+          fetchPanelCommand("/profile"),
+          fetchPanelCommand("/info"),
+        ]);
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/personalization",
+          title: "Personalization",
+          content: {
+            ui: {
+              currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
+              modes: UI_MODE_OPTIONS,
+            },
+            assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+            profile: parseProfileContent(profilePayload.answer || ""),
           },
-          assistant: parseAssistantModeContent(assistantPayload.answer || ""),
-          profile: parseProfileContent(profilePayload.answer || ""),
-        },
-        severity: null,
-        responseType: null,
-        configView: null,
-      });
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else if (selectedTab.id === "archive") {
+        const response = await fetch(
+          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load archived chats");
+        }
+        const archivedRows = Array.isArray(payload.chats)
+          ? payload.chats
+            .filter((chat) => chat.status === "archived")
+            .map((chat) => ({
+              id: chat.id,
+              name: chat.name || buildChatNameFromId(chat.id),
+              archivedAt: chat.archivedAt || null,
+            }))
+          : [];
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/archive",
+          title: "Archive",
+          content: {
+            rows: archivedRows,
+          },
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else {
+        const payload = await fetchPanelCommand(selectedTab.command);
+        nextPanel = buildPanelDataFromCommand(selectedTab.command, payload);
+      }
+
+      if (nextPanel) {
+        setDialogTabPanels((previous) => ({ ...previous, [selectedTab.id]: nextPanel }));
+      }
     } catch (error) {
-      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-        evidenceSeverity: "error",
-        isVolatile: true,
-      })));
+      setDialogTabError(error.message);
     } finally {
+      setIsDialogTabLoading(false);
       setIsSending(false);
       await refreshStatus();
     }
+  }
+
+  async function openUnifiedDialog(tabId) {
+    if (isSending || !isEmbeddingReady) return;
+    setIsMenuOpen(false);
+    setPanelData(null);
+    setIsUnifiedDialogOpen(true);
+    await loadUnifiedDialogTab(tabId);
+  }
+
+  async function openPersonalizationPanel() {
+    await openUnifiedDialog("personalization");
   }
 
   async function refreshCurrentPanel(activeCommand) {
@@ -716,7 +930,17 @@ function App() {
     setIsSending(true);
     try {
       await fetchPanelCommand(command);
-      await refreshCurrentPanel(panelData?.command);
+      if (isUnifiedDialogOpen) {
+        setDialogTabPanels((previous) => {
+          const nextPanels = { ...previous };
+          delete nextPanels.personalization;
+          delete nextPanels.info;
+          return nextPanels;
+        });
+        await loadUnifiedDialogTab(activeDialogTab, { forceReload: true });
+      } else {
+        await refreshCurrentPanel(panelData?.command);
+      }
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
         evidenceSeverity: "error",
@@ -763,11 +987,17 @@ function App() {
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
+  const plusChatIconPath = "M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1";
+  const settingsIconPath = "M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5";
   const fileUploadIconPath = "M11 18h2v-8h3l-4-4-4 4h3zm-6 2h14v-2H5z";
   const trashIconPath = "M9 3h6l1.4 2H20a1 1 0 1 1 0 2h-1v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4a1 1 0 1 1 0-2h3.6zM7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7zm3 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1m4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1";
   const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
   const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
+  const downloadIconPath = "M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4 2.3 2.3V4a1 1 0 0 1 1-1M4 17h16v4H4z";
+  const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
+  const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
+  const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -777,22 +1007,25 @@ function App() {
     });
   };
 
-  const panelTitle = getPanelTitle(panelData?.command);
+  const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
+  const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
+  const panelTitle = isUnifiedDialogOpen ? "Preferences" : getPanelTitle(panelData?.command);
+  const archivedChatRows = Array.isArray(activeUnifiedPanel?.content?.rows) ? activeUnifiedPanel.content.rows : [];
 
-  const parsedAssistantPanel = panelData?.command === "/assistant"
-    ? parseAssistantModeContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedAssistantPanel = activeModalPanel?.command === "/assistant"
+    ? parseAssistantModeContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
-  const parsedProfilePanel = panelData?.command === "/profile"
-    ? parseProfileContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedProfilePanel = activeModalPanel?.command === "/profile"
+    ? parseProfileContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
-  const parsedInfoGroups = panelData?.command === "/info"
-    ? parseSystemInfoContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedInfoGroups = activeModalPanel?.command === "/info"
+    ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : [];
-  const parsedHelpPanel = panelData?.command === "/help" || panelData?.command === "?"
-    ? parseHelpContent(Array.isArray(panelData.content) ? panelData.content.join("\n") : String(panelData.content || ""))
+  const parsedHelpPanel = activeModalPanel?.command === "/help" || activeModalPanel?.command === "?"
+    ? parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
-  const configSections = panelData?.command === "/config" && panelData.configView
-    ? panelData.configView.sections
+  const configSections = activeModalPanel?.command === "/config" && activeModalPanel.configView
+    ? activeModalPanel.configView.sections
     : [];
   const editableConfigRows = configSections.flatMap((section) => section.entries
     .filter((entry) => entry.editable)
@@ -853,9 +1086,267 @@ function App() {
     window.location.hash = "";
   }
 
+  function createVolatileChat() {
+    if (volatileChat?.id) {
+      const previousVolatileId = volatileChat.id;
+      setChatList((previous) => previous.filter((chat) => chat.id !== previousVolatileId));
+    }
+    const draftId = `chat-${crypto.randomUUID()}`;
+    const draftChat = { id: draftId, name: buildChatNameFromId(draftId), status: "active" };
+    setVolatileChat(draftChat);
+    setActiveChatId(draftId);
+    chatIdRef.current = draftId;
+    setMessages([]);
+    setPanelData(null);
+    setOpenChatMenuId(null);
+    try {
+      window.localStorage.setItem(CHAT_ID_STORAGE_KEY, draftId);
+    } catch {
+      // ignore storage write errors
+    }
+  }
+
+  async function createNewChat() {
+    setIsMenuOpen(false);
+    window.location.hash = "";
+    createVolatileChat();
+  }
+
+  async function switchChat(chatId) {
+    const selectedId = String(chatId || "").trim();
+    if (!selectedId || selectedId === activeChatId) {
+      return;
+    }
+    if (volatileChat && selectedId !== volatileChat.id) {
+      const volatileId = volatileChat.id;
+      setVolatileChat(null);
+      setChatList((previous) => previous.filter((chat) => chat.id !== volatileId));
+    }
+    const sessionId = sessionIdRef.current;
+    setPanelData(null);
+    setIsMenuOpen(false);
+    window.location.hash = "";
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(selectedId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, action: "switch" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to switch chat");
+      }
+
+      await refreshChats({ preferredChatId: selectedId });
+      await loadMessagesFromDb(selectedId).catch(() => {
+        setMessages([]);
+      });
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    }
+  }
+
+  async function downloadChat(chat) {
+    if (!chat?.id) return;
+    if (volatileChat?.id === chat.id) {
+      throw new Error("Send at least one message to save this chat before downloading.");
+    }
+    let response = await fetch(
+      `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+    );
+    if (!response.ok) {
+      const [chatListResponse, messagesResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`),
+        fetch(`${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`),
+      ]);
+      const chatListPayload = await chatListResponse.json().catch(() => ({}));
+      const messagesPayload = await messagesResponse.json().catch(() => ({}));
+      if (!chatListResponse.ok || !messagesResponse.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "Failed to download chat.");
+      }
+      const selectedChat = Array.isArray(chatListPayload.chats)
+        ? chatListPayload.chats.find((entry) => entry.id === chat.id)
+        : null;
+      const fallbackPayload = buildFallbackChatExportPayload({
+        sessionId: sessionIdRef.current,
+        chat,
+        selectedChat,
+        messages: messagesPayload.messages,
+      });
+      response = new Response(JSON.stringify(fallbackPayload, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+    }
+    const blob = await response.blob();
+    triggerJsonDownload(blob, buildChatDownloadFileName(chat));
+  }
+
+  function openRenameDialog(chat) {
+    setOpenChatMenuId(null);
+    setRenameDialogChat(chat);
+    setRenameInputValue(String(chat?.name || ""));
+  }
+
+  async function confirmRenameChat() {
+    const targetChat = renameDialogChat;
+    if (!targetChat || isChatActionPending) return;
+    const nextName = String(renameInputValue || "").trim();
+    if (!nextName) return;
+
+    setIsChatActionPending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "rename",
+          name: nextName,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to rename chat");
+      }
+
+      setRenameDialogChat(null);
+      setRenameInputValue("");
+      await refreshChats({ preferredChatId: activeChatId });
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function refreshArchiveTabIfOpen() {
+    if (isUnifiedDialogOpen && activeDialogTab === "archive") {
+      await loadUnifiedDialogTab("archive", { forceReload: true });
+    }
+  }
+
+  async function archiveChat(chatId) {
+    if (!chatId || isChatActionPending) return;
+    setIsChatActionPending(true);
+    setOpenChatMenuId(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "archive",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to archive chat");
+      }
+      await refreshChats({ preferredChatId: payload?.activeChatId || activeChatId });
+      if (payload?.activeChatId) {
+        await loadMessagesFromDb(payload.activeChatId).catch(() => setMessages([]));
+      }
+      setDialogTabPanels((previous) => {
+        const nextPanels = { ...previous };
+        delete nextPanels.archive;
+        return nextPanels;
+      });
+      await refreshArchiveTabIfOpen();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function confirmDeleteChat() {
+    const targetChat = deleteConfirmChat;
+    if (!targetChat || isChatActionPending) return;
+    setIsChatActionPending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sessionIdRef.current }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to delete chat");
+      }
+      setDeleteConfirmChat(null);
+      await refreshChats({ preferredChatId: payload?.activeChatId || activeChatId });
+      if (payload?.activeChatId) {
+        await loadMessagesFromDb(payload.activeChatId).catch(() => setMessages([]));
+      } else {
+        setMessages([]);
+      }
+      setDialogTabPanels((previous) => {
+        const nextPanels = { ...previous };
+        delete nextPanels.archive;
+        return nextPanels;
+      });
+      await refreshArchiveTabIfOpen();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function unarchiveChat(chatId) {
+    if (!chatId || isChatActionPending) return;
+    setIsChatActionPending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "activate",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to unarchive chat");
+      }
+      await refreshChats({ preferredChatId: activeChatId });
+      setDialogTabPanels((previous) => {
+        const nextPanels = { ...previous };
+        delete nextPanels.archive;
+        return nextPanels;
+      });
+      await refreshArchiveTabIfOpen();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatActionPending(false);
+    }
+  }
+
+  async function openSettingsDialog() {
+    await openUnifiedDialog("settings");
+  }
+
   return React.createElement(
     "div",
-    { className: `page${panelData ? " modal-open" : ""}` },
+    { className: `page${panelData || isUnifiedDialogOpen ? " modal-open" : ""}` },
     React.createElement(
       "header",
       { className: "topbar" },
@@ -873,15 +1364,186 @@ function App() {
           ? React.createElement(
             React.Fragment,
             null,
-            React.createElement(
-              "button",
-              { type: "button", className: "send header-chat-link", onClick: openChatPage },
-              icon(chatIconPath),
-              "Chat"
-            ),
             React.createElement("h2", { className: "header-title" }, "Library")
           )
           : null
+      )
+    ),
+    React.createElement(
+      "aside",
+      { className: "side-nav" },
+      React.createElement(
+        "div",
+        { className: "side-nav-top" },
+        React.createElement(
+          "button",
+          { type: "button", className: "side-nav-item", onClick: createNewChat },
+          icon(plusChatIconPath),
+          React.createElement("span", null, "New chat")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "side-nav-item",
+            onClick: activeView === "library" ? openChatPage : openLibraryPage,
+          },
+          icon(activeView === "library" ? chatIconPath : libraryIconPath),
+          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && activeDialogTab === "settings") ? " active" : ""}`,
+            onClick: openSettingsDialog,
+            disabled: isSending || !isEmbeddingReady,
+          },
+          icon(settingsIconPath),
+          React.createElement("span", null, "Settings")
+        )
+      ),
+      React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
+      React.createElement(
+        "div",
+        { className: "side-nav-chat-list", role: "navigation", "aria-label": "Your chats" },
+        isLoadingChats
+          ? React.createElement("p", { className: "side-nav-loading" }, "Loading chats…")
+          : null,
+        ...displayedChatList.map((chat) => {
+          const isActiveChat = chat.id === activeChatId;
+          const isMenuOpenForChat = openChatMenuId === chat.id;
+          return React.createElement(
+            "div",
+            {
+              key: chat.id,
+              className: `side-nav-chat-row${isActiveChat ? " active" : ""}${isMenuOpenForChat ? " menu-open" : ""}`,
+            },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: `side-nav-chat-item${isActiveChat ? " active" : ""}`,
+                onClick: () => switchChat(chat.id),
+                disabled: isLoadingChats,
+              },
+              chat.name
+            ),
+            React.createElement(
+              "div",
+              { className: "chat-item-actions" },
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "chat-item-actions-trigger",
+                  "aria-label": `Open actions for ${chat.name}`,
+                  "aria-haspopup": "menu",
+                  "aria-expanded": isMenuOpenForChat ? "true" : "false",
+                  onClick: (event) => {
+                    event.stopPropagation();
+                    setOpenChatMenuId((previous) => previous === chat.id ? null : chat.id);
+                  },
+                },
+                icon(dotsIconPath)
+              ),
+              isMenuOpenForChat
+                ? React.createElement(
+                  "ul",
+                  { className: "chat-item-actions-menu", role: "menu" },
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        onClick: () => openRenameDialog(chat),
+                      },
+                      icon(renameIconPath),
+                      React.createElement("span", null, "Rename")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        onClick: async () => {
+                          setOpenChatMenuId(null);
+                          try {
+                            await downloadChat(chat);
+                          } catch (error) {
+                            setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                              evidenceSeverity: "error",
+                              isVolatile: true,
+                            })));
+                          }
+                        },
+                      },
+                      icon(downloadIconPath),
+                      React.createElement("span", null, "Download")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        onClick: () => archiveChat(chat.id),
+                      },
+                      icon(archiveIconPath),
+                      React.createElement("span", null, "Archive")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option delete",
+                        role: "menuitem",
+                        onClick: () => {
+                          setOpenChatMenuId(null);
+                          setDeleteConfirmChat(chat);
+                        },
+                      },
+                      icon(trashIconPath),
+                      React.createElement("span", null, "Delete")
+                    )
+                  )
+                )
+                : null
+            )
+          );
+        })
+      ),
+      React.createElement(
+        "div",
+        { className: "side-nav-bottom" },
+        React.createElement(
+          "div",
+          { className: "side-nav-user" },
+          React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+          React.createElement(
+            "div",
+            { className: "side-nav-user-meta" },
+            React.createElement("strong", null, "Username"),
+            React.createElement("small", null, "Account placeholder")
+          )
+        )
       )
     ),
     React.createElement(
@@ -1217,13 +1879,23 @@ function App() {
     React.createElement(
       "div",
       { className: "floating-menu", ref: menuRef },
+      React.createElement(
+        "button",
+        {
+          className: "floating-menu-toggle",
+          type: "button",
+          onClick: () => setIsMenuOpen((current) => !current),
+          "aria-label": isMenuOpen ? "Close quick actions" : "Open quick actions",
+        },
+        icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
+      ),
       isMenuOpen
         ? React.createElement(
           "div",
           { className: "floating-menu-panel" },
           React.createElement(
             "button",
-            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/info"); }, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("info"), disabled: isSending || !isEmbeddingReady },
             icon("M11 17h2v-6h-2zm1-8a1.25 1.25 0 1 0 0 2.5A1.25 1.25 0 0 0 12 9m0 13A10 10 0 1 1 12 2a10 10 0 0 1 0 20"),
             "Info"
           ),
@@ -1248,30 +1920,19 @@ function App() {
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/config"); }, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("settings"), disabled: isSending || !isEmbeddingReady },
             icon("M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5"),
             "Settings"
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: async () => { setIsMenuOpen(false); await sendRawPrompt("/help"); }, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("help"), disabled: isSending || !isEmbeddingReady },
             icon("M12 2 2 12l10 10 10-10Zm0 4.5a3 3 0 0 1 3 3c0 2.2-3 2.4-3 5h-2c0-3.4 3-3.8 3-5a1 1 0 0 0-2 0H9a3 3 0 0 1 3-3Zm-1 10h2v2h-2z"),
             "Help"
           )
         )
         : null,
-      React.createElement(
-        "button",
-        {
-          className: "floating-menu-toggle",
-          type: "button",
-          onClick: () => setIsMenuOpen((current) => !current),
-          "aria-label": isMenuOpen ? "Close menu" : "Open menu",
-        },
-        isMenuOpen
-          ? icon("M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.3l6.3 6.29 6.3-6.29z")
-          : icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
-      )
+      null
     ),
     activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
@@ -1331,6 +1992,277 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    renameDialogChat
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => {
+            if (isChatActionPending) return;
+            setRenameDialogChat(null);
+            setRenameInputValue("");
+          },
+        },
+        React.createElement(
+          "section",
+          {
+            className: "chat-rename-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Rename chat",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Rename"),
+          React.createElement("input", {
+            type: "text",
+            className: "chat-rename-input",
+            value: renameInputValue,
+            maxLength: 240,
+            autoFocus: true,
+            onChange: (event) => setRenameInputValue(event.target.value),
+          }),
+          React.createElement(
+            "div",
+            { className: "chat-rename-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "chat-rename-cancel",
+                onClick: () => {
+                  setRenameDialogChat(null);
+                  setRenameInputValue("");
+                },
+                disabled: isChatActionPending,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "chat-rename-save",
+                onClick: confirmRenameChat,
+                disabled: isChatActionPending || !String(renameInputValue || "").trim(),
+              },
+              icon(keepIconPath),
+              "Save"
+            )
+          )
+        )
+      )
+      : null,
+    deleteConfirmChat
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop panel-modal-backdrop-elevated",
+          onClick: () => {
+            if (isChatActionPending) return;
+            setDeleteConfirmChat(null);
+          },
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-delete-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Confirm chat deletion",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Delete chat?"),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you want to delete this chat?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmChat.name)
+          ),
+          React.createElement(
+            "div",
+            { className: "library-delete-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-cancel",
+                onClick: () => setDeleteConfirmChat(null),
+                disabled: isChatActionPending,
+              },
+              icon(keepIconPath),
+              "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteChat,
+                disabled: isChatActionPending,
+              },
+              icon(trashIconPath),
+              "Delete"
+            )
+          )
+        )
+      )
+      : null,
+    isUnifiedDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setIsUnifiedDialogOpen(false),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "panel-modal panel-modal-with-tabs",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Preferences dialog",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement(
+            "div",
+            { className: "panel-modal-head" },
+            React.createElement("strong", null, "Preferences"),
+            React.createElement(
+              "div",
+              { className: "panel-modal-head-actions" },
+              React.createElement(
+                "button",
+                {
+                  className: "panel-close",
+                  type: "button",
+                  onClick: () => setIsUnifiedDialogOpen(false),
+                  "aria-label": "Close preferences dialog",
+                },
+                "×"
+              )
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "panel-modal-tab-layout" },
+            React.createElement(
+              "nav",
+              { className: "panel-tab-nav", "aria-label": "Preferences sections" },
+              ...MENU_DIALOG_TABS.map((tab) => React.createElement(
+                "button",
+                {
+                  key: tab.id,
+                  type: "button",
+                  className: `panel-tab-button${tab.id === activeDialogTab ? " active" : ""}`,
+                  onClick: () => loadUnifiedDialogTab(tab.id),
+                  disabled: isDialogTabLoading && tab.id === activeDialogTab,
+                  "aria-current": tab.id === activeDialogTab ? "page" : undefined,
+                },
+                tab.label
+              ))
+            ),
+            React.createElement(
+              "div",
+              { className: "panel-modal-content" },
+              dialogTabError
+                ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
+                : isDialogTabLoading && !activeModalPanel
+                  ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
+                  : activeDialogTab === "archive"
+                    ? React.createElement(
+                      "section",
+                      { className: "archive-table-wrapper" },
+                      React.createElement(
+                        "div",
+                        { className: "archive-table", role: "table", "aria-label": "Archived chats" },
+                        React.createElement(
+                          "div",
+                          { className: "archive-table-head", role: "row" },
+                          React.createElement("strong", { role: "columnheader" }, "Chat name"),
+                          React.createElement("strong", { role: "columnheader" }, "Archived at"),
+                          React.createElement("strong", { role: "columnheader" }, "Actions")
+                        ),
+                        archivedChatRows.length === 0
+                          ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
+                          : archivedChatRows.map((chat) => React.createElement(
+                            "div",
+                            { key: chat.id, className: "archive-table-row", role: "row" },
+                            React.createElement("strong", { className: "archive-chat-name" }, chat.name),
+                            React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
+                            React.createElement(
+                              "div",
+                              { className: "library-row-actions archive-row-actions" },
+                              React.createElement(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "library-toggle-button",
+                                  title: "Download chat",
+                                  "aria-label": `Download ${chat.name}`,
+                                  onClick: async () => {
+                                    try {
+                                      await downloadChat(chat);
+                                    } catch (error) {
+                                      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                                        evidenceSeverity: "error",
+                                        isVolatile: true,
+                                      })));
+                                    }
+                                  },
+                                },
+                                icon(downloadIconPath)
+                              ),
+                              React.createElement(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "library-toggle-button",
+                                  title: "Unarchive chat",
+                                  "aria-label": `Unarchive ${chat.name}`,
+                                  onClick: () => unarchiveChat(chat.id),
+                                  disabled: isChatActionPending,
+                                },
+                                icon(keepIconPath)
+                              ),
+                              React.createElement(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "library-delete-button",
+                                  title: "Delete chat",
+                                  "aria-label": `Delete ${chat.name}`,
+                                  onClick: () => setDeleteConfirmChat(chat),
+                                  disabled: isChatActionPending,
+                                },
+                                icon(trashIconPath)
+                              )
+                            )
+                          ))
+                      )
+                    )
+                    : activeModalPanel
+                    ? renderPanelContent({
+                      panelData: activeModalPanel,
+                      parsedInfoGroups,
+                      parsedAssistantPanel,
+                      parsedProfilePanel,
+                      parsedHelpPanel,
+                      editableConfigRows,
+                      restartConfigRows,
+                      retrieverStatus,
+                      embedderStatus,
+                      isSending,
+                      isEmbeddingReady,
+                      submitConfigChange,
+                      applyPersonalizationChange,
+                      icon,
+                    })
+                    : React.createElement("p", null, "Select a section.")
             )
           )
         )

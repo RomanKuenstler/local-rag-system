@@ -16,12 +16,16 @@ This project runs five services with Docker Compose:
 
 Detailed documentation (architecture, setup details, internals) has been moved to:
 - **`DOCUMENTATION.md`**
+- **`DEVELOPERS.md`** (maintainer-oriented file/folder map and development notes)
 
 ## Implemented APIs (backend step 1)
 
 - `POST /api/prompt`: send user prompt and receive answer + evidence severity.
 - `GET /api/status`: get basic system/readiness status.
 - `GET /api/files`: list embeddable files and embedding coverage.
+- `GET /api/chats`, `POST /api/chats`, `PATCH /api/chats/:chatId`, `DELETE /api/chats/:chatId`: manage multi-chat lifecycle per session (create, switch, archive, activate, rename, delete).
+- `GET /api/chats/:chatId/download`: download a chat export as JSON.
+- `GET /api/messages`: fetch messages for a specific chat (or the session's active chat).
 - `GET /healthz`: lightweight liveness check.
 
 ## WebUI (frontend step 2)
@@ -29,6 +33,8 @@ Detailed documentation (architecture, setup details, internals) has been moved t
 The web UI is intentionally minimal for now:
 - message list (chat-like)
 - prompt input + send button
+- per-chat menu actions (rename, download, archive, delete)
+- archive management tab in Preferences (download / unarchive / delete archived chats)
 - **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, up to 3 files)
 - status badges for retriever, embedding state, and embedded file count
 - `/info` panel with grouped runtime details (models, Qdrant collection, Postgres connection, and state-file paths)

@@ -75,26 +75,250 @@ export async function getRuntimeConfigState(fallbacks) {
   };
 }
 
-export async function ensureChatContext({ sessionId, chatId, chatName = null }) {
+export async function ensureSessionExists(sessionId) {
   await dbQuery(
     `INSERT INTO chat_sessions (id, updated_at)
      VALUES ($1, NOW())
      ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
     [sessionId]
   );
+}
+
+export async function ensureChatContext({ sessionId, chatId, chatName = null }) {
+  await ensureSessionExists(sessionId);
 
   await dbQuery(
-    `INSERT INTO chats (id, session_id, name, updated_at)
-     VALUES ($1, $2, COALESCE($3, CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), NOW())
-     ON CONFLICT (id) DO UPDATE SET session_id = EXCLUDED.session_id, updated_at = NOW()`,
+    `INSERT INTO chats (id, session_id, name, status, archived_at, updated_at)
+     VALUES ($1, $2, COALESCE($3, CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), 'active', NULL, NOW())
+     ON CONFLICT (id) DO NOTHING`,
     [chatId, sessionId, chatName]
   );
 
   const result = await dbQuery(
-    "SELECT name FROM chats WHERE id = $1",
+    `SELECT id, session_id, name, status
+     FROM chats
+     WHERE id = $1`,
     [chatId]
   );
-  return result.rows[0]?.name || null;
+  const row = result.rows[0];
+  if (!row || row.session_id !== sessionId) {
+    return null;
+  }
+
+  await dbQuery(
+    `UPDATE chat_sessions
+     SET active_chat_id = COALESCE(active_chat_id, $2),
+         updated_at = NOW()
+     WHERE id = $1`,
+    [sessionId, chatId]
+  );
+
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status,
+  };
+}
+
+export async function createChat({ sessionId, chatId, chatName }) {
+  await ensureSessionExists(sessionId);
+  await dbQuery(
+    `INSERT INTO chats (id, session_id, name, status, archived_at, updated_at)
+     VALUES ($1, $2, COALESCE(NULLIF(BTRIM($3), ''), CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), 'active', NULL, NOW())`,
+    [chatId, sessionId, chatName || null]
+  );
+
+  await dbQuery(
+    `UPDATE chat_sessions
+     SET active_chat_id = $2,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [sessionId, chatId]
+  );
+
+  const result = await dbQuery(
+    `SELECT id, session_id, name, status, created_at, updated_at, archived_at
+     FROM chats
+     WHERE id = $1`,
+    [chatId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function listSessionChats({ sessionId, includeArchived = false }) {
+  await ensureSessionExists(sessionId);
+  const sessionResult = await dbQuery(
+    "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
+    [sessionId]
+  );
+  const activeChatId = sessionResult.rows[0]?.active_chat_id || null;
+
+  const chatResult = await dbQuery(
+    `SELECT id, name, status, created_at, updated_at, archived_at
+     FROM chats
+     WHERE session_id = $1
+       AND ($2::boolean OR status = 'active')
+     ORDER BY updated_at DESC, created_at DESC`,
+    [sessionId, includeArchived]
+  );
+
+  return {
+    activeChatId,
+    chats: chatResult.rows,
+  };
+}
+
+export async function setSessionActiveChat({ sessionId, chatId }) {
+  const chat = await dbQuery(
+    `SELECT id, name, status
+     FROM chats
+     WHERE session_id = $1 AND id = $2`,
+    [sessionId, chatId]
+  );
+  const selectedChat = chat.rows[0];
+  if (!selectedChat) {
+    return null;
+  }
+  if (selectedChat.status !== "active") {
+    return { ...selectedChat, notSwitchable: true };
+  }
+
+  await dbQuery(
+    `UPDATE chat_sessions
+     SET active_chat_id = $2,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [sessionId, chatId]
+  );
+  return selectedChat;
+}
+
+export async function updateChatStatus({ sessionId, chatId, status }) {
+  const result = await dbQuery(
+    `UPDATE chats
+     SET status = $3,
+         archived_at = CASE WHEN $3 = 'archived' THEN NOW() ELSE NULL END,
+         updated_at = NOW()
+     WHERE session_id = $1 AND id = $2
+     RETURNING id, name, status, created_at, updated_at, archived_at`,
+    [sessionId, chatId, status]
+  );
+  const chat = result.rows[0];
+  if (!chat) {
+    return null;
+  }
+
+  if (status === "archived") {
+    const sessionRow = await dbQuery(
+      "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
+      [sessionId]
+    );
+    if (sessionRow.rows[0]?.active_chat_id === chatId) {
+      const fallbackResult = await dbQuery(
+        `SELECT id
+         FROM chats
+         WHERE session_id = $1 AND status = 'active'
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [sessionId]
+      );
+      const fallbackChatId = fallbackResult.rows[0]?.id || null;
+      await dbQuery(
+        `UPDATE chat_sessions
+         SET active_chat_id = $2,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [sessionId, fallbackChatId]
+      );
+    }
+  }
+
+  return chat;
+}
+
+export async function updateChatName({ sessionId, chatId, name }) {
+  const nextName = String(name || "").trim();
+  if (!nextName) {
+    return null;
+  }
+
+  const result = await dbQuery(
+    `UPDATE chats
+     SET name = $3,
+         updated_at = NOW()
+     WHERE session_id = $1 AND id = $2
+     RETURNING id, name, status, created_at, updated_at, archived_at`,
+    [sessionId, chatId, nextName]
+  );
+  return result.rows[0] || null;
+}
+
+export async function deleteChat({ sessionId, chatId }) {
+  const activeBeforeDelete = await dbQuery(
+    "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
+    [sessionId]
+  );
+  const existing = await dbQuery(
+    `SELECT id
+     FROM chats
+     WHERE session_id = $1 AND id = $2`,
+    [sessionId, chatId]
+  );
+  if (!existing.rows[0]) {
+    return false;
+  }
+
+  await dbQuery("DELETE FROM chats WHERE session_id = $1 AND id = $2", [sessionId, chatId]);
+
+  if (activeBeforeDelete.rows[0]?.active_chat_id === chatId) {
+    const fallbackResult = await dbQuery(
+      `SELECT id
+       FROM chats
+       WHERE session_id = $1 AND status = 'active'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [sessionId]
+    );
+    const fallbackChatId = fallbackResult.rows[0]?.id || null;
+    await dbQuery(
+      `UPDATE chat_sessions
+       SET active_chat_id = $2,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [sessionId, fallbackChatId]
+    );
+  }
+
+  return true;
+}
+
+export async function resolveSessionChatId({ sessionId, requestedChatId = null, fallbackChatId = "default-chat" }) {
+  await ensureSessionExists(sessionId);
+
+  const sessionResult = await dbQuery(
+    "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
+    [sessionId]
+  );
+  const sessionActiveChatId = sessionResult.rows[0]?.active_chat_id || null;
+  const chatId = requestedChatId || sessionActiveChatId || fallbackChatId;
+  const ensured = await ensureChatContext({ sessionId, chatId });
+
+  if (!ensured || ensured.status !== "active") {
+    return null;
+  }
+
+  await dbQuery(
+    `UPDATE chat_sessions
+     SET active_chat_id = $2,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [sessionId, chatId]
+  );
+
+  return {
+    chatId,
+    chatName: ensured.name,
+  };
 }
 
 export async function addChatMessage({ sessionId, chatId, role, content, metadata = {} }) {
