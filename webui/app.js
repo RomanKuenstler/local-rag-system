@@ -452,6 +452,43 @@ function App() {
     }
   }
 
+  async function toggleLibraryFile(file, action) {
+    if (!file?.path || !["disable", "activate"].includes(action)) {
+      return;
+    }
+
+    const pendingStatus = action === "disable" ? "removing" : "embedding";
+    setLibraryNotice(action === "disable" ? `Disabling ${file.path}...` : `Activating ${file.path}...`);
+    setLibraryManagedData((previous) => {
+      if (!previous?.files) return previous;
+      return {
+        ...previous,
+        files: previous.files.map((entry) => (
+          entry.path === file.path
+            ? { ...entry, uploadStatus: pendingStatus, embedded: action === "activate" }
+            : entry
+        )),
+      };
+    });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: file.path, action }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "File status update failed.");
+      }
+      setLibraryNotice(action === "disable" ? `Disabled ${file.path}.` : `Activated ${file.path}.`);
+      await refreshStatus();
+    } catch (error) {
+      setLibraryNotice(error.message || "File status update failed.");
+      await refreshStatus();
+    }
+  }
+
   async function sendRawPrompt(rawPrompt, promptFiles = []) {
     const prompt = String(rawPrompt || "").trim();
     const isSlashCommand = prompt.startsWith("/");
@@ -726,8 +763,10 @@ function App() {
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
-  const fileUploadIconPath = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zm0 1.5L18.5 9H14zM11 17v-4.6l-1.7 1.7-1.4-1.4L12 8.6l4.1 4.1-1.4 1.4-1.7-1.7V17z";
-  const trashIconPath = "M9 3h6l1 2h4v2H4V5h4zm1 6h2v8h-2zm4 0h2v8h-2zM7 9h2v8H7z";
+  const fileUploadIconPath = "M11 18h2v-8h3l-4-4-4 4h3zm-6 2h14v-2H5z";
+  const trashIconPath = "M9 3h6l1.4 2H20a1 1 0 1 1 0 2h-1v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4a1 1 0 1 1 0-2h3.6zM7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7zm3 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1m4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1";
+  const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
+  const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
@@ -958,18 +997,32 @@ function App() {
                   );
                 })(),
                 React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
-                file.canDelete
-                  ? React.createElement(
+                React.createElement(
+                  "div",
+                  { className: "library-row-actions" },
+                  React.createElement(
+                    "button",
+                    {
+                      type: "button",
+                      className: "library-toggle-button",
+                      "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
+                      onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
+                      disabled: !file.canDelete,
+                    },
+                    icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                  ),
+                  React.createElement(
                     "button",
                     {
                       type: "button",
                       className: "library-delete-button",
                       "aria-label": `Delete ${file.path}`,
                       onClick: () => setDeleteConfirmFile(file),
+                      disabled: !file.canDelete,
                     },
                     icon(trashIconPath)
                   )
-                  : React.createElement("span", null, "—")
+                )
               ))
             )
           )

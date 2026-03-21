@@ -163,16 +163,32 @@ body {
   font-size: 0.7rem;
   line-height: 1.2;
 }
+.library-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.library-toggle-button,
 .library-delete-button {
   border: none;
   background: transparent;
-  color: #dc2626;
   cursor: pointer;
-  padding: 0.18rem;
+  padding: 0.3rem;
   line-height: 0;
 }
+.library-toggle-button { color: #475569; }
+.library-toggle-button:hover { color: #1f2937; }
+.library-toggle-button:disabled,
+.library-delete-button:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+.library-delete-button {
+  color: #dc2626;
+}
 .library-delete-button:hover { color: #b91c1c; }
-.library-delete-button .icon { width: 0.95rem; height: 0.95rem; }
+.library-toggle-button .icon,
+.library-delete-button .icon { width: 1.2rem; height: 1.2rem; }
 .library-delete-modal {
   width: min(92vw, 420px);
   background: #fff;

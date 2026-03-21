@@ -267,6 +267,18 @@ export async function markManagedLibraryFileDeleted(filePath) {
   );
 }
 
+export async function setManagedLibraryFileStatus(filePath, status) {
+  const result = await dbQuery(
+    `UPDATE library_managed_files
+     SET upload_status = $2,
+         updated_at = NOW()
+     WHERE file_path = $1
+     RETURNING file_path, upload_status`,
+    [filePath, status]
+  );
+  return result.rows[0] || null;
+}
+
 export async function getManagedLibraryFile(filePath) {
   const result = await dbQuery(
     `SELECT file_path, original_name, source, upload_status, size_bytes, uploaded_at, embedded_at, last_error, last_job_id, updated_at
@@ -297,6 +309,7 @@ export async function listManagedLibraryFilesWithStatus() {
        f.embedded
      FROM library_managed_files m
      LEFT JOIN file_metadata f ON f.file_path = m.file_path
+     WHERE m.upload_status <> 'deleted'
      ORDER BY m.updated_at DESC, m.file_path ASC`
   );
   return result.rows;
