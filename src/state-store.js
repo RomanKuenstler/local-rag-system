@@ -235,8 +235,8 @@ export async function markManagedLibraryFilesStatus(filePaths, status, { jobId =
     `UPDATE library_managed_files
      SET upload_status = $2,
          embedded_at = CASE WHEN $2 = 'ready' THEN NOW() ELSE embedded_at END,
-         last_error = CASE WHEN $3 IS NULL THEN last_error ELSE $3 END,
-         last_job_id = COALESCE($4, last_job_id),
+         last_error = CASE WHEN $3::text IS NULL THEN last_error ELSE $3::text END,
+         last_job_id = COALESCE($4::bigint, last_job_id),
          updated_at = NOW()
      WHERE file_path = ANY($1)`,
     [filePaths, status, error, jobId]
