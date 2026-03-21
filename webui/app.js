@@ -1180,6 +1180,11 @@ function App() {
       if (payload?.activeChatId) {
         await loadMessagesFromDb(payload.activeChatId).catch(() => setMessages([]));
       }
+      setDialogTabPanels((previous) => {
+        const nextPanels = { ...previous };
+        delete nextPanels.archive;
+        return nextPanels;
+      });
       await refreshArchiveTabIfOpen();
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
@@ -1212,6 +1217,11 @@ function App() {
       } else {
         setMessages([]);
       }
+      setDialogTabPanels((previous) => {
+        const nextPanels = { ...previous };
+        delete nextPanels.archive;
+        return nextPanels;
+      });
       await refreshArchiveTabIfOpen();
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
@@ -1240,6 +1250,11 @@ function App() {
         throw new Error(payload?.error || "Failed to unarchive chat");
       }
       await refreshChats({ preferredChatId: activeChatId });
+      setDialogTabPanels((previous) => {
+        const nextPanels = { ...previous };
+        delete nextPanels.archive;
+        return nextPanels;
+      });
       await refreshArchiveTabIfOpen();
     } catch (error) {
       setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
@@ -1375,6 +1390,21 @@ function App() {
                       },
                       icon(renameIconPath),
                       React.createElement("span", null, "Rename")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        onClick: () => setOpenChatMenuId(null),
+                      },
+                      icon(downloadIconPath),
+                      React.createElement("span", null, "Download")
                     )
                   ),
                   React.createElement(
