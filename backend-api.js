@@ -1,6 +1,11 @@
 import { ensureDatabaseReady, pingDatabase } from "./src/db.js";
 import http from "http";
-import { deleteManagedLibraryFile, listManagedLibraryFiles, saveManagedLibraryFile } from "./src/library-service.js";
+import {
+  deleteManagedLibraryFile,
+  listManagedLibraryFiles,
+  saveManagedLibraryFile,
+  toggleManagedLibraryFile,
+} from "./src/library-service.js";
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
@@ -11,7 +16,7 @@ function json(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(payload));
@@ -46,7 +51,7 @@ async function proxyRetriever({ req, res, targetPath }) {
   res.writeHead(upstreamResponse.status, {
     "Content-Type": contentType,
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(text);
@@ -152,6 +157,35 @@ async function handleLibraryDelete(url, res) {
   json(res, 200, { ok: true, path: result.path });
 }
 
+async function handleLibraryToggle(req, res) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const filePath = String(body.path || "");
+  const action = String(body.action || "").toLowerCase();
+  if (!filePath) {
+    json(res, 400, { ok: false, error: "Missing 'path' in request body." });
+    return;
+  }
+  if (!["disable", "activate"].includes(action)) {
+    json(res, 400, { ok: false, error: "Action must be either 'disable' or 'activate'." });
+    return;
+  }
+
+  const result = await toggleManagedLibraryFile(filePath, action === "activate");
+  if (!result.updated) {
+    json(res, 404, { ok: false, error: "Managed file not found." });
+    return;
+  }
+  json(res, 200, { ok: true, file: result });
+}
+
 async function handleLibraryList(res) {
   const files = await listManagedLibraryFiles();
   json(res, 200, {
@@ -203,6 +237,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "PATCH" && url.pathname === "/api/library/files") {
+      await handleLibraryToggle(req, res);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/messages") {
       await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages") });
       return;
@@ -238,5 +277,5 @@ await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });

@@ -5,6 +5,7 @@ import {
   getManagedLibraryFile,
   listManagedLibraryFilesWithStatus,
   markManagedLibraryFileDeleted,
+  setManagedLibraryFileStatus,
   upsertManagedLibraryFile,
 } from "./state-store.js";
 
@@ -126,4 +127,23 @@ export async function listManagedLibraryFiles() {
     embedded: row.embedded,
     updatedAt: row.updated_at,
   }));
+}
+
+export async function toggleManagedLibraryFile(filePath, enabled) {
+  const file = await getManagedLibraryFile(filePath);
+  if (!file || file.upload_status === "deleted") {
+    return { updated: false, reason: "not_found" };
+  }
+
+  const nextStatus = enabled ? "uploaded" : "disabled";
+  const updated = await setManagedLibraryFileStatus(file.file_path, nextStatus);
+  if (!updated) {
+    return { updated: false, reason: "not_found" };
+  }
+
+  return {
+    updated: true,
+    path: updated.file_path,
+    uploadStatus: updated.upload_status,
+  };
 }

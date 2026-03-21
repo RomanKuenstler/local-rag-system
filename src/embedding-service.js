@@ -21,6 +21,7 @@ import {
   clearManagedLibraryFileErrors,
   getEmbeddingStatus,
   getIndexStateMap,
+  listManagedLibraryFilesWithStatus,
   markManagedLibraryFilesStatus,
   markIndexingFinished,
   recordIndexingJobFile,
@@ -181,6 +182,14 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
 
     const files = await readEmbeddableFiles();
     logger(`Files found: ${files.length}`);
+    const managedFiles = await listManagedLibraryFilesWithStatus();
+    const disabledPaths = new Set(
+      managedFiles
+        .filter((file) => file.upload_status === "disabled")
+        .map((file) => file.file_path)
+    );
+    const activeFiles = files.filter((file) => !disabledPaths.has(file.relativePath));
+    const activeFilePathSet = new Set(activeFiles.map((file) => file.relativePath));
 
     const indexState = await getIndexStateMap();
 
@@ -201,10 +210,12 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
       return summary;
     }
 
-    const changedFiles = files.filter((file) => indexState[file.relativePath] !== file.hash);
+    const changedFiles = activeFiles.filter((file) => indexState[file.relativePath] !== file.hash);
     const removedFiles = Object.keys(indexState).filter(
-      (relativePath) => !files.some((file) => file.relativePath === relativePath)
+      (relativePath) => !activeFilePathSet.has(relativePath)
     );
+    const disabledRemovedFiles = removedFiles.filter((filePath) => disabledPaths.has(filePath));
+    const deletedRemovedFiles = removedFiles.filter((filePath) => !disabledPaths.has(filePath));
 
     logger(`Changed/new files: ${changedFiles.length}`);
     logger(`Removed files: ${removedFiles.length}`);
@@ -257,7 +268,8 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
           action: "delete",
           status: "success",
         });
-        await markManagedLibraryFilesStatus([removedFile], "deleted", { jobId });
+        const removalStatus = disabledPaths.has(removedFile) ? "disabled" : "deleted";
+        await markManagedLibraryFilesStatus([removedFile], removalStatus, { jobId });
       } catch (error) {
         console.error(`Failed removing ${removedFile}: ${error.message}`);
         await recordIndexingJobFile({
@@ -341,6 +353,8 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
       removedFiles: [...removedFiles],
       indexedCount,
       removedCount,
+      disabledRemovedCount: disabledRemovedFiles.length,
+      deletedRemovedCount: deletedRemovedFiles.length,
       skipped: false,
     };
 

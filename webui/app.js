@@ -452,6 +452,43 @@ function App() {
     }
   }
 
+  async function toggleLibraryFile(file, action) {
+    if (!file?.path || !["disable", "activate"].includes(action)) {
+      return;
+    }
+
+    const pendingStatus = action === "disable" ? "removing" : "embedding";
+    setLibraryNotice(action === "disable" ? `Disabling ${file.path}...` : `Activating ${file.path}...`);
+    setLibraryManagedData((previous) => {
+      if (!previous?.files) return previous;
+      return {
+        ...previous,
+        files: previous.files.map((entry) => (
+          entry.path === file.path
+            ? { ...entry, uploadStatus: pendingStatus, embedded: action === "activate" }
+            : entry
+        )),
+      };
+    });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: file.path, action }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "File status update failed.");
+      }
+      setLibraryNotice(action === "disable" ? `Disabled ${file.path}.` : `Activated ${file.path}.`);
+      await refreshStatus();
+    } catch (error) {
+      setLibraryNotice(error.message || "File status update failed.");
+      await refreshStatus();
+    }
+  }
+
   async function sendRawPrompt(rawPrompt, promptFiles = []) {
     const prompt = String(rawPrompt || "").trim();
     const isSlashCommand = prompt.startsWith("/");
@@ -728,6 +765,8 @@ function App() {
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
   const fileUploadIconPath = "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zm0 1.5L18.5 9H14zM11 17v-4.6l-1.7 1.7-1.4-1.4L12 8.6l4.1 4.1-1.4 1.4-1.7-1.7V17z";
   const trashIconPath = "M9 3h6l1 2h4v2H4V5h4zm1 6h2v8h-2zm4 0h2v8h-2zM7 9h2v8H7z";
+  const eyeIconPath = "M12 5c5.5 0 9 5.7 9 7s-3.5 7-9 7-9-5.7-9-7 3.5-7 9-7m0 2c-3.9 0-6.5 3.7-6.9 5 .4 1.3 3 5 6.9 5s6.5-3.7 6.9-5c-.4-1.3-3-5-6.9-5m0 2.2A2.8 2.8 0 1 1 9.2 12 2.8 2.8 0 0 1 12 9.2";
+  const eyeOffIconPath = "m3 4.3 1.4-1.4 16.3 16.3-1.4 1.4-3.2-3.2A9.7 9.7 0 0 1 12 19c-5.5 0-9-5.7-9-7a11.8 11.8 0 0 1 3.5-4.8zm5.1 5.1a2.8 2.8 0 0 0 3.8 3.8zm8.2 2.2-1.6-1.6a2.8 2.8 0 0 1-3.7 3.7l-1.5-1.5A2.8 2.8 0 0 1 11.8 9l-1.2-1.2A4.8 4.8 0 0 1 17 12q0 .3-.1.6m3.5.4a11.7 11.7 0 0 0-4.2-5l-1.5 1.5A9.2 9.2 0 0 1 18.9 12zM12 7c.5 0 1 .1 1.5.2L12 5C6.5 5 3 10.7 3 12q0 .4.2 1.1l1.6-1.6C5.7 9.9 8.2 7 12 7";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
@@ -959,15 +998,27 @@ function App() {
                 })(),
                 React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
                 file.canDelete
-                  ? React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "library-delete-button",
-                      "aria-label": `Delete ${file.path}`,
-                      onClick: () => setDeleteConfirmFile(file),
-                    },
-                    icon(trashIconPath)
+                  ? React.createElement(React.Fragment, null,
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "library-delete-button",
+                        "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
+                        onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
+                      },
+                      icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "library-delete-button",
+                        "aria-label": `Delete ${file.path}`,
+                        onClick: () => setDeleteConfirmFile(file),
+                      },
+                      icon(trashIconPath)
+                    )
                   )
                   : React.createElement("span", null, "—")
               ))
