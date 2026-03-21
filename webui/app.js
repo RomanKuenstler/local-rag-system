@@ -1022,19 +1022,28 @@ function App() {
         { className: "side-nav-top" },
         React.createElement(
           "button",
-          { type: "button", className: "side-nav-item primary", onClick: createNewChat },
+          { type: "button", className: "side-nav-item", onClick: createNewChat },
           icon(plusChatIconPath),
           React.createElement("span", null, "New chat")
         ),
         React.createElement(
           "button",
-          { type: "button", className: "side-nav-item", onClick: openLibraryPage },
-          icon(libraryIconPath),
-          React.createElement("span", null, "Library")
+          {
+            type: "button",
+            className: `side-nav-item${activeView === "library" ? " active" : ""}`,
+            onClick: activeView === "library" ? openChatPage : openLibraryPage,
+          },
+          icon(activeView === "library" ? chatIconPath : libraryIconPath),
+          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
         ),
         React.createElement(
           "button",
-          { type: "button", className: "side-nav-item", onClick: openSettingsDialog, disabled: isSending || !isEmbeddingReady },
+          {
+            type: "button",
+            className: `side-nav-item${panelData?.command === "/config" ? " active" : ""}`,
+            onClick: openSettingsDialog,
+            disabled: isSending || !isEmbeddingReady,
+          },
           icon(settingsIconPath),
           React.createElement("span", null, "Settings")
         )
