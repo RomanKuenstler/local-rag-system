@@ -129,6 +129,7 @@ function App() {
   const promptFileInputRef = useRef(null);
   const libraryFileInputRef = useRef(null);
   const menuRef = useRef(null);
+  const volatileChatCreatePromiseRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
@@ -226,10 +227,7 @@ function App() {
       })
       : [];
 
-    setMessages((previous) => {
-      const volatileMessages = previous.filter((message) => message.isVolatile);
-      return normalized.concat(volatileMessages);
-    });
+    setMessages(normalized);
   }
 
   async function refreshChats({ preferredChatId = null } = {}) {
@@ -610,19 +608,24 @@ function App() {
 
     if (volatileChat && chatIdRef.current === volatileChat.id) {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/chats`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: sessionIdRef.current,
-            chatId: volatileChat.id,
-            name: volatileChat.name,
-          }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(payload?.error || "Failed to create chat");
+        if (!volatileChatCreatePromiseRef.current) {
+          volatileChatCreatePromiseRef.current = (async () => {
+            const response = await fetch(`${API_BASE_URL}/api/chats`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionId: sessionIdRef.current,
+                chatId: volatileChat.id,
+                name: volatileChat.name,
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok && response.status !== 409) {
+              throw new Error(payload?.error || "Failed to create chat");
+            }
+          })();
         }
+        await volatileChatCreatePromiseRef.current;
         setVolatileChat(null);
         await refreshChats({ preferredChatId: volatileChat.id });
       } catch (error) {
@@ -631,6 +634,8 @@ function App() {
           isVolatile: true,
         })));
         return;
+      } finally {
+        volatileChatCreatePromiseRef.current = null;
       }
     }
 
@@ -1138,12 +1143,33 @@ function App() {
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
     }
-    const response = await fetch(
+    let response = await fetch(
       `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`
     );
     if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload?.error || "Failed to download chat.");
+      const [chatListResponse, messagesResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`),
+        fetch(`${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`),
+      ]);
+      const chatListPayload = await chatListResponse.json().catch(() => ({}));
+      const messagesPayload = await messagesResponse.json().catch(() => ({}));
+      if (!chatListResponse.ok || !messagesResponse.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "Failed to download chat.");
+      }
+      const selectedChat = Array.isArray(chatListPayload.chats)
+        ? chatListPayload.chats.find((entry) => entry.id === chat.id)
+        : null;
+      const fallbackPayload = {
+        exportedAt: new Date().toISOString(),
+        sessionId: sessionIdRef.current,
+        chat: selectedChat || { id: chat.id, name: chat.name, status: "active" },
+        messages: Array.isArray(messagesPayload.messages) ? messagesPayload.messages : [],
+      };
+      response = new Response(JSON.stringify(fallbackPayload, null, 2), {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
     }
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
