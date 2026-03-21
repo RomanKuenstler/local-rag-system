@@ -200,6 +200,113 @@ function extractTextFromHtml(html) {
   return deduplicateConsecutiveBlocks(blocks).join("\n\n");
 }
 
+function extractTextFromXhtml(xhtml) {
+  if (!xhtml || xhtml.trim() === "") {
+    return "";
+  }
+
+  const $ = cheerio.load(xhtml, { xmlMode: true, decodeEntities: true });
+
+  $(
+    [
+      "script",
+      "style",
+      "noscript",
+      "svg",
+      "canvas",
+      "iframe",
+      "nav",
+      "footer",
+      "aside",
+      "form",
+      "button",
+      "input",
+      "select",
+      "textarea",
+      "img",
+      "picture",
+      "video",
+      "audio",
+      "source",
+      "meta",
+      "link",
+      "object",
+      "embed",
+      "advertisement",
+    ].join(", ")
+  ).remove();
+
+  const root = $("body").first().length > 0 ? $("body").first() : $.root();
+  const blocks = [];
+  const selectors = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote", "pre", "table"].join(", ");
+
+  root.find(selectors).each((_, element) => {
+    const $el = $(element);
+    const tagName = (element.tagName || "").toLowerCase();
+    if (!tagName) {
+      return;
+    }
+
+    let text = "";
+    if (tagName === "table") {
+      const rows = [];
+      $el.find("tr").each((_, row) => {
+        const cells = [];
+        $(row)
+          .find("th, td")
+          .each((_, cell) => {
+            const cellText = normalizeInlineText($(cell).text());
+            if (cellText) {
+              cells.push(cellText);
+            }
+          });
+        if (cells.length > 0) {
+          rows.push(cells.join(" | "));
+        }
+      });
+      if (rows.length > 0) {
+        text = rows.join("\n");
+      }
+    } else if (tagName === "pre") {
+      text = normalizePreformattedText($el.text());
+      if (text) {
+        text = `\`\`\`\n${text}\n\`\`\``;
+      }
+    } else {
+      text = normalizeInlineText($el.text());
+    }
+
+    if (!text) {
+      return;
+    }
+
+    if (/^h[1-6]$/.test(tagName)) {
+      blocks.push(`${"#".repeat(Number(tagName[1]))} ${text}`);
+      return;
+    }
+    if (tagName === "li") {
+      blocks.push(`- ${text}`);
+      return;
+    }
+    if (tagName === "blockquote") {
+      blocks.push(`> ${text}`);
+      return;
+    }
+    blocks.push(text);
+  });
+
+  if (blocks.length > 0) {
+    return deduplicateConsecutiveBlocks(blocks).join("\n\n");
+  }
+
+  const fallbackText = normalizeInlineText(root.text());
+  if (fallbackText) {
+    return fallbackText;
+  }
+
+  return normalizeInlineText($.root().text());
+}
+
 function parseCsvLine(line) {
   const cells = [];
   let current = "";
@@ -304,7 +411,7 @@ function decodeZipEntry(entry) {
     return "";
   }
 
-  return data.toString("utf8");
+  return data.toString("utf8").replace(/^\uFEFF/, "");
 }
 
 function normalizeZipPath(filePath) {
@@ -428,15 +535,21 @@ async function extractTextFromEpub(filePath) {
 
   const containerEntry = getZipEntry(entryMap, "META-INF/container.xml");
   if (!containerEntry) {
+    console.warn(`[EPUB] Missing META-INF/container.xml in ${filePath}`);
     return "";
   }
 
   const containerXml = decodeZipEntry(containerEntry);
   const containerDoc = cheerio.load(containerXml, { xmlMode: true });
   const rootFilePath = containerDoc("rootfile").first().attr("full-path");
+  if (!rootFilePath) {
+    console.warn(`[EPUB] No rootfile path in container.xml for ${filePath}`);
+    return "";
+  }
 
   const packageEntry = getZipEntry(entryMap, rootFilePath);
   if (!rootFilePath || !packageEntry) {
+    console.warn(`[EPUB] Package file not found (${rootFilePath || "unknown"}) in ${filePath}`);
     return "";
   }
 
@@ -479,6 +592,9 @@ async function extractTextFromEpub(filePath) {
 
     spineEntries.push(manifestItem);
   });
+  if (spineEntries.length === 0) {
+    console.warn(`[EPUB] No usable spine entries in ${filePath}`);
+  }
 
   const sections = [];
 
@@ -490,8 +606,14 @@ async function extractTextFromEpub(filePath) {
       continue;
     }
 
-    const chapterText = extractTextFromHtml(decodeZipEntry(chapterEntry));
+    const rawChapter = decodeZipEntry(chapterEntry);
+    let chapterText = extractTextFromXhtml(rawChapter);
     if (!chapterText) {
+      const $fallback = cheerio.load(rawChapter, { xmlMode: true, decodeEntities: true });
+      chapterText = normalizeInlineText($fallback("body").text() || $fallback.root().text());
+    }
+    if (!chapterText) {
+      console.warn(`[EPUB] Empty extracted text for chapter ${chapterPath} in ${filePath}`);
       continue;
     }
 
@@ -514,7 +636,12 @@ async function extractTextFromEpub(filePath) {
         continue;
       }
 
-      const fallbackText = extractTextFromHtml(decodeZipEntry(fallbackEntry));
+      const rawFallbackChapter = decodeZipEntry(fallbackEntry);
+      let fallbackText = extractTextFromXhtml(rawFallbackChapter);
+      if (!fallbackText) {
+        const $fallback = cheerio.load(rawFallbackChapter, { xmlMode: true, decodeEntities: true });
+        fallbackText = normalizeInlineText($fallback("body").text() || $fallback.root().text());
+      }
       if (!fallbackText || shouldSkipEpubFrontMatter(entryName, fallbackText, 99)) {
         continue;
       }
