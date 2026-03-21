@@ -307,6 +307,43 @@ function decodeZipEntry(entry) {
   return data.toString("utf8");
 }
 
+function normalizeZipPath(filePath) {
+  if (!filePath) {
+    return "";
+  }
+
+  return path.posix
+    .normalize(String(filePath).replace(/\\/g, "/"))
+    .replace(/^\/+/, "");
+}
+
+function getZipEntry(entryMap, requestedPath) {
+  const normalizedPath = normalizeZipPath(requestedPath);
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const candidates = [normalizedPath];
+
+  try {
+    const decoded = decodeURIComponent(normalizedPath);
+    if (!candidates.includes(decoded)) {
+      candidates.push(decoded);
+    }
+  } catch {
+    // Ignore malformed URI sequences and keep best-effort lookup.
+  }
+
+  for (const candidate of candidates) {
+    const entry = entryMap.get(candidate);
+    if (entry) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
 function removeRepeatedBookChrome(sections) {
   if (!Array.isArray(sections) || sections.length < 2) {
     return sections;
@@ -387,9 +424,9 @@ function shouldSkipEpubFrontMatter(href, sectionText, sectionIndex) {
 async function extractTextFromEpub(filePath) {
   const zip = new AdmZip(filePath);
   const entries = zip.getEntries();
-  const entryMap = new Map(entries.map((entry) => [entry.entryName, entry]));
+  const entryMap = new Map(entries.map((entry) => [normalizeZipPath(entry.entryName), entry]));
 
-  const containerEntry = entryMap.get("META-INF/container.xml");
+  const containerEntry = getZipEntry(entryMap, "META-INF/container.xml");
   if (!containerEntry) {
     return "";
   }
@@ -398,38 +435,57 @@ async function extractTextFromEpub(filePath) {
   const containerDoc = cheerio.load(containerXml, { xmlMode: true });
   const rootFilePath = containerDoc("rootfile").first().attr("full-path");
 
-  if (!rootFilePath || !entryMap.has(rootFilePath)) {
+  const packageEntry = getZipEntry(entryMap, rootFilePath);
+  if (!rootFilePath || !packageEntry) {
     return "";
   }
 
-  const packageDir = path.posix.dirname(rootFilePath);
-  const packageXml = decodeZipEntry(entryMap.get(rootFilePath));
+  const packagePath = normalizeZipPath(rootFilePath);
+  const packageDir = path.posix.dirname(packagePath);
+  const packageXml = decodeZipEntry(packageEntry);
   const packageDoc = cheerio.load(packageXml, { xmlMode: true });
 
   const manifestById = new Map();
   packageDoc("manifest > item").each((_, item) => {
     const id = packageDoc(item).attr("id");
     const href = packageDoc(item).attr("href");
-    if (id && href) {
-      manifestById.set(id, href);
+    const mediaType = String(packageDoc(item).attr("media-type") || "").trim().toLowerCase();
+    const properties = String(packageDoc(item).attr("properties") || "").trim().toLowerCase();
+
+    if (id && href && mediaType) {
+      manifestById.set(id, {
+        href,
+        mediaType,
+        properties,
+      });
     }
   });
 
-  const spineHrefs = [];
+  const spineEntries = [];
   packageDoc("spine > itemref").each((_, itemref) => {
     const idref = packageDoc(itemref).attr("idref");
-    const href = idref ? manifestById.get(idref) : null;
-    if (href) {
-      spineHrefs.push(href);
+    const manifestItem = idref ? manifestById.get(idref) : null;
+    if (!manifestItem) {
+      return;
     }
+
+    if (!["application/xhtml+xml", "text/html"].includes(manifestItem.mediaType)) {
+      return;
+    }
+
+    if (manifestItem.properties.includes("nav")) {
+      return;
+    }
+
+    spineEntries.push(manifestItem);
   });
 
   const sections = [];
 
-  for (let index = 0; index < spineHrefs.length; index++) {
-    const href = spineHrefs[index];
-    const chapterPath = path.posix.normalize(path.posix.join(packageDir, href));
-    const chapterEntry = entryMap.get(chapterPath);
+  for (let index = 0; index < spineEntries.length; index++) {
+    const manifestItem = spineEntries[index];
+    const chapterPath = normalizeZipPath(path.posix.join(packageDir, manifestItem.href));
+    const chapterEntry = getZipEntry(entryMap, chapterPath);
     if (!chapterEntry) {
       continue;
     }
@@ -439,7 +495,7 @@ async function extractTextFromEpub(filePath) {
       continue;
     }
 
-    if (shouldSkipEpubFrontMatter(href, chapterText, index)) {
+    if (shouldSkipEpubFrontMatter(chapterPath, chapterText, index)) {
       continue;
     }
 
@@ -453,7 +509,7 @@ async function extractTextFromEpub(filePath) {
       .sort();
 
     for (const entryName of fallbackEntries) {
-      const fallbackEntry = entryMap.get(entryName);
+      const fallbackEntry = getZipEntry(entryMap, entryName);
       if (!fallbackEntry) {
         continue;
       }
