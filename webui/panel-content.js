@@ -12,20 +12,26 @@ export function renderPanelContent({
   embedderStatus,
   isSending,
   isEmbeddingReady,
+  disabledAssistantModes = [],
   submitConfigChange,
   applyPersonalizationChange,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
+  const disabledAssistantModeSet = new Set(
+    Array.isArray(disabledAssistantModes)
+      ? disabledAssistantModes.map((modeId) => String(modeId || "").trim().toLowerCase())
+      : []
+  );
 
-  const renderSelectableModeCard = ({ key, id, description, isActive, onSelect }) => React.createElement(
+  const renderSelectableModeCard = ({ key, id, description, isActive, onSelect, isDisabled = false }) => React.createElement(
     "button",
     {
       key,
       type: "button",
       className: `assistant-mode-card mode-select-button ${isActive ? "active" : ""}`,
       onClick: () => onSelect(id),
-      disabled: interactionDisabled,
+      disabled: interactionDisabled || isDisabled,
       "aria-pressed": isActive,
     },
     React.createElement("strong", null, id),
@@ -233,6 +239,7 @@ export function renderPanelContent({
           id: mode.id,
           description: mode.description,
           isActive: mode.id === currentAssistantMode,
+          isDisabled: disabledAssistantModeSet.has(String(mode.id || "").trim().toLowerCase()),
           onSelect: (id) => applyPersonalizationChange("assistant", id),
         }))
       )

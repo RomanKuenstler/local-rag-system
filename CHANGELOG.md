@@ -1,5 +1,24 @@
 # CHANGELOG
 
+### Chain-impr recap (vs main)
+
+#### Added
+- Multi-chat lifecycle in WebUI and APIs, including rename/download/archive/restore/delete workflows.
+- Unified Preferences dialog tabs (Settings, Personalization, Info, Archive, Help).
+- Header assistant-mode selector with frontend chain-stage feedback for refine mode.
+- EPUB ingestion support across upload/embedding flows.
+- CSV prompt attachment support in WebUI prompt uploads.
+
+#### Changed
+- Refined assistant-mode prompting and chain behavior (including updated refine prompt steps and global-layer adjustments).
+- Improved frontend handling for refine-mode pending states and chain-stage transitions.
+- Temporarily disabled selecting `thinking` assistant mode in UI while keeping it visible.
+- Performed broader frontend helper extraction/refactors (`chat-export`, attachment validation rules, personalization rendering flow).
+
+#### Fixed
+- Empty final-pass refine responses no longer disappear in chat; draft fallback is used when needed.
+- Multiple EPUB parser reliability edge cases (XHTML handling, sparse chapter extraction, OPF path handling, cleanup behavior).
+
 ### Added
 - Added `DEVELOPERS.md` with a maintainer-focused, detailed folder/file map and implementation guide.
 - Added chat export helper module `webui/chat-export.js` to keep frontend export/download logic modular.
@@ -19,6 +38,9 @@
 - Mapped `./upload` into the retriever container (`/app/upload`) so host-side files are immediately available to `/upload`.
 
 ### Changed
+- Temporarily disabled selecting `thinking` assistant mode in both the chat-header assistant mode dropdown and the Preferences → Personalization assistant mode list, while still showing it in the UI.
+- Refactored WebUI assistant-mode availability checks to use shared helper logic and centralized disabled-mode configuration.
+- Removed `wishlist.md` from the repository.
 - Refactored WebUI chat export/download logic out of `webui/app.js` into reusable helper functions.
 - Updated README and DOCUMENTATION to include current chat lifecycle features (rename/download/archive flows) and developer docs pointer.
 - Expanded `/info` system details to include Postgres connection target and local state-file paths.

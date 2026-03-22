@@ -117,3 +117,29 @@ This file is for maintainers/contributors who need a practical map of the codeba
 - Preferences includes Archive tab with archived chat management.
 - New chat starts as **volatile** in frontend and is persisted on first successful send.
 - Chat download uses backend export endpoint, with frontend fallback export composition.
+- Assistant mode options are shown in both the chat header menu and Preferences → Personalization; `thinking` is intentionally displayed but temporarily disabled in both places.
+
+---
+
+## 6) Chain-impr branch recap (vs main)
+
+Major implementation themes completed on this branch:
+
+- **Assistant mode evolution**
+  - Added header-level assistant mode selector in chat view.
+  - Added refine-chain stage UI feedback (`drafting` / `refining`) and pending-text updates.
+  - Updated refine mode prompt-chain behavior and fallback handling when final output is empty.
+
+- **Chat lifecycle and exports**
+  - Added persisted multi-chat lifecycle with rename, archive, activate, delete, and download flows.
+  - Added dedicated frontend chat export helper module and backend export endpoint integration.
+
+- **Content/ingestion pipeline**
+  - Added `.epub` support for embedding and upload flows.
+  - Hardened EPUB parsing against sparse chapter markup, XHTML media types, nested OPF paths, and cleanup edge cases.
+  - Added `.csv` support for prompt attachments while narrowing unsupported attachment types.
+
+- **UI + docs cleanup**
+  - Consolidated Preferences dialog behavior and personalization rendering.
+  - Performed ongoing frontend helper extraction/refactors to reduce logic duplication.
+  - Updated README / DOCUMENTATION / DEVELOPERS / CHANGELOG to reflect current behavior.

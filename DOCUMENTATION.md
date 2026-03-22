@@ -107,9 +107,11 @@ The system consists of several components:
 
 ### User
 
-The user interacts with the system via the terminal.
+The user can interact with the system via:
+- the browser WebUI (`webui` service), or
+- API calls to the backend/retriever services.
 
-You can ask questions about the data stored in the knowledge base.
+Terminal usage is still supported for local debugging workflows.
 
 ---
 
@@ -117,11 +119,15 @@ You can ask questions about the data stored in the knowledge base.
 
 Files placed inside the `data/` directory are used as knowledge sources.
 
-Currently supported formats:
+Currently supported formats include:
 
 ```
 .md
 .txt
+.html
+.htm
+.pdf
+.epub
 ```
 
 These files are:
@@ -130,6 +136,8 @@ These files are:
 2. Split into chunks
 3. Embedded into vectors
 4. Stored in a vector database
+
+For one-time prompt attachments in chat, `.csv` is also supported (prompt-level, not long-term library indexing).
 
 ---
 
