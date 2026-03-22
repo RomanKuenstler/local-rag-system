@@ -34,6 +34,7 @@ const ASSISTANT_MODE_OPTIONS = [
   { id: "refine", label: "Refine", description: "For getting refined answers" },
   { id: "thinking", label: "Thinking", description: "For complex questions" },
 ];
+const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv"],
@@ -95,6 +96,11 @@ function getMenuTabById(tabId) {
 function getAssistantModeMeta(modeId) {
   const normalized = String(modeId || "").trim().toLowerCase();
   return ASSISTANT_MODE_OPTIONS.find((mode) => mode.id === normalized) || ASSISTANT_MODE_OPTIONS[0];
+}
+
+function isAssistantModeTemporarilyDisabled(modeId) {
+  const normalized = String(modeId || "").trim().toLowerCase();
+  return TEMPORARILY_DISABLED_ASSISTANT_MODES.has(normalized);
 }
 
 function getPendingAssistantMessage(modeId, chainStage) {
@@ -166,6 +172,10 @@ function App() {
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
   const isRagMode = currentUiMode === "rag";
   const healthState = useMemo(() => getOverallHealth(statusData, filesData), [statusData, filesData]);
+  const disabledAssistantModesList = useMemo(
+    () => Array.from(TEMPORARILY_DISABLED_ASSISTANT_MODES),
+    []
+  );
   const displayedChatList = volatileChat
     ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
     : chatList;
@@ -994,6 +1004,7 @@ function App() {
 
   async function applyPersonalizationChange(kind, selectedId) {
     if (isSending || !isEmbeddingReady) return;
+    if (kind === "assistant" && isAssistantModeTemporarilyDisabled(selectedId)) return;
 
     const command = kind === "assistant"
       ? `/assistant ${selectedId}`
@@ -1483,7 +1494,7 @@ function App() {
                     type: "button",
                     className: `assistant-mode-option${mode.id === selectedAssistantMode.id ? " active" : ""}`,
                     onClick: () => applyPersonalizationChange("assistant", mode.id),
-                    disabled: isSending || !isEmbeddingReady,
+                    disabled: isSending || !isEmbeddingReady || isAssistantModeTemporarilyDisabled(mode.id),
                     role: "menuitemradio",
                     "aria-checked": mode.id === selectedAssistantMode.id ? "true" : "false",
                   },
@@ -2391,6 +2402,7 @@ function App() {
                       embedderStatus,
                       isSending,
                       isEmbeddingReady,
+                      disabledAssistantModes: disabledAssistantModesList,
                       submitConfigChange,
                       applyPersonalizationChange,
                       icon,
@@ -2458,6 +2470,7 @@ function App() {
               embedderStatus,
               isSending,
               isEmbeddingReady,
+              disabledAssistantModes: disabledAssistantModesList,
               submitConfigChange,
               applyPersonalizationChange,
               icon,
