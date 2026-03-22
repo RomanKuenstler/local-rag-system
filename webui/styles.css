@@ -918,7 +918,7 @@ body {
   position: absolute;
   top: calc(100% + 0.35rem);
   right: 0;
-  min-width: 140px;
+  min-width: 240px;
   border: 1px solid #d9dee7;
   border-radius: 12px;
   background: #f8fafc;
@@ -957,6 +957,9 @@ body {
   color: #6b7280;
   font-size: 0.8rem;
   line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .info-row {
