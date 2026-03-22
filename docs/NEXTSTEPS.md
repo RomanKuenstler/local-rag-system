@@ -26,7 +26,7 @@ Also you can ask ChatGPT (or other AIs) for ideas *how to improve your data-sour
 
 > improve the searching for matches in the DB (thats called similarities)
 
-Use ChatGPT (or other AIs) to help you to improve the code (index.js) to search for similarities
+Use ChatGPT (or other AIs) to help you to improve the code (`apps/retriever/api.js`, `apps/retriever/cli.js`, `shared/src/embedding-service.js`) to search for similarities
 For example:
 - always at least 5 similarities (when less > no answer)
 - better score of the similarities (example: higher than 0.7; when lower > no answer)
@@ -36,7 +36,7 @@ For example:
 > improve the creation of chunks from your input files 
 > smaller and better (semantic) chunks will also improve the similarities and so the answer
 
-Use ChatGPT (or other AIs) to help you to improve the code (index.js) to create better Chunks
+Use ChatGPT (or other AIs) to help you to improve the code (`apps/retriever/api.js`, `apps/retriever/cli.js`, `shared/src/embedding-service.js`) to create better Chunks
 Sections in the code:
 - CHUNKS
 - HELPER
@@ -49,7 +49,7 @@ Examples for improving:
 
 > improve the embedding (insert data into DB) process
 
-Use ChatGPT (or other AIs) to help you to improve the code (index.js) for embedding data
+Use ChatGPT (or other AIs) to help you to improve the code (`apps/retriever/api.js`, `apps/retriever/cli.js`, `shared/src/embedding-service.js`) for embedding data
 For example:
 - some meta data is already included but there is still ways to improve this
 - multiple embeddings (different ways of embedding for the same source > better answer; like multiple was of remembering)
@@ -60,7 +60,7 @@ For example:
 
 > enable the system to use other file extensions to embed into the DB
 
-Use ChatGPT (or other AIs) to help you to improve the code (index.js) for embedding other file extensions
+Use ChatGPT (or other AIs) to help you to improve the code (`apps/retriever/api.js`, `apps/retriever/cli.js`, `shared/src/embedding-service.js`) for embedding other file extensions
 For example:
 - .pdf > search/ask for *javascript embed pdf into rag*
 - .docx > search/ask for *javascript embed .docx into rag*
@@ -68,20 +68,24 @@ For example:
 > for the beginning focus only on **text** embedding
 > enable you system to also embed for example images is more difficult (but also possbile)
 
-##  Split up Application
+## Keep service boundaries clean
 
-> it's recommended to split up the system, especially the application (index.js) into two different parts
->
-> 1 - the retriever > this is the application the user talks to and that's responsible for searching similarities etc
-> 2 - the embedding > this is the process of embedding your files/sources into the DB
+> retriever, backend, and embedder are already split into separate services and containers
 
-Use ChatGPT (or other AIs) to help you to split up the code (index.js) into retriever and embedding in own files. And step two is then to also create two separate (docker) containers for this. Here you can also use ChatGPT to help you to modify the compose.yml and Dockerfile for this > that's a easy task, but it highly improves your system
+When you add new features, keep modules close to the service that owns them:
+
+1 - retriever-only code in `apps/retriever/*`
+2 - backend-only code in `apps/backend/*`
+3 - embedder orchestration in `apps/embedder/*`
+4 - only truly reusable logic in `shared/*`
+
+If you move responsibilities across services, update `compose.yml`, `Dockerfile`, and `docs/DEVELOPERS.md` together.
 
 ## External Data-Sources
 
 > you can use external data-sources like websites/weburl for your RAG
 
-Use ChatGPT (or other AIs) to help you to improve the code (index.js) to also use external data-sources
+Use ChatGPT (or other AIs) to help you to improve the code (`apps/retriever/api.js`, `apps/retriever/cli.js`, `shared/src/embedding-service.js`) to also use external data-sources
 For example:
 - weburls > search/ask for *javascript embed weburls into rag*
 

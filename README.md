@@ -40,8 +40,8 @@ Endpoints:
 
 ## Prompt + assistant behavior docs
 
-- `shared/prompts/PROMPTS.md` – high-level prompting principles.
-- `shared/prompts/PROMPTBUILDING.md` – implementation-level prompt assembly pipeline, guardrails layering, assistant mode differences, personalization behavior, and file-level change map.
+- `docs/PROMPTS.md` – high-level prompting principles.
+- `docs/PROMPTBUILDING.md` – implementation-level prompt assembly pipeline, guardrails layering, assistant mode differences, personalization behavior, and file-level change map.
 
 ## Documentation map
 
@@ -61,6 +61,7 @@ Endpoints:
 
 - `apps/` – deployable service entrypoints and UI (`backend`, `retriever`, `embedder`, `webui`).
 - `shared/` – reusable modules and cross-service assets (`src`, `config`, `db`, `prompts`).
+- Service-local helpers now live with each app (for example `apps/backend/library-service.js` and `apps/retriever/ui.js`) to avoid unnecessary cross-service coupling.
 - `docs/` – architecture, changelog, and contributor notes.
 - `scripts/` – helper scripts for content download/prep.
 - `data/`, `migrations/`, `upload/`, `downloaded-html/` – runtime/content assets.

@@ -13,7 +13,7 @@ At `POST /api/prompt`, the retriever pipeline builds the model input in layers:
 5. **Personalization settings** are applied to style/tone instructions.
 6. The final message array is sent to the configured chat model client.
 
-Primary orchestration is in `retriever-api.js`.
+Primary orchestration is in `apps/retriever/api.js`.
 
 ---
 
@@ -23,13 +23,13 @@ Primary orchestration is in `retriever-api.js`.
 
 - **File(s):**
   - `guardrails.md` (policy text maintained by project)
-  - `src/guardrails.js` (loader and system-layer builder)
+  - `shared/src/guardrails.js` (loader and system-layer builder)
 - **Purpose:** project-wide safety/behavior constraints independent of a specific mode.
 - **Change here when:** you want rules that always apply regardless of mode.
 
 ### B. Assistant mode behavior
 
-- **File:** `src/assistant-modes.js`
+- **File:** `shared/src/assistant-modes.js`
 - **Purpose:** mode-specific system instructions and refine-chain prompts.
 - **What is defined there:**
   - `ASSISTANT_MODE_DEFINITIONS` for `simple`, `refine`, `thinking`
@@ -39,7 +39,7 @@ Primary orchestration is in `retriever-api.js`.
 
 ### C. RAG evidence packaging
 
-- **File:** `src/messages.js`
+- **File:** `shared/src/messages.js`
 - **Key builder:** `buildRagContextPackage(...)`
 - **Purpose:** format retrieved chunks, evidence quality, and user question into a task input block the model can consume.
 - **Change here when:** you want different evidence framing, ranking hints, or context text structure.
@@ -47,15 +47,15 @@ Primary orchestration is in `retriever-api.js`.
 ### D. Personalization
 
 - **File(s):**
-  - `src/personalization.js`
-  - persistence access through `src/state-store.js`
-  - surfaced in runtime flow via `retriever-api.js`
+  - `shared/src/personalization.js`
+  - persistence access through `shared/src/state-store.js`
+  - surfaced in runtime flow via `apps/retriever/api.js`
 - **Purpose:** session/user-style controls (tone, warmth, enthusiasm, formatting preferences).
 - **Change here when:** you add/remove personalization options or change how style instructions are generated.
 
 ### E. Runtime prompt assembly and call flow
 
-- **File:** `retriever-api.js`
+- **File:** `apps/retriever/api.js`
 - **Purpose:** joins all layers, handles refine chaining, and dispatches messages to the model.
 - **Change here when:** you need new layer ordering, additional context sources, or different chain orchestration.
 
@@ -107,7 +107,7 @@ When editing prompt templates:
 
 ```bash
 npm run lint
-node --check retriever-api.js src/assistant-modes.js src/messages.js src/guardrails.js src/personalization.js
+node --check apps/retriever/api.js shared/src/assistant-modes.js shared/src/messages.js shared/src/guardrails.js shared/src/personalization.js
 ```
 
 ---

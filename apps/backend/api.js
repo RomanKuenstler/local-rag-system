@@ -5,7 +5,7 @@ import {
   listManagedLibraryFiles,
   saveManagedLibraryFile,
   toggleManagedLibraryFile,
-} from "../../shared/src/library-service.js";
+} from "./library-service.js";
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
