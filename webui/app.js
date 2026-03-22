@@ -64,6 +64,7 @@ const DEFAULT_PERSONALIZATION_PREFERENCES = {
   warm: "default",
   enthusiastic: "default",
   headersAndLists: "default",
+  customInstructions: "",
 };
 const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {
@@ -232,6 +233,8 @@ function App() {
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
+  const [customInstructionsDraft, setCustomInstructionsDraft] = useState("");
+  const [isCustomInstructionsDirty, setIsCustomInstructionsDirty] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -282,26 +285,31 @@ function App() {
     const persistedWarm = String(persistedSettings.warm || "").trim().toLowerCase();
     const persistedEnthusiastic = String(persistedSettings.enthusiastic || "").trim().toLowerCase();
     const persistedHeadersAndLists = String(persistedSettings.headersAndLists || "").trim().toLowerCase();
-    if (!persistedBaseStyleTone && !persistedWarm && !persistedEnthusiastic && !persistedHeadersAndLists) return;
+    const persistedCustomInstructions = String(persistedSettings.customInstructions || "");
     setPersonalizationPreferences((previous) => {
       const nextPreferences = {
         ...previous,
-        ...(persistedBaseStyleTone ? { baseStyleTone: persistedBaseStyleTone } : {}),
-        ...(persistedWarm ? { warm: persistedWarm } : {}),
-        ...(persistedEnthusiastic ? { enthusiastic: persistedEnthusiastic } : {}),
-        ...(persistedHeadersAndLists ? { headersAndLists: persistedHeadersAndLists } : {}),
+        baseStyleTone: persistedBaseStyleTone || DEFAULT_PERSONALIZATION_PREFERENCES.baseStyleTone,
+        warm: persistedWarm || DEFAULT_PERSONALIZATION_PREFERENCES.warm,
+        enthusiastic: persistedEnthusiastic || DEFAULT_PERSONALIZATION_PREFERENCES.enthusiastic,
+        headersAndLists: persistedHeadersAndLists || DEFAULT_PERSONALIZATION_PREFERENCES.headersAndLists,
+        customInstructions: persistedCustomInstructions,
       };
       if (
         previous.baseStyleTone === nextPreferences.baseStyleTone
         && previous.warm === nextPreferences.warm
         && previous.enthusiastic === nextPreferences.enthusiastic
         && previous.headersAndLists === nextPreferences.headersAndLists
+        && previous.customInstructions === nextPreferences.customInstructions
       ) return previous;
       return {
         ...nextPreferences,
       };
     });
-  }, [statusData]);
+    if (!isCustomInstructionsDirty) {
+      setCustomInstructionsDraft(persistedCustomInstructions);
+    }
+  }, [statusData, isCustomInstructionsDirty]);
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -1212,6 +1220,48 @@ function App() {
     } finally {
       setIsSending(false);
       await refreshStatus();
+    }
+  }
+
+  function updateCustomInstructionsDraft(value) {
+    const nextDraft = String(value || "");
+    setCustomInstructionsDraft(nextDraft);
+    setIsCustomInstructionsDirty(nextDraft !== String(personalizationPreferences.customInstructions || ""));
+  }
+
+  async function saveCustomInstructions() {
+    if (isSending || !isEmbeddingReady || !isCustomInstructionsDirty) return;
+    setIsSending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          customInstructions: customInstructionsDraft,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save custom instructions");
+      }
+      const savedCustomInstructions = String(payload?.settings?.customInstructions || "");
+      setPersonalizationPreferences((previous) => ({
+        ...previous,
+        customInstructions: savedCustomInstructions,
+      }));
+      setCustomInstructionsDraft(savedCustomInstructions);
+      setIsCustomInstructionsDirty(false);
+      await refreshStatus();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -2586,6 +2636,10 @@ function App() {
                       disabledAssistantModes: disabledAssistantModesList,
                       submitConfigChange,
                       applyPersonalizationChange,
+                      customInstructionsDraft,
+                      isCustomInstructionsDirty,
+                      updateCustomInstructionsDraft,
+                      saveCustomInstructions,
                       icon,
                     })
                     : React.createElement("p", null, "Select a section.")
@@ -2653,6 +2707,10 @@ function App() {
               disabledAssistantModes: disabledAssistantModesList,
               submitConfigChange,
               applyPersonalizationChange,
+              customInstructionsDraft,
+              isCustomInstructionsDirty,
+              updateCustomInstructionsDraft,
+              saveCustomInstructions,
               icon,
             })
           )

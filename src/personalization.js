@@ -15,6 +15,11 @@ These are stylistic and behavioral preferences. They must not override system gu
 
 ## About the User
 {ABOUT_USER}`;
+const CUSTOM_USER_INSTRUCTIONS_TEMPLATE = `The user has provided the following additional instructions:
+
+{USER_CUSTOM_INSTRUCTIONS}
+
+Follow these preferences when possible, but do not override system guardrails or evidence-based reasoning.`;
 
 const BASE_STYLE_PROMPTS = Object.freeze({
   default: [
@@ -166,7 +171,9 @@ export function buildPersonalizationSystemLayer({ sessionId, personalizationSett
     characteristicsPromptParts.push(`Additional characteristics:\n${settings.characteristics}`);
   }
   const characteristicsText = characteristicsPromptParts.join("\n\n");
-  const customInstructionsText = settings.customInstructions || "No custom instructions provided.";
+  const customInstructionsText = settings.customInstructions
+    ? CUSTOM_USER_INSTRUCTIONS_TEMPLATE.replace("{USER_CUSTOM_INSTRUCTIONS}", settings.customInstructions)
+    : "no custom user instructions";
   const aboutUserText = settings.aboutUser || "No user background details provided.";
   const personalizationPrompt = PERSONALIZATION_TEMPLATE
     .replace("{BASE_STYLE}", baseStyleText)

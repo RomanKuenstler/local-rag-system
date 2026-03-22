@@ -14,6 +14,10 @@ export function renderPanelContent({
   disabledAssistantModes = [],
   submitConfigChange,
   applyPersonalizationChange,
+  customInstructionsDraft,
+  isCustomInstructionsDirty,
+  updateCustomInstructionsDraft,
+  saveCustomInstructions,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
@@ -38,6 +42,14 @@ export function renderPanelContent({
   );
   const chevron = "▾";
   const check = "✓";
+  const saveIconPath = "M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14V7zm-7 0v4h4V3zm8 18H6v-6h12zm0-8H6V5h2v4h8V5h2z";
+  const customInstructionsValue = String(customInstructionsDraft || "");
+  const customInstructionsDisabled = interactionDisabled || !isCustomInstructionsDirty;
+  const autoResizeTextarea = (element) => {
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.max(element.scrollHeight, 24)}px`;
+  };
   const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
     "div",
     { className: "general-setting-row", key: `setting-${kind}-${label}` },
@@ -275,6 +287,47 @@ export function renderPanelContent({
       "div",
       { className: "info-groups" },
       ...sections.map((section) => {
+        if (section.id === "custom-instructions") {
+          return React.createElement(
+            "section",
+            { key: section.id, className: "info-group-card personalization-section-card" },
+            React.createElement("h4", null, section.title),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("textarea", {
+                  className: "personalization-custom-instructions-input",
+                  value: customInstructionsValue,
+                  placeholder: "Additional behavior, style, and tone preferences",
+                  rows: 1,
+                  onChange: (event) => {
+                    autoResizeTextarea(event.currentTarget);
+                    updateCustomInstructionsDraft(event.currentTarget.value);
+                  },
+                  ref: autoResizeTextarea,
+                  disabled: interactionDisabled,
+                  "aria-label": "Custom instructions",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${customInstructionsDisabled ? "" : " active"}`,
+                    onClick: saveCustomInstructions,
+                    disabled: customInstructionsDisabled,
+                    "aria-label": "Save custom instructions",
+                    title: "Save custom instructions",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            )
+          );
+        }
+
         if (section.id !== "personalization" || !section.settings) {
           return React.createElement(
             "section",
