@@ -276,6 +276,18 @@ function App() {
     }));
   }, [isSending, currentAssistantMode, activeChainStage]);
 
+  useEffect(() => {
+    const persistedBaseStyleTone = String(statusData?.assistant?.personalization?.baseStyleTone || "").trim().toLowerCase();
+    if (!persistedBaseStyleTone) return;
+    setPersonalizationPreferences((previous) => {
+      if (previous.baseStyleTone === persistedBaseStyleTone) return previous;
+      return {
+        ...previous,
+        baseStyleTone: persistedBaseStyleTone,
+      };
+    });
+  }, [statusData]);
+
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
       return { tone: "warning", label: "Warning" };
@@ -1093,33 +1105,66 @@ function App() {
     if (kind.startsWith("personalization:")) {
       const settingKey = kind.replace("personalization:", "");
       if (!Object.prototype.hasOwnProperty.call(DEFAULT_PERSONALIZATION_PREFERENCES, settingKey)) return;
+      let nextPreferences = null;
       setPersonalizationPreferences((previous) => {
-        const nextPreferences = {
+        nextPreferences = {
           ...previous,
           [settingKey]: selectedId,
         };
-        setDialogTabPanels((previousPanels) => {
-          const personalizationPanel = previousPanels.personalization;
-          if (!personalizationPanel) return previousPanels;
-          return {
-            ...previousPanels,
-            personalization: {
-              ...personalizationPanel,
-              content: buildPersonalizationContent(nextPreferences),
-            },
-          };
-        });
-        if (panelData?.command === "/personalization") {
-          setPanelData((previousPanel) => {
-            if (!previousPanel) return previousPanel;
-            return {
-              ...previousPanel,
-              content: buildPersonalizationContent(nextPreferences),
-            };
-          });
-        }
         return nextPreferences;
       });
+      const effectivePreferences = nextPreferences || {
+        ...personalizationPreferences,
+        [settingKey]: selectedId,
+      };
+      setDialogTabPanels((previousPanels) => {
+        const personalizationPanel = previousPanels.personalization;
+        if (!personalizationPanel) return previousPanels;
+        return {
+          ...previousPanels,
+          personalization: {
+            ...personalizationPanel,
+            content: buildPersonalizationContent(effectivePreferences),
+          },
+        };
+      });
+      if (panelData?.command === "/personalization") {
+        setPanelData((previousPanel) => {
+          if (!previousPanel) return previousPanel;
+          return {
+            ...previousPanel,
+            content: buildPersonalizationContent(effectivePreferences),
+          };
+        });
+      }
+
+      if (settingKey === "baseStyleTone") {
+        setIsSending(true);
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sessionId: sessionIdRef.current,
+              baseStyleTone: selectedId,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || "Failed to save personalization setting");
+          }
+          await refreshStatus();
+        } catch (error) {
+          setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+            evidenceSeverity: "error",
+            isVolatile: true,
+          })));
+        } finally {
+          setIsSending(false);
+        }
+      }
       return;
     }
 

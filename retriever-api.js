@@ -75,6 +75,7 @@ import {
   setSessionActiveChat,
   updateChatName,
   updateSetting,
+  updateSessionPersonalizationSettings,
   updateSessionSetting,
   updateChatStatus,
 } from "./src/state-store.js";
@@ -1319,6 +1320,32 @@ async function handleStatus(_req, res) {
   });
 }
 
+async function handlePersonalization(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  if (req.method === "GET") {
+    const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
+    const settings = await getSessionPersonalizationSettings(sessionId);
+    json(res, 200, {
+      sessionId,
+      settings,
+    });
+    return;
+  }
+
+  if (req.method === "PATCH") {
+    const body = await readJsonBody(req);
+    const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+    const baseStyleTone = String(body.baseStyleTone || "").trim().toLowerCase();
+    const settings = await updateSessionPersonalizationSettings(sessionId, {
+      ...(baseStyleTone ? { baseStyleTone } : {}),
+    });
+    json(res, 200, {
+      sessionId,
+      settings,
+    });
+  }
+}
+
 async function handleFiles(_req, res) {
   const rows = await listFileMetadata();
 
@@ -1359,6 +1386,7 @@ const server = http.createServer(async (req, res) => {
     const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
     const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
+    const isPersonalizationRoute = ["/api/personalization", "/internal/retriever/personalization"].includes(url.pathname);
     const chatRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)$/);
     const chatDownloadRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)\/download$/);
 
@@ -1384,6 +1412,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && isChatsRoute) {
       await handleCreateChat(req, res);
+      return;
+    }
+
+    if ((req.method === "GET" || req.method === "PATCH") && isPersonalizationRoute) {
+      await handlePersonalization(req, res);
       return;
     }
 
@@ -1457,6 +1490,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
   );
 });

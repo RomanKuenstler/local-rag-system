@@ -87,6 +87,19 @@ export async function getSessionPersonalizationSettings(sessionId) {
   return normalizePersonalizationSettings(rawSettings);
 }
 
+export async function updateSessionPersonalizationSettings(sessionId, nextSettings) {
+  const mergedSettings = normalizePersonalizationSettings({
+    ...(await getSessionPersonalizationSettings(sessionId)),
+    ...(nextSettings && typeof nextSettings === "object" ? nextSettings : {}),
+  });
+  await updateSessionSetting({
+    sessionId,
+    settingName: "personalization_settings",
+    value: mergedSettings,
+  });
+  return mergedSettings;
+}
+
 export async function getRuntimeConfigState(fallbacks) {
   const result = await dbQuery(
     "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
