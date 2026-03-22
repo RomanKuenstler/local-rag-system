@@ -271,7 +271,10 @@ function App() {
     const normalized = Array.isArray(payload.messages)
       ? payload.messages.map((message) => {
         const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
+        const normalizedText = String(message.content || "").trim()
+          || (message.role === "assistant" ? "No answer generated." : "");
         return createMessage(message.role, message.content, {
+          text: normalizedText,
           evidenceSeverity: metadata.evidenceSeverity || null,
           responseType: metadata.responseType || null,
           retrieval: metadata.retrieval || null,
