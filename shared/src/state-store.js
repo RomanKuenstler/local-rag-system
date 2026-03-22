@@ -11,6 +11,31 @@ function normalizeFileTags(tags) {
   return [...new Set(normalized)];
 }
 
+async function replaceFileTags(filePath, tags) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const normalizedTags = normalizeFileTags(tags);
+  const nextTags = normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG];
+
+  await dbQuery("DELETE FROM file_tags WHERE file_path = $1", [normalizedPath]);
+  for (const tag of nextTags) {
+    await dbQuery(
+      `INSERT INTO file_tags (file_path, tag, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (file_path, tag) DO UPDATE SET updated_at = NOW()`,
+      [normalizedPath, tag]
+    );
+  }
+
+  return {
+    filePath: normalizedPath,
+    tags: nextTags,
+  };
+}
+
 export async function initializeStateDefaults({ uiMode, assistantMode }) {
   const defaults = [
     ["ui_mode", { value: uiMode }],
@@ -528,9 +553,6 @@ export async function updateFileTags(filePath, tags) {
     return null;
   }
 
-  const normalizedTags = normalizeFileTags(tags);
-  const nextTags = normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG];
-
   const existing = await dbQuery(
     "SELECT 1 FROM file_metadata WHERE file_path = $1",
     [normalizedPath]
@@ -539,20 +561,11 @@ export async function updateFileTags(filePath, tags) {
     return null;
   }
 
-  await dbQuery("DELETE FROM file_tags WHERE file_path = $1", [normalizedPath]);
-  for (const tag of nextTags) {
-    await dbQuery(
-      `INSERT INTO file_tags (file_path, tag, updated_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (file_path, tag) DO UPDATE SET updated_at = NOW()`,
-      [normalizedPath, tag]
-    );
-  }
+  return replaceFileTags(normalizedPath, tags);
+}
 
-  return {
-    filePath: normalizedPath,
-    tags: nextTags,
-  };
+export async function setFileTagsForPath(filePath, tags) {
+  return replaceFileTags(filePath, tags);
 }
 
 export async function ensureDefaultFileTags(filePaths) {

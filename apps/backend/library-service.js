@@ -1,10 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
-import { CONTENT_PATH, EMBEDDABLE_EXTENSIONS } from "../../shared/config/index.js";
+import { CONTENT_PATH, DEFAULT_FILE_TAG, EMBEDDABLE_EXTENSIONS } from "../../shared/config/index.js";
 import {
   getManagedLibraryFile,
   listManagedLibraryFilesWithStatus,
   markManagedLibraryFileDeleted,
+  setFileTagsForPath,
   setManagedLibraryFileStatus,
   upsertManagedLibraryFile,
 } from "../../shared/src/state-store.js";
@@ -12,6 +13,20 @@ import {
 const LIBRARY_UPLOAD_SUBDIR = (process.env.LIBRARY_UPLOAD_SUBDIR || "_library").trim();
 const MAX_LIBRARY_UPLOAD_BYTES = Number.parseInt(process.env.MAX_LIBRARY_UPLOAD_BYTES || String(15 * 1024 * 1024), 10);
 const EMBEDDABLE_EXTENSION_SET = new Set(EMBEDDABLE_EXTENSIONS.map((extension) => extension.toLowerCase()));
+const TAG_PATTERN = /^[a-z0-9][a-z0-9_\-:.]{0,63}$/;
+
+function normalizeTags(tags) {
+  const input = Array.isArray(tags)
+    ? tags
+    : typeof tags === "string"
+      ? tags.split(",")
+      : [];
+  const normalized = input
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .filter(Boolean)
+    .filter((tag) => TAG_PATTERN.test(tag));
+  return [...new Set(normalized)];
+}
 
 function normalizeFilename(name) {
   const fileName = path.basename(String(name || "").trim());
@@ -35,7 +50,7 @@ function ensurePathInsideContentRoot(relativePath) {
   return absoluteTarget;
 }
 
-export async function saveManagedLibraryFile({ fileName, contentBase64, overwrite = false }) {
+export async function saveManagedLibraryFile({ fileName, contentBase64, overwrite = false, tags = [] }) {
   const normalizedName = normalizeFilename(fileName);
   if (!normalizedName) {
     throw new Error("Missing file name.");
@@ -87,12 +102,15 @@ export async function saveManagedLibraryFile({ fileName, contentBase64, overwrit
     sizeBytes: fileBuffer.length,
     status: "uploaded",
   });
+  const normalizedTags = normalizeTags(tags);
+  await setFileTagsForPath(relativePath, normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG]);
 
   return {
     path: relativePath,
     name: normalizedName,
     sizeBytes: fileBuffer.length,
     status: "uploaded",
+    tags: normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG],
   };
 }
 
