@@ -883,19 +883,20 @@ body {
   text-transform: uppercase;
 }
 .personalization-custom-instructions-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.4rem;
-  align-items: center;
+  display: block;
+}
+.personalization-custom-instructions-input-shell {
+  position: relative;
 }
 .personalization-custom-instructions-input {
   min-height: 22px;
-  max-height: 14rem;
+  max-height: none;
   line-height: 1.35;
-  padding: 0.55rem 0.75rem;
+  padding: 0.55rem 2.9rem 0.55rem 0.75rem;
   border: 1px solid #d1d5db;
   border-radius: 9px;
   background: #ffffff;
+  overflow-y: hidden;
 }
 .personalization-custom-instructions-input::placeholder {
   color: #9ca3af;
@@ -903,6 +904,10 @@ body {
 .personalization-custom-save-button {
   width: 2rem;
   height: 2rem;
+  position: absolute;
+  right: 0.4rem;
+  top: 50%;
+  transform: translateY(-50%);
   border: none;
   border-radius: 999px;
   display: inline-flex;

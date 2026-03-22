@@ -295,33 +295,36 @@ export function renderPanelContent({
             React.createElement(
               "div",
               { className: "personalization-custom-instructions-row" },
-              React.createElement("textarea", {
-                className: "personalization-custom-instructions-input",
-                value: customInstructionsValue,
-                placeholder: "Additional behavior, style, and tone preferences",
-                rows: 1,
-                onChange: (event) => {
-                  autoResizeTextarea(event.currentTarget);
-                  updateCustomInstructionsDraft(event.currentTarget.value);
-                },
-                ref: autoResizeTextarea,
-                disabled: interactionDisabled,
-                "aria-label": "Custom instructions",
-              }),
               React.createElement(
-                "button",
-                {
-                  type: "button",
-                  className: `personalization-custom-save-button${customInstructionsDisabled ? "" : " active"}`,
-                  onClick: saveCustomInstructions,
-                  disabled: customInstructionsDisabled,
-                  "aria-label": "Save custom instructions",
-                  title: "Save custom instructions",
-                },
-                icon(saveIconPath)
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("textarea", {
+                  className: "personalization-custom-instructions-input",
+                  value: customInstructionsValue,
+                  placeholder: "Additional behavior, style, and tone preferences",
+                  rows: 1,
+                  onChange: (event) => {
+                    autoResizeTextarea(event.currentTarget);
+                    updateCustomInstructionsDraft(event.currentTarget.value);
+                  },
+                  ref: autoResizeTextarea,
+                  disabled: interactionDisabled,
+                  "aria-label": "Custom instructions",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${customInstructionsDisabled ? "" : " active"}`,
+                    onClick: saveCustomInstructions,
+                    disabled: customInstructionsDisabled,
+                    "aria-label": "Save custom instructions",
+                    title: "Save custom instructions",
+                  },
+                  icon(saveIconPath)
+                )
               )
-            ),
-            React.createElement("p", { className: "config-help" }, section.description || "")
+            )
           );
         }
 
