@@ -9,10 +9,10 @@ export function getEvidenceQuality(results, minSimilarities) {
   const maxScore = Math.max(...scores);
   const avgScore = scores.reduce((sum, score) => sum + score, 0) / scores.length;
 
-  if (maxScore >= 0.82 && avgScore >= 0.72) {
+  if (maxScore >= 0.78 && avgScore >= 0.69) {
     return "strong";
   }
-  if (maxScore >= 0.62 && avgScore >= 0.55) {
+  if (maxScore >= 0.60 && avgScore >= 0.51) {
     return "moderate";
   }
 
@@ -57,7 +57,19 @@ export function createSimilarityDetails(results, runtimeConfig) {
 export function buildRagContextPackage({ results, userMessage, evidenceQuality }) {
   const evidenceBlock = results.map((result, index) => formatEvidenceEntry(result, index)).join("\n\n---\n\n");
 
-  return `RETRIEVAL RESULT
+  return `# Retrieved Evidence
+
+The following information has been retrieved from the knowledge base.
+
+Instructions for using this evidence:
+
+- Not all retrieved items are equally relevant; prioritize the most relevant content.
+- Use the content of the evidence as the primary source for answering.
+- Metadata such as scores or titles are only hints and should not replace actual content.
+- Ignore evidence that does not directly help answer the user’s question.
+- If multiple pieces of evidence are relevant, combine them into a coherent answer.
+- Do not assume that all necessary information is present.
+- If the evidence does not fully answer the question, clearly state what is missing.
 Evidence quality: ${evidenceQuality}
 Evidence quality meaning: strong|moderate|weak
 
@@ -154,11 +166,11 @@ export function buildHelpMessage() {
     "- /mode clean      Switch to clean chat-focused UI",
     "- /mode rag        Switch to debug RAG UI with similarity details",
     "- /assistant       List assistant modes and current mode",
-    "- /assistant <mode>  Switch assistant mode (e.g. learning, normal)",
+    "- /assistant <mode>  Switch assistant mode (e.g. simple, refine, thinking)",
     "- /profile         List profiles and current profile",
     "- /profile <name>  Switch profile (e.g. default, alice)",
     "- /embed           Show embedder-container status hint",
-    "- /upload <prompt>   Attach one-time files from ./upload (.md/.txt/.html/.htm/.pdf)",
+    "- /upload <prompt>   Attach one-time files from ./upload (.md/.txt/.html/.htm/.pdf/.csv)",
     "- /yes             Show pending weak-evidence answer",
     "- /no | /skip      Hide pending weak-evidence answer",
     "- /bye | /exit | /quit  Exit the application",

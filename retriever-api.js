@@ -32,6 +32,8 @@ import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
 import { createChatModel } from "./src/model-clients.js";
 import {
   DEFAULT_ASSISTANT_MODE,
+  buildRefineFinalPassMessages,
+  getRefineChainSystemPrompt,
   isAssistantModeSupported,
   listAssistantModes,
   normalizeAssistantMode,
@@ -68,6 +70,7 @@ import {
   getIndexStateMap,
   initializeRuntimeConfigDefaults,
   getSelectionState,
+  getSessionSetting,
   initializeStateDefaults,
   listSessionChats,
   listChatMessages,
@@ -77,6 +80,7 @@ import {
   setSessionActiveChat,
   updateChatName,
   updateSetting,
+  updateSessionSetting,
   updateChatStatus,
 } from "./src/state-store.js";
 import {
@@ -96,7 +100,6 @@ const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
 
-let assistantMode = initialAssistantMode;
 let profileId = initialProfileId;
 let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
@@ -105,9 +108,12 @@ const chatModel = createChatModel();
 
 const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
-const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf"]);
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".csv"]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
+const MAX_REQUEST_BODY_BYTES = Number.parseInt(process.env.MAX_REQUEST_BODY_BYTES || String(10 * 1024 * 1024), 10);
 const pendingWeakAnswers = new Map();
+const assistantChainProgressBySession = new Map();
+const assistantChainProgressClearTimers = new Map();
 const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
   historyMessages: HISTORY_MESSAGES,
   maxSimilarities: MAX_SIMILARITIES,
@@ -129,6 +135,79 @@ function generateChatName() {
 
 function normalizePrompt(input) {
   return String(input || "").trim();
+}
+
+function extractAssistantTextContent(response) {
+  const rawContent = response?.content;
+  if (typeof rawContent === "string") {
+    return rawContent.trim();
+  }
+
+  if (Array.isArray(rawContent)) {
+    const textSegments = rawContent
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .filter(Boolean);
+
+    return textSegments.join("\n").trim();
+  }
+
+  return "";
+}
+
+function finalizeAssistantAnswer(response, { fallbackText = "" } = {}) {
+  const extracted = extractAssistantTextContent(response)
+    || String(response?.additional_kwargs?.output_text || "").trim()
+    || String(response?.additional_kwargs?.text || "").trim()
+    || String(response?.text || "").trim();
+  if (extracted) {
+    return extracted;
+  }
+  if (fallbackText) {
+    return String(fallbackText).trim();
+  }
+  return "I’m sorry—I couldn’t generate a complete answer this time. Please try again.";
+}
+
+function setAssistantChainProgress(sessionId, progress) {
+  if (!sessionId) return;
+  const existingTimer = assistantChainProgressClearTimers.get(sessionId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    assistantChainProgressClearTimers.delete(sessionId);
+  }
+  assistantChainProgressBySession.set(sessionId, {
+    ...progress,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function clearAssistantChainProgress(sessionId) {
+  if (!sessionId) return;
+  const existingTimer = assistantChainProgressClearTimers.get(sessionId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    assistantChainProgressClearTimers.delete(sessionId);
+  }
+  assistantChainProgressBySession.delete(sessionId);
+}
+
+function markAssistantChainCompleted(sessionId, mode) {
+  if (!sessionId) return;
+  setAssistantChainProgress(sessionId, {
+    active: false,
+    mode,
+    stage: "completed",
+  });
+  const timer = setTimeout(() => {
+    clearAssistantChainProgress(sessionId);
+  }, 15000);
+  assistantChainProgressClearTimers.set(sessionId, timer);
 }
 
 async function normalizeUploadedPromptFile(file) {
@@ -370,6 +449,11 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   }
 
   if (normalizedPrompt === "/info") {
+    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }));
     return {
       statusCode: 200,
       payload: {
@@ -378,7 +462,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
           appName: APP_NAME,
           appVersion: APP_VERSION,
           uiMode,
-          assistantMode,
+          assistantMode: currentAssistantMode,
           profileId,
           chatModelName: chatModel.model,
           embeddingModelName: embeddingsModel.model,
@@ -415,6 +499,11 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
 
 
   if (normalizedPrompt === "/assistant") {
+    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }));
     const modes = listAssistantModes();
     return {
       statusCode: 200,
@@ -423,7 +512,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         answer: [
           "Assistant modes:",
           ...modes.map((mode) => `- ${mode.id}: ${mode.description}`),
-          `Current mode: ${assistantMode}`
+          `Current mode: ${currentAssistantMode}`
         ].join("\n"),
         evidenceSeverity: null,
         responseType: "assistant_mode",
@@ -490,14 +579,18 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
       };
     }
 
-    assistantMode = normalizeAssistantMode(requestedMode);
-    await updateSetting("assistant_mode", assistantMode);
+    const nextAssistantMode = normalizeAssistantMode(requestedMode);
+    await updateSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      value: nextAssistantMode,
+    });
 
     return {
       statusCode: 200,
       payload: {
         sessionId,
-        answer: `Assistant mode changed to: ${assistantMode}` ,
+        answer: `Assistant mode changed to: ${nextAssistantMode}` ,
         evidenceSeverity: "ok",
         responseType: "assistant_mode",
       },
@@ -697,12 +790,15 @@ function json(res, statusCode, payload) {
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
+    let sizeBytes = 0;
 
     req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > 1_000_000) {
+      sizeBytes += chunk.length;
+      if (sizeBytes > MAX_REQUEST_BODY_BYTES) {
         reject(new Error("Payload too large"));
+        return;
       }
+      raw += chunk;
     });
 
     req.on("end", () => {
@@ -747,6 +843,11 @@ async function handlePrompt(req, res) {
     return;
   }
   const { chatId, chatName } = resolvedChat;
+  const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+    sessionId,
+    settingName: "assistant_mode",
+    fallbackValue: initialAssistantMode,
+  }));
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -809,18 +910,84 @@ async function handlePrompt(req, res) {
     cosineLimit: runtimeConfig.cosineLimit,
   });
 
-  const assistantResponse = await chatModel.invoke([
-    ...buildSystemPromptLayers({
-      guardrailsText,
-      ragContextPackage: searchResult.ragContextPackage,
-      assistantMode,
-      profileId,
-    }),
-    ...chatHistory,
-    ["human", promptForAssistant],
-  ]);
+  let answer = "";
+  try {
+    if (currentAssistantMode === "refine") {
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "drafting",
+      });
 
-  const answer = String(assistantResponse.content || "").trim();
+      const draftResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          profileId,
+          includeAssistantModeLayer: false,
+        }),
+        [
+          "system",
+          getRefineChainSystemPrompt("drafting"),
+        ],
+        ...chatHistory,
+        ["human", promptForAssistant],
+      ]);
+
+      const draftAnswer = finalizeAssistantAnswer(draftResponse);
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "refining",
+      });
+
+      const refinedResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          profileId,
+          includeAssistantModeLayer: false,
+        }),
+        [
+          "system",
+          getRefineChainSystemPrompt("refining"),
+        ],
+        ...chatHistory,
+        ...buildRefineFinalPassMessages({
+          originalPrompt: promptForAssistant,
+          draftAnswer,
+        }),
+      ]);
+
+      answer = finalizeAssistantAnswer(refinedResponse, {
+        fallbackText: draftAnswer,
+      });
+      markAssistantChainCompleted(sessionId, currentAssistantMode);
+    } else {
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "single_pass",
+      });
+      const assistantResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          profileId,
+        }),
+        ...chatHistory,
+        ["human", promptForAssistant],
+      ]);
+      answer = finalizeAssistantAnswer(assistantResponse);
+      markAssistantChainCompleted(sessionId, currentAssistantMode);
+    }
+  } catch (error) {
+    clearAssistantChainProgress(sessionId);
+    throw error;
+  }
   const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
 
   const hasUploadedContext = Boolean(uploadInfo?.uploadedCount);
@@ -1140,6 +1307,15 @@ async function handleDownloadChat(req, res, chatId) {
 }
 
 async function handleStatus(_req, res) {
+  const url = new URL(_req.url, `http://${_req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "").trim();
+  const currentAssistantMode = sessionId
+    ? normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }))
+    : initialAssistantMode;
   const readiness = await getEmbeddingReadiness();
   const embeddingStatus = await readEmbeddingStatus();
 
@@ -1151,8 +1327,9 @@ async function handleStatus(_req, res) {
       uiMode,
     },
     assistant: {
-      mode: assistantMode,
+      mode: currentAssistantMode,
       profile: profileId,
+      chainProgress: sessionId ? (assistantChainProgressBySession.get(sessionId) || null) : null,
       availableModes: listAssistantModes().map((mode) => ({ id: mode.id, label: mode.label })),
       availableProfiles: listProfiles().map((profile) => ({ id: profile.id, label: profile.label })),
     },
@@ -1295,7 +1472,6 @@ await initializeRuntimeConfigDefaults({
 });
 const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
 uiMode = persistedSelections.uiMode;
-assistantMode = normalizeAssistantMode(persistedSelections.assistantMode);
 profileId = normalizeProfile(persistedSelections.profileId);
 const persistedRuntimeConfig = await getRuntimeConfigState({
   historyMessages: runtimeConfig.historyMessages,

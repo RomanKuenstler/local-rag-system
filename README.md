@@ -18,6 +18,18 @@ Detailed documentation (architecture, setup details, internals) has been moved t
 - **`DOCUMENTATION.md`**
 - **`DEVELOPERS.md`** (maintainer-oriented file/folder map and development notes)
 
+## Chain-impr branch highlights (vs main)
+
+This branch contains a broad set of product and reliability updates:
+- multi-chat lifecycle in WebUI (rename, download, archive, restore, delete)
+- a unified Preferences dialog (Settings / Personalization / Info / Archive / Help)
+- assistant-mode UX improvements including refine-chain stage awareness in frontend
+- temporary UI disablement of `thinking` mode while keeping it visible
+- stronger refine chain behavior (draft → refine fallback handling for empty final passes)
+- richer prompt attachment support (including `.csv`) and library embedding support for `.epub`
+- EPUB ingestion hardening across multiple parsing edge-cases
+- updated maintainer docs and changelog to reflect current system behavior
+
 ## Implemented APIs (backend step 1)
 
 - `POST /api/prompt`: send user prompt and receive answer + evidence severity.
@@ -35,7 +47,8 @@ The web UI is intentionally minimal for now:
 - prompt input + send button
 - per-chat menu actions (rename, download, archive, delete)
 - archive management tab in Preferences (download / unarchive / delete archived chats)
-- **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, up to 3 files)
+- assistant mode selector in chat header and Preferences personalization (with **Thinking** visible but temporarily disabled)
+- **Attach** button in normal chat composer for prompt-level file uploads (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`, up to 3 files)
 - status badges for retriever, embedding state, and embedded file count
 - `/info` panel with grouped runtime details (models, Qdrant collection, Postgres connection, and state-file paths)
 

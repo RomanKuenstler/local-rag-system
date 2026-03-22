@@ -12,20 +12,26 @@ export function renderPanelContent({
   embedderStatus,
   isSending,
   isEmbeddingReady,
+  disabledAssistantModes = [],
   submitConfigChange,
   applyPersonalizationChange,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
+  const disabledAssistantModeSet = new Set(
+    Array.isArray(disabledAssistantModes)
+      ? disabledAssistantModes.map((modeId) => String(modeId || "").trim().toLowerCase())
+      : []
+  );
 
-  const renderSelectableModeCard = ({ key, id, description, isActive, onSelect }) => React.createElement(
+  const renderSelectableModeCard = ({ key, id, description, isActive, onSelect, isDisabled = false }) => React.createElement(
     "button",
     {
       key,
       type: "button",
       className: `assistant-mode-card mode-select-button ${isActive ? "active" : ""}`,
       onClick: () => onSelect(id),
-      disabled: interactionDisabled,
+      disabled: interactionDisabled || isDisabled,
       "aria-pressed": isActive,
     },
     React.createElement("strong", null, id),
@@ -208,8 +214,6 @@ export function renderPanelContent({
     const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
     const currentAssistantMode = panelData.content.assistant?.currentMode || null;
-    const profiles = panelData.content.profile?.profiles || [];
-    const currentProfile = panelData.content.profile?.currentProfile || null;
 
     return React.createElement(
       "div",
@@ -235,19 +239,8 @@ export function renderPanelContent({
           id: mode.id,
           description: mode.description,
           isActive: mode.id === currentAssistantMode,
+          isDisabled: disabledAssistantModeSet.has(String(mode.id || "").trim().toLowerCase()),
           onSelect: (id) => applyPersonalizationChange("assistant", id),
-        }))
-      ),
-      React.createElement(
-        "section",
-        { className: "info-group-card" },
-        React.createElement("h4", null, "Profile"),
-        ...profiles.map((profile) => renderSelectableModeCard({
-          key: `personalization-profile-${profile.id}`,
-          id: profile.id,
-          description: profile.description,
-          isActive: profile.id === currentProfile,
-          onSelect: (id) => applyPersonalizationChange("profile", id),
         }))
       )
     );

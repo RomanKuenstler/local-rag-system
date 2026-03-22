@@ -123,7 +123,7 @@ async function deletePointsBySource(qdrant, relativePath) {
 export function fileToChunks(file) {
   let sections;
 
-  if ([".md", ".html", ".htm", ".pdf"].includes(file.extension)) {
+  if ([".md", ".html", ".htm", ".pdf", ".epub"].includes(file.extension)) {
     sections = splitMarkdownBySectionsWithMetadata(file.content);
   } else {
     const trimmed = file.content.trim();
