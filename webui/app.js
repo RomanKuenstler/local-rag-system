@@ -142,13 +142,37 @@ function isAssistantModeTemporarilyDisabled(modeId) {
 function getPendingAssistantMessage(modeId, chainStage) {
   const normalizedMode = String(modeId || "").trim().toLowerCase();
   const normalizedStage = String(chainStage || "").trim().toLowerCase();
+  if (normalizedStage === "searching") {
+    return "Searching the knowledge base…";
+  }
   if (normalizedMode === "refine") {
     if (normalizedStage === "refining") {
-      return "Assistant is refining the answer…";
+      return "Refining the final answer…";
     }
-    return "Assistant is drafting an answer…";
+    return "Drafting an answer…";
   }
   return "Assistant is thinking…";
+}
+
+function buildPendingAssistantTrailText(statusTrail) {
+  const normalizedTrail = Array.isArray(statusTrail)
+    ? statusTrail.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (normalizedTrail.length === 0) {
+    return "Assistant is thinking…";
+  }
+  return normalizedTrail.join("\n");
+}
+
+function dedupeStatusTrail(statusTrail) {
+  const deduped = [];
+  for (const step of Array.isArray(statusTrail) ? statusTrail : []) {
+    const normalized = String(step || "").trim();
+    if (!normalized) continue;
+    if (deduped[deduped.length - 1] === normalized) continue;
+    deduped.push(normalized);
+  }
+  return deduped;
 }
 
 function buildPersonalizationContent(preferences) {
@@ -267,26 +291,45 @@ function App() {
   const displayedChatList = volatileChat
     ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
     : chatList;
-  const activeChainStage = String(statusData?.assistant?.chainProgress?.stage || "").toLowerCase();
+  const activeChainProgress = statusData?.assistant?.chainProgress || null;
+  const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
 
   useEffect(() => {
     if (!isSending) {
       return;
     }
+    const backendStageTrail = Array.isArray(activeChainProgress?.trail)
+      ? activeChainProgress.trail
+      : [];
+    const normalizedMode = String(activeChainProgress?.mode || currentAssistantMode || "").trim().toLowerCase();
+    const mappedBackendTrail = dedupeStatusTrail(backendStageTrail.map((stage) => (
+      getPendingAssistantMessage(normalizedMode, stage)
+    )));
     const nextPendingText = getPendingAssistantMessage(currentAssistantMode, activeChainStage);
     setMessages((previous) => previous.map((message) => {
       if (!message.isPending || message.role !== "assistant") {
         return message;
       }
-      if (message.text === nextPendingText) {
-        return message;
+      let nextTrail = Array.isArray(message.pendingStatusTrail)
+        ? dedupeStatusTrail(message.pendingStatusTrail)
+        : [];
+      if (mappedBackendTrail.length > 0) {
+        nextTrail = mappedBackendTrail;
+      } else if (nextTrail[nextTrail.length - 1] !== nextPendingText) {
+        nextTrail = dedupeStatusTrail(nextTrail.concat(nextPendingText));
       }
+      if (nextTrail.length === 0) {
+        nextTrail = [nextPendingText];
+      }
+      const nextText = buildPendingAssistantTrailText(nextTrail);
+      if (message.text === nextText) return message;
       return {
         ...message,
-        text: nextPendingText,
+        pendingStatusTrail: nextTrail,
+        text: nextText,
       };
     }));
-  }, [isSending, currentAssistantMode, activeChainStage]);
+  }, [isSending, currentAssistantMode, activeChainProgress, activeChainStage]);
 
   useEffect(() => {
     const persistedSettings = statusData?.assistant?.personalization || {};
@@ -472,6 +515,28 @@ function App() {
     } finally {
       setIsLoadingChats(false);
     }
+  }
+
+  function appendPendingStatusStep(pendingMessageId, stepText) {
+    const normalizedStep = String(stepText || "").trim();
+    if (!normalizedStep) return;
+    setMessages((previous) => previous.map((message) => {
+      if (message.id !== pendingMessageId || !message.isPending || message.role !== "assistant") {
+        return message;
+      }
+      const previousTrail = Array.isArray(message.pendingStatusTrail)
+        ? dedupeStatusTrail(message.pendingStatusTrail)
+        : [];
+      if (previousTrail[previousTrail.length - 1] === normalizedStep) {
+        return message;
+      }
+      const nextTrail = dedupeStatusTrail(previousTrail.concat(normalizedStep));
+      return {
+        ...message,
+        pendingStatusTrail: nextTrail,
+        text: buildPendingAssistantTrailText(nextTrail),
+      };
+    }));
   }
 
   useEffect(() => {
@@ -861,16 +926,32 @@ function App() {
     }
     sendingStatusPollRef.current = window.setInterval(() => {
       refreshStatus().catch(() => {});
-    }, 900);
+    }, 250);
+    refreshStatus().catch(() => {});
     const pendingMessageId = crypto.randomUUID();
+    const initialPendingText = getPendingAssistantMessage(currentAssistantMode, "searching");
     setMessages((prev) => prev.concat(createMessage(
       "assistant",
-      getPendingAssistantMessage(currentAssistantMode, activeChainStage),
+      initialPendingText,
       {
-      id: pendingMessageId,
-      isPending: true,
+        id: pendingMessageId,
+        isPending: true,
+        pendingStatusTrail: [initialPendingText],
       }
     )));
+    const fallbackStepTimers = [];
+    if (String(currentAssistantMode || "").trim().toLowerCase() === "refine") {
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "drafting"));
+      }, 550));
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "refining"));
+      }, 1300));
+    } else {
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("simple", "single_pass"));
+      }, 650));
+    }
 
     try {
       if (isPanelCommand && hasPromptFiles) {
@@ -934,6 +1015,9 @@ function App() {
         };
       }));
     } finally {
+      for (const timerId of fallbackStepTimers) {
+        window.clearTimeout(timerId);
+      }
       if (sendingStatusPollRef.current) {
         window.clearInterval(sendingStatusPollRef.current);
         sendingStatusPollRef.current = null;
@@ -1423,6 +1507,27 @@ function App() {
       dangerouslySetInnerHTML: { __html: sanitized },
     });
   };
+  const renderPendingAssistantTrail = (message) => {
+    const trail = dedupeStatusTrail(message?.pendingStatusTrail);
+    if (trail.length === 0) {
+      return renderAssistantMarkdown(message?.text || "Assistant is thinking…");
+    }
+    return React.createElement(
+      "div",
+      { className: "assistant-pending-trail", role: "status", "aria-live": "polite" },
+      ...trail.map((step, index) => {
+        const isLast = index === trail.length - 1;
+        return React.createElement(
+          "div",
+          { key: `${message.id}-pending-step-${index}`, className: `assistant-pending-step ${isLast ? "active" : "done"}` },
+          React.createElement("span", { className: "assistant-pending-step-label" }, step),
+          isLast
+            ? null
+            : React.createElement("span", { className: "assistant-pending-step-check", "aria-hidden": "true" }, "✓")
+        );
+      })
+    );
+  };
 
   const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
   const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
@@ -1490,11 +1595,13 @@ function App() {
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const sendButtonLabel = isSending
-    ? activeChainStage === "drafting"
+    ? activeChainStage === "searching"
+      ? "Searching..."
+      : activeChainStage === "drafting"
       ? "Drafting..."
       : activeChainStage === "refining"
         ? "Refining..."
-        : "Sending..."
+        : "Thinking..."
     : "Send";
 
   function openLibraryPage() {
@@ -2215,7 +2322,9 @@ function App() {
                       "section",
                       { className: "assistant-answer-block" },
                       React.createElement("small", null, "Answer"),
-                      renderAssistantMarkdown(message.text)
+                      message.isPending
+                        ? renderPendingAssistantTrail(message)
+                        : renderAssistantMarkdown(message.text)
                     ),
                     React.createElement(
                       "details",
@@ -2256,7 +2365,11 @@ function App() {
                     )
                   )
                   : message.role === "assistant"
-                    ? renderAssistantMarkdown(message.text)
+                    ? (
+                      message.isPending
+                        ? renderPendingAssistantTrail(message)
+                        : renderAssistantMarkdown(message.text)
+                    )
                     : React.createElement(
                       "div",
                       { className: "user-message-content" },
