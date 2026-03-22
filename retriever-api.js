@@ -137,6 +137,37 @@ function normalizePrompt(input) {
   return String(input || "").trim();
 }
 
+function extractAssistantTextContent(response) {
+  const rawContent = response?.content;
+  if (typeof rawContent === "string") {
+    return rawContent.trim();
+  }
+
+  if (Array.isArray(rawContent)) {
+    const textSegments = rawContent
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .filter(Boolean);
+
+    return textSegments.join("\n").trim();
+  }
+
+  return "";
+}
+
+function finalizeAssistantAnswer(response) {
+  const extracted = extractAssistantTextContent(response);
+  if (extracted) {
+    return extracted;
+  }
+  return "I’m sorry—I couldn’t generate a complete answer this time. Please try again.";
+}
+
 function setAssistantChainProgress(sessionId, progress) {
   if (!sessionId) return;
   const existingTimer = assistantChainProgressClearTimers.get(sessionId);
@@ -898,7 +929,7 @@ async function handlePrompt(req, res) {
         ["human", promptForAssistant],
       ]);
 
-      const draftAnswer = String(draftResponse.content || "").trim();
+      const draftAnswer = finalizeAssistantAnswer(draftResponse);
       setAssistantChainProgress(sessionId, {
         active: true,
         mode: currentAssistantMode,
@@ -924,7 +955,7 @@ async function handlePrompt(req, res) {
         }),
       ]);
 
-      answer = String(refinedResponse.content || "").trim();
+      answer = finalizeAssistantAnswer(refinedResponse);
       markAssistantChainCompleted(sessionId, currentAssistantMode);
     } else {
       setAssistantChainProgress(sessionId, {
@@ -942,7 +973,7 @@ async function handlePrompt(req, res) {
         ...chatHistory,
         ["human", promptForAssistant],
       ]);
-      answer = String(assistantResponse.content || "").trim();
+      answer = finalizeAssistantAnswer(assistantResponse);
       markAssistantChainCompleted(sessionId, currentAssistantMode);
     }
   } catch (error) {
