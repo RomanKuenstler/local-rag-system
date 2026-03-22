@@ -36,6 +36,55 @@ export function renderPanelContent({
     React.createElement("strong", null, id),
     React.createElement("p", null, description)
   );
+  const chevron = "▾";
+  const check = "✓";
+  const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
+    "div",
+    { className: "general-setting-row", key: `setting-${kind}-${label}` },
+    React.createElement("span", { className: "general-setting-label" }, label),
+    React.createElement(
+      "details",
+      { className: "general-dropdown" },
+      React.createElement(
+        "summary",
+        { className: "general-dropdown-trigger" },
+        React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
+        React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
+      ),
+      React.createElement(
+        "div",
+        { className: "general-dropdown-menu", role: "menu" },
+        ...options.map((option) => {
+          const optionId = String(option.id || "").trim().toLowerCase();
+          const active = optionId === String(currentId || "").trim().toLowerCase();
+          const optionDisabled = Boolean(isOptionDisabled?.(optionId));
+
+          return React.createElement(
+            "button",
+            {
+              key: `${kind}-${optionId}`,
+              type: "button",
+              className: `general-dropdown-option${active ? " active" : ""}`,
+              role: "menuitemradio",
+              "aria-checked": active ? "true" : "false",
+              disabled: interactionDisabled || optionDisabled,
+              onClick: (event) => {
+                event.preventDefault();
+                applyPersonalizationChange(kind, optionId);
+              },
+            },
+            React.createElement(
+              "span",
+              { className: "general-dropdown-option-copy" },
+              React.createElement("strong", null, optionId),
+              React.createElement("small", null, option.shortDescription || option.description || "")
+            ),
+            active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
+          );
+        })
+      )
+    )
+  );
 
   if (panelData.command === "/config" && panelData.configView) {
     return React.createElement(
@@ -196,57 +245,6 @@ export function renderPanelContent({
     const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
     const currentAssistantMode = panelData.content.assistant?.currentMode || null;
-    const chevron = "▾";
-    const check = "✓";
-
-    const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
-      "div",
-      { className: "general-setting-row", key: `general-setting-${label}` },
-      React.createElement("span", { className: "general-setting-label" }, label),
-      React.createElement(
-        "details",
-        { className: "general-dropdown" },
-        React.createElement(
-          "summary",
-          { className: "general-dropdown-trigger" },
-          React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
-          React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
-        ),
-        React.createElement(
-          "div",
-          { className: "general-dropdown-menu", role: "menu" },
-          ...options.map((option) => {
-            const optionId = String(option.id || "").trim().toLowerCase();
-            const active = optionId === String(currentId || "").trim().toLowerCase();
-            const optionDisabled = Boolean(isOptionDisabled?.(optionId));
-
-            return React.createElement(
-              "button",
-              {
-                key: `${kind}-${optionId}`,
-                type: "button",
-                className: `general-dropdown-option${active ? " active" : ""}`,
-                role: "menuitemradio",
-                "aria-checked": active ? "true" : "false",
-                disabled: interactionDisabled || optionDisabled,
-                onClick: (event) => {
-                  event.preventDefault();
-                  applyPersonalizationChange(kind, optionId);
-                },
-              },
-              React.createElement(
-                "span",
-                { className: "general-dropdown-option-copy" },
-                React.createElement("strong", null, optionId),
-                React.createElement("small", null, option.shortDescription || option.description || "")
-              ),
-              active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
-            );
-          })
-        )
-      )
-    );
-
     return React.createElement(
       "div",
       { className: "info-groups general-settings-grid" },
@@ -276,12 +274,47 @@ export function renderPanelContent({
     return React.createElement(
       "div",
       { className: "info-groups" },
-      ...sections.map((section) => React.createElement(
-        "section",
-        { key: section.id, className: "info-group-card personalization-section-card" },
-        React.createElement("h4", null, section.title),
-        React.createElement("p", { className: "config-help" }, section.description || "")
-      ))
+      ...sections.map((section) => {
+        if (section.id !== "personalization" || !section.settings) {
+          return React.createElement(
+            "section",
+            { key: section.id, className: "info-group-card personalization-section-card" },
+            React.createElement("h4", null, section.title),
+            React.createElement("p", { className: "config-help" }, section.description || "")
+          );
+        }
+
+        return React.createElement(
+          "section",
+          { key: section.id, className: "info-group-card general-settings-card personalization-settings-card" },
+          React.createElement("h4", null, section.title),
+          renderModeDropdown({
+            label: section.settings.baseStyleTone.label,
+            currentId: section.settings.baseStyleTone.currentId,
+            options: section.settings.baseStyleTone.options,
+            kind: "personalization:baseStyleTone",
+          }),
+          React.createElement("h5", { className: "personalization-subheadline" }, "Characteristics"),
+          renderModeDropdown({
+            label: section.settings.warm.label,
+            currentId: section.settings.warm.currentId,
+            options: section.settings.warm.options,
+            kind: "personalization:warm",
+          }),
+          renderModeDropdown({
+            label: section.settings.enthusiastic.label,
+            currentId: section.settings.enthusiastic.currentId,
+            options: section.settings.enthusiastic.options,
+            kind: "personalization:enthusiastic",
+          }),
+          renderModeDropdown({
+            label: section.settings.headersAndLists.label,
+            currentId: section.settings.headersAndLists.currentId,
+            options: section.settings.headersAndLists.options,
+            kind: "personalization:headersAndLists",
+          })
+        );
+      })
     );
   }
 
