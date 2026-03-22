@@ -1629,6 +1629,7 @@ function App() {
       updatedAt: managed?.updatedAt || file.lastModified || null,
       canDelete: Boolean(managed),
       lastError: managed?.lastError || null,
+      tags: Array.isArray(file.tags) ? file.tags : [],
     };
   });
   const managedOnlyRows = managedLibraryFiles
@@ -1644,6 +1645,7 @@ function App() {
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
       canDelete: true,
       lastError: managed.lastError || null,
+      tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
   const dbRows = retrieverRows.concat(managedOnlyRows).sort((left, right) => {
     const a = Date.parse(String(left.updatedAt || 0));
@@ -2250,6 +2252,7 @@ function App() {
                 { className: "library-table-head", role: "row" },
                 React.createElement("span", null, "File"),
                 React.createElement("span", null, "Status"),
+                React.createElement("span", null, "Tags"),
                 React.createElement("span", null, "Size"),
                 React.createElement("span", null, "Chunks"),
                 React.createElement("span", null, "Extension"),
@@ -2282,6 +2285,17 @@ function App() {
                     file.uploadStatus || "unknown"
                   ),
                   file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
+                ),
+                React.createElement(
+                  "span",
+                  { className: "library-tags-cell" },
+                  Array.isArray(file.tags) && file.tags.length > 0
+                    ? file.tags.map((tag) => React.createElement(
+                      "span",
+                      { key: `${file.path}-tag-${tag}`, className: "library-tag-line" },
+                      tag
+                    ))
+                    : React.createElement("span", { className: "library-tag-line muted" }, "—")
                 ),
                 React.createElement("span", null, formatBytes(file.sizeBytes)),
                 React.createElement("span", null, String(file.chunkCount ?? "0")),
