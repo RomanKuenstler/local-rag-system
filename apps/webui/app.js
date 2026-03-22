@@ -2438,13 +2438,9 @@ function App() {
                               ),
                               Array.isArray(match.tags) && match.tags.length > 0
                                 ? React.createElement(
-                                  "div",
+                                  "p",
                                   { className: "assistant-evidence-tags" },
-                                  ...match.tags.map((tag) => React.createElement(
-                                    "span",
-                                    { key: `${message.id}-${match.rank}-${tag}`, className: "assistant-evidence-tag-line" },
-                                    `tag: ${tag}`
-                                  ))
+                                  `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
                                 )
                                 : null,
                               match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
