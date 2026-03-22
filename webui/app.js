@@ -65,6 +65,9 @@ const DEFAULT_PERSONALIZATION_PREFERENCES = {
   enthusiastic: "default",
   headersAndLists: "default",
   customInstructions: "",
+  nickname: "",
+  occupation: "",
+  moreAboutUser: "",
 };
 const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {
@@ -235,6 +238,12 @@ function App() {
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
   const [customInstructionsDraft, setCustomInstructionsDraft] = useState("");
   const [isCustomInstructionsDirty, setIsCustomInstructionsDirty] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [occupationDraft, setOccupationDraft] = useState("");
+  const [moreAboutUserDraft, setMoreAboutUserDraft] = useState("");
+  const [isNicknameDirty, setIsNicknameDirty] = useState(false);
+  const [isOccupationDirty, setIsOccupationDirty] = useState(false);
+  const [isMoreAboutUserDirty, setIsMoreAboutUserDirty] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -286,6 +295,9 @@ function App() {
     const persistedEnthusiastic = String(persistedSettings.enthusiastic || "").trim().toLowerCase();
     const persistedHeadersAndLists = String(persistedSettings.headersAndLists || "").trim().toLowerCase();
     const persistedCustomInstructions = String(persistedSettings.customInstructions || "");
+    const persistedNickname = String(persistedSettings.nickname || "");
+    const persistedOccupation = String(persistedSettings.occupation || "");
+    const persistedMoreAboutUser = String(persistedSettings.moreAboutUser || persistedSettings.aboutUser || "");
     setPersonalizationPreferences((previous) => {
       const nextPreferences = {
         ...previous,
@@ -294,6 +306,9 @@ function App() {
         enthusiastic: persistedEnthusiastic || DEFAULT_PERSONALIZATION_PREFERENCES.enthusiastic,
         headersAndLists: persistedHeadersAndLists || DEFAULT_PERSONALIZATION_PREFERENCES.headersAndLists,
         customInstructions: persistedCustomInstructions,
+        nickname: persistedNickname,
+        occupation: persistedOccupation,
+        moreAboutUser: persistedMoreAboutUser,
       };
       if (
         previous.baseStyleTone === nextPreferences.baseStyleTone
@@ -301,6 +316,9 @@ function App() {
         && previous.enthusiastic === nextPreferences.enthusiastic
         && previous.headersAndLists === nextPreferences.headersAndLists
         && previous.customInstructions === nextPreferences.customInstructions
+        && previous.nickname === nextPreferences.nickname
+        && previous.occupation === nextPreferences.occupation
+        && previous.moreAboutUser === nextPreferences.moreAboutUser
       ) return previous;
       return {
         ...nextPreferences,
@@ -309,7 +327,16 @@ function App() {
     if (!isCustomInstructionsDirty) {
       setCustomInstructionsDraft(persistedCustomInstructions);
     }
-  }, [statusData, isCustomInstructionsDirty]);
+    if (!isNicknameDirty) {
+      setNicknameDraft(persistedNickname);
+    }
+    if (!isOccupationDirty) {
+      setOccupationDraft(persistedOccupation);
+    }
+    if (!isMoreAboutUserDirty) {
+      setMoreAboutUserDraft(persistedMoreAboutUser);
+    }
+  }, [statusData, isCustomInstructionsDirty, isNicknameDirty, isOccupationDirty, isMoreAboutUserDirty]);
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -1229,6 +1256,24 @@ function App() {
     setIsCustomInstructionsDirty(nextDraft !== String(personalizationPreferences.customInstructions || ""));
   }
 
+  function updateNicknameDraft(value) {
+    const nextDraft = String(value || "");
+    setNicknameDraft(nextDraft);
+    setIsNicknameDirty(nextDraft !== String(personalizationPreferences.nickname || ""));
+  }
+
+  function updateOccupationDraft(value) {
+    const nextDraft = String(value || "");
+    setOccupationDraft(nextDraft);
+    setIsOccupationDirty(nextDraft !== String(personalizationPreferences.occupation || ""));
+  }
+
+  function updateMoreAboutUserDraft(value) {
+    const nextDraft = String(value || "");
+    setMoreAboutUserDraft(nextDraft);
+    setIsMoreAboutUserDirty(nextDraft !== String(personalizationPreferences.moreAboutUser || ""));
+  }
+
   async function saveCustomInstructions() {
     if (isSending || !isEmbeddingReady || !isCustomInstructionsDirty) return;
     setIsSending(true);
@@ -1263,6 +1308,63 @@ function App() {
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function saveAboutYouSetting(settingKey, draftValue, setDirtyState) {
+    if (isSending || !isEmbeddingReady) return;
+    setIsSending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          [settingKey]: draftValue,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save about-you setting");
+      }
+      const savedValue = String(payload?.settings?.[settingKey] || "");
+      setPersonalizationPreferences((previous) => ({
+        ...previous,
+        [settingKey]: savedValue,
+      }));
+      if (settingKey === "nickname") {
+        setNicknameDraft(savedValue);
+      } else if (settingKey === "occupation") {
+        setOccupationDraft(savedValue);
+      } else if (settingKey === "moreAboutUser") {
+        setMoreAboutUserDraft(savedValue);
+      }
+      setDirtyState(false);
+      await refreshStatus();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  async function saveNickname() {
+    if (!isNicknameDirty) return;
+    await saveAboutYouSetting("nickname", nicknameDraft, setIsNicknameDirty);
+  }
+
+  async function saveOccupation() {
+    if (!isOccupationDirty) return;
+    await saveAboutYouSetting("occupation", occupationDraft, setIsOccupationDirty);
+  }
+
+  async function saveMoreAboutUser() {
+    if (!isMoreAboutUserDirty) return;
+    await saveAboutYouSetting("moreAboutUser", moreAboutUserDraft, setIsMoreAboutUserDirty);
   }
 
   async function sendPrompt(event) {
@@ -2640,6 +2742,18 @@ function App() {
                       isCustomInstructionsDirty,
                       updateCustomInstructionsDraft,
                       saveCustomInstructions,
+                      nicknameDraft,
+                      occupationDraft,
+                      moreAboutUserDraft,
+                      isNicknameDirty,
+                      isOccupationDirty,
+                      isMoreAboutUserDirty,
+                      updateNicknameDraft,
+                      updateOccupationDraft,
+                      updateMoreAboutUserDraft,
+                      saveNickname,
+                      saveOccupation,
+                      saveMoreAboutUser,
                       icon,
                     })
                     : React.createElement("p", null, "Select a section.")
@@ -2711,6 +2825,18 @@ function App() {
               isCustomInstructionsDirty,
               updateCustomInstructionsDraft,
               saveCustomInstructions,
+              nicknameDraft,
+              occupationDraft,
+              moreAboutUserDraft,
+              isNicknameDirty,
+              isOccupationDirty,
+              isMoreAboutUserDirty,
+              updateNicknameDraft,
+              updateOccupationDraft,
+              updateMoreAboutUserDraft,
+              saveNickname,
+              saveOccupation,
+              saveMoreAboutUser,
               icon,
             })
           )

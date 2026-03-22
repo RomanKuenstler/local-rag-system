@@ -67,8 +67,21 @@ const DEFAULT_PERSONALIZATION_SETTINGS = Object.freeze({
   headersAndLists: "default",
   characteristics: "",
   customInstructions: "",
-  aboutUser: "",
+  nickname: "",
+  occupation: "",
+  moreAboutUser: "",
 });
+const NICKNAME_PROMPT_TEMPLATE = "The user prefers to be addressed as: {NICKNAME}.";
+const OCCUPATION_PROMPT_TEMPLATE = [
+  "The user's occupation is: {OCCUPATION}.",
+  "Adjust explanations to be relevant to this background when helpful.",
+].join("\n");
+const MORE_ABOUT_USER_PROMPT_TEMPLATE = [
+  "Additional user context:",
+  "{ABOUT_USER_TEXT}",
+  "",
+  "Use this information to better tailor explanations and examples when relevant.",
+].join("\n");
 
 const ALLOWED_BASE_STYLE_TONES = new Set(Object.keys(BASE_STYLE_PROMPTS));
 const CHARACTERISTIC_OPTION_PROMPTS = Object.freeze({
@@ -119,7 +132,9 @@ export function getDefaultPersonalizationSettings() {
     headersAndLists: DEFAULT_PERSONALIZATION_SETTINGS.headersAndLists,
     characteristics: DEFAULT_PERSONALIZATION_SETTINGS.characteristics,
     customInstructions: DEFAULT_PERSONALIZATION_SETTINGS.customInstructions,
-    aboutUser: DEFAULT_PERSONALIZATION_SETTINGS.aboutUser,
+    nickname: DEFAULT_PERSONALIZATION_SETTINGS.nickname,
+    occupation: DEFAULT_PERSONALIZATION_SETTINGS.occupation,
+    moreAboutUser: DEFAULT_PERSONALIZATION_SETTINGS.moreAboutUser,
   };
 }
 
@@ -140,6 +155,10 @@ export function normalizePersonalizationSettings(rawSettings) {
   const enthusiastic = String(source.enthusiastic || "").trim().toLowerCase();
   const headersAndLists = String(source.headersAndLists || "").trim().toLowerCase();
 
+  const normalizedNickname = String(source.nickname || "").trim();
+  const normalizedOccupation = String(source.occupation || "").trim();
+  const normalizedMoreAboutUser = String(source.moreAboutUser || source.aboutUser || "").trim();
+
   return {
     baseStyleTone: ALLOWED_BASE_STYLE_TONES.has(baseStyleTone)
       ? baseStyleTone
@@ -155,7 +174,9 @@ export function normalizePersonalizationSettings(rawSettings) {
       : DEFAULT_PERSONALIZATION_SETTINGS.headersAndLists,
     characteristics: String(source.characteristics || "").trim(),
     customInstructions: String(source.customInstructions || "").trim(),
-    aboutUser: String(source.aboutUser || "").trim(),
+    nickname: normalizedNickname,
+    occupation: normalizedOccupation,
+    moreAboutUser: normalizedMoreAboutUser,
   };
 }
 
@@ -174,7 +195,21 @@ export function buildPersonalizationSystemLayer({ sessionId, personalizationSett
   const customInstructionsText = settings.customInstructions
     ? CUSTOM_USER_INSTRUCTIONS_TEMPLATE.replace("{USER_CUSTOM_INSTRUCTIONS}", settings.customInstructions)
     : "no custom user instructions";
-  const aboutUserText = settings.aboutUser || "No user background details provided.";
+  const aboutUserPromptParts = [];
+  if (settings.nickname) {
+    aboutUserPromptParts.push(NICKNAME_PROMPT_TEMPLATE.replace("{NICKNAME}", settings.nickname));
+  }
+  if (settings.occupation) {
+    aboutUserPromptParts.push(OCCUPATION_PROMPT_TEMPLATE.replace("{OCCUPATION}", settings.occupation));
+  }
+  if (settings.moreAboutUser) {
+    aboutUserPromptParts.push(
+      MORE_ABOUT_USER_PROMPT_TEMPLATE.replace("{ABOUT_USER_TEXT}", settings.moreAboutUser)
+    );
+  }
+  const aboutUserText = aboutUserPromptParts.length
+    ? aboutUserPromptParts.join("\n\n")
+    : "No additional information about the user available";
   const personalizationPrompt = PERSONALIZATION_TEMPLATE
     .replace("{BASE_STYLE}", baseStyleText)
     .replace("{CHARACTERISTICS}", characteristicsText)
