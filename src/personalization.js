@@ -57,16 +57,61 @@ const BASE_STYLE_PROMPTS = Object.freeze({
 
 const DEFAULT_PERSONALIZATION_SETTINGS = Object.freeze({
   baseStyleTone: "default",
+  warm: "default",
+  enthusiastic: "default",
+  headersAndLists: "default",
   characteristics: "",
   customInstructions: "",
   aboutUser: "",
 });
 
 const ALLOWED_BASE_STYLE_TONES = new Set(Object.keys(BASE_STYLE_PROMPTS));
+const CHARACTERISTIC_OPTION_PROMPTS = Object.freeze({
+  warm: Object.freeze({
+    more: [
+      "Be more personable and friendly.",
+      "Use a slightly more human and engaging tone.",
+    ].join("\n"),
+    default: "Maintain a neutral level of friendliness.",
+    less: [
+      "Keep the tone more formal and factual.",
+      "Avoid unnecessary emotional or personable language.",
+    ].join("\n"),
+  }),
+  enthusiastic: Object.freeze({
+    more: [
+      "Use a more energetic and enthusiastic tone.",
+      "Show engagement and positive energy when appropriate.",
+    ].join("\n"),
+    default: "Maintain a balanced and neutral level of energy.",
+    less: [
+      "Keep the tone calm, neutral, and composed.",
+      "Avoid overly energetic or expressive language.",
+    ].join("\n"),
+  }),
+  headersAndLists: Object.freeze({
+    more: [
+      "Use clear structure with headings, sections, and lists where helpful.",
+      "Prefer structured formatting for readability.",
+    ].join("\n"),
+    default: [
+      "Use formatting naturally when it improves clarity.",
+      "Do not overuse lists or headings.",
+    ].join("\n"),
+    less: [
+      "Prefer natural paragraphs over structured lists.",
+      "Keep formatting minimal and fluid.",
+    ].join("\n"),
+  }),
+});
+const ALLOWED_CHARACTERISTIC_OPTIONS = new Set(["more", "default", "less"]);
 
 export function getDefaultPersonalizationSettings() {
   return {
     baseStyleTone: DEFAULT_PERSONALIZATION_SETTINGS.baseStyleTone,
+    warm: DEFAULT_PERSONALIZATION_SETTINGS.warm,
+    enthusiastic: DEFAULT_PERSONALIZATION_SETTINGS.enthusiastic,
+    headersAndLists: DEFAULT_PERSONALIZATION_SETTINGS.headersAndLists,
     characteristics: DEFAULT_PERSONALIZATION_SETTINGS.characteristics,
     customInstructions: DEFAULT_PERSONALIZATION_SETTINGS.customInstructions,
     aboutUser: DEFAULT_PERSONALIZATION_SETTINGS.aboutUser,
@@ -86,11 +131,23 @@ export function normalizePersonalizationSettings(rawSettings) {
   const baseStyleTone = normalizedBaseStyleTone === "skeptical"
     ? "sceptical"
     : normalizedBaseStyleTone;
+  const warm = String(source.warm || "").trim().toLowerCase();
+  const enthusiastic = String(source.enthusiastic || "").trim().toLowerCase();
+  const headersAndLists = String(source.headersAndLists || "").trim().toLowerCase();
 
   return {
     baseStyleTone: ALLOWED_BASE_STYLE_TONES.has(baseStyleTone)
       ? baseStyleTone
       : DEFAULT_PERSONALIZATION_SETTINGS.baseStyleTone,
+    warm: ALLOWED_CHARACTERISTIC_OPTIONS.has(warm)
+      ? warm
+      : DEFAULT_PERSONALIZATION_SETTINGS.warm,
+    enthusiastic: ALLOWED_CHARACTERISTIC_OPTIONS.has(enthusiastic)
+      ? enthusiastic
+      : DEFAULT_PERSONALIZATION_SETTINGS.enthusiastic,
+    headersAndLists: ALLOWED_CHARACTERISTIC_OPTIONS.has(headersAndLists)
+      ? headersAndLists
+      : DEFAULT_PERSONALIZATION_SETTINGS.headersAndLists,
     characteristics: String(source.characteristics || "").trim(),
     customInstructions: String(source.customInstructions || "").trim(),
     aboutUser: String(source.aboutUser || "").trim(),
@@ -100,7 +157,15 @@ export function normalizePersonalizationSettings(rawSettings) {
 export function buildPersonalizationSystemLayer({ sessionId, personalizationSettings }) {
   const settings = normalizePersonalizationSettings(personalizationSettings);
   const baseStyleText = BASE_STYLE_PROMPTS[settings.baseStyleTone] || BASE_STYLE_PROMPTS.default;
-  const characteristicsText = settings.characteristics || "No communication characteristics configured yet.";
+  const characteristicsPromptParts = [
+    `Warm (${settings.warm}): ${CHARACTERISTIC_OPTION_PROMPTS.warm[settings.warm]}`,
+    `Enthusiastic (${settings.enthusiastic}): ${CHARACTERISTIC_OPTION_PROMPTS.enthusiastic[settings.enthusiastic]}`,
+    `Headers and Lists (${settings.headersAndLists}): ${CHARACTERISTIC_OPTION_PROMPTS.headersAndLists[settings.headersAndLists]}`,
+  ];
+  if (settings.characteristics) {
+    characteristicsPromptParts.push(`Additional characteristics:\n${settings.characteristics}`);
+  }
+  const characteristicsText = characteristicsPromptParts.join("\n\n");
   const customInstructionsText = settings.customInstructions || "No custom instructions provided.";
   const aboutUserText = settings.aboutUser || "No user background details provided.";
   const personalizationPrompt = PERSONALIZATION_TEMPLATE
