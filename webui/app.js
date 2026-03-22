@@ -29,6 +29,11 @@ const UI_MODE_OPTIONS = [
   { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
   { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details." },
 ];
+const ASSISTANT_MODE_OPTIONS = [
+  { id: "simple", label: "Simple", description: "For everyday simple tasks" },
+  { id: "refine", label: "Refine", description: "For getting refined answers" },
+  { id: "thinking", label: "Thinking", description: "For complex questions" },
+];
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv"],
@@ -87,6 +92,11 @@ function getMenuTabById(tabId) {
   return MENU_DIALOG_TABS.find((tab) => tab.id === tabId) || MENU_DIALOG_TABS[0];
 }
 
+function getAssistantModeMeta(modeId) {
+  const normalized = String(modeId || "").trim().toLowerCase();
+  return ASSISTANT_MODE_OPTIONS.find((mode) => mode.id === normalized) || ASSISTANT_MODE_OPTIONS[0];
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -126,6 +136,8 @@ function App() {
   const [renameInputValue, setRenameInputValue] = useState("");
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
+  const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
+  const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -134,7 +146,9 @@ function App() {
   const promptFileInputRef = useRef(null);
   const libraryFileInputRef = useRef(null);
   const menuRef = useRef(null);
+  const assistantModeMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
+  const sendingStatusPollRef = useRef(null);
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
@@ -143,6 +157,7 @@ function App() {
   const displayedChatList = volatileChat
     ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
     : chatList;
+  const activeChainStage = String(statusData?.assistant?.chainProgress?.stage || "").toLowerCase();
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -166,13 +181,17 @@ function App() {
   async function refreshStatus() {
     try {
       const [statusRes, filesRes, libraryRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/status`),
+        fetch(`${API_BASE_URL}/api/status?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
         fetch(`${API_BASE_URL}/api/files`),
         fetch(`${API_BASE_URL}/api/library/files`),
       ]);
 
       if (statusRes.ok) {
         const newStatus = await statusRes.json();
+        const nextAssistantMode = String(newStatus?.assistant?.mode || "").trim().toLowerCase();
+        if (nextAssistantMode) {
+          setCurrentAssistantMode(getAssistantModeMeta(nextAssistantMode).id);
+        }
         setStatusData((previous) => {
           const previousReady = previous?.embedding?.readiness?.ready === true;
           const nextReady = newStatus?.embedding?.readiness?.ready === true;
@@ -320,10 +339,20 @@ function App() {
     return () => window.removeEventListener("hashchange", syncViewFromHash);
   }, []);
 
+  useEffect(() => () => {
+    if (sendingStatusPollRef.current) {
+      window.clearInterval(sendingStatusPollRef.current);
+      sendingStatusPollRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     function closeMenuOnOutside(event) {
       if (!menuRef.current?.contains(event.target)) {
         setIsMenuOpen(false);
+      }
+      if (!assistantModeMenuRef.current?.contains(event.target)) {
+        setIsAssistantModeMenuOpen(false);
       }
       if (!event.target.closest(".chat-item-actions")) {
         setOpenChatMenuId(null);
@@ -645,6 +674,12 @@ function App() {
     }
 
     setIsSending(true);
+    if (sendingStatusPollRef.current) {
+      window.clearInterval(sendingStatusPollRef.current);
+    }
+    sendingStatusPollRef.current = window.setInterval(() => {
+      refreshStatus().catch(() => {});
+    }, 900);
     const pendingMessageId = crypto.randomUUID();
     setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
       id: pendingMessageId,
@@ -713,6 +748,10 @@ function App() {
         };
       }));
     } finally {
+      if (sendingStatusPollRef.current) {
+        window.clearInterval(sendingStatusPollRef.current);
+        sendingStatusPollRef.current = null;
+      }
       setIsSending(false);
       await loadMessagesFromDb().catch(() => {});
       await refreshStatus();
@@ -785,9 +824,8 @@ function App() {
     try {
       let nextPanel = null;
       if (selectedTab.command === "/personalization") {
-        const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
+        const [assistantPayload, infoPayload] = await Promise.all([
           fetchPanelCommand("/assistant"),
-          fetchPanelCommand("/profile"),
           fetchPanelCommand("/info"),
         ]);
         nextPanel = {
@@ -800,7 +838,6 @@ function App() {
               modes: UI_MODE_OPTIONS,
             },
             assistant: parseAssistantModeContent(assistantPayload.answer || ""),
-            profile: parseProfileContent(profilePayload.answer || ""),
           },
           severity: null,
           responseType: null,
@@ -854,6 +891,7 @@ function App() {
   async function openUnifiedDialog(tabId) {
     if (isSending || !isEmbeddingReady) return;
     setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
     setPanelData(null);
     setIsUnifiedDialogOpen(true);
     await loadUnifiedDialogTab(tabId);
@@ -893,9 +931,8 @@ function App() {
     }
 
     if (activeCommand === "/personalization") {
-      const [assistantPayload, profilePayload, infoPayload] = await Promise.all([
+      const [assistantPayload, infoPayload] = await Promise.all([
         fetchPanelCommand("/assistant"),
-        fetchPanelCommand("/profile"),
         fetchPanelCommand("/info"),
       ]);
 
@@ -909,7 +946,6 @@ function App() {
             modes: UI_MODE_OPTIONS,
           },
           assistant: parseAssistantModeContent(assistantPayload.answer || ""),
-          profile: parseProfileContent(profilePayload.answer || ""),
         },
         severity: null,
         responseType: null,
@@ -930,6 +966,10 @@ function App() {
     setIsSending(true);
     try {
       await fetchPanelCommand(command);
+      if (kind === "assistant") {
+        setCurrentAssistantMode(getAssistantModeMeta(selectedId).id);
+        setIsAssistantModeMenuOpen(false);
+      }
       if (isUnifiedDialogOpen) {
         setDialogTabPanels((previous) => {
           const nextPanels = { ...previous };
@@ -998,6 +1038,8 @@ function App() {
   const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
+  const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
+  const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -1074,15 +1116,25 @@ function App() {
   });
   const libraryRows = pendingLibraryUploads.concat(dbRows);
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
+  const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
+  const sendButtonLabel = isSending
+    ? activeChainStage === "drafting"
+      ? "Drafting..."
+      : activeChainStage === "refining"
+        ? "Refining..."
+        : "Sending..."
+    : "Send";
 
   function openLibraryPage() {
     setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
     setPanelData(null);
     window.location.hash = "#library";
   }
 
   function openChatPage() {
     setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
     window.location.hash = "";
   }
 
@@ -1108,6 +1160,7 @@ function App() {
 
   async function createNewChat() {
     setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
     window.location.hash = "";
     createVolatileChat();
   }
@@ -1366,7 +1419,49 @@ function App() {
             null,
             React.createElement("h2", { className: "header-title" }, "Library")
           )
-          : null
+          : React.createElement(
+            "div",
+            { className: "assistant-mode-menu", ref: assistantModeMenuRef },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "assistant-mode-trigger",
+                onClick: () => setIsAssistantModeMenuOpen((previous) => !previous),
+                "aria-expanded": isAssistantModeMenuOpen ? "true" : "false",
+                "aria-haspopup": "menu",
+              },
+              React.createElement("span", { className: "header-title" }, selectedAssistantMode.label),
+              icon(chevronDownIconPath)
+            ),
+            isAssistantModeMenuOpen
+              ? React.createElement(
+                "div",
+                { className: "assistant-mode-dropdown", role: "menu", "aria-label": "Assistant modes" },
+                ...ASSISTANT_MODE_OPTIONS.map((mode) => React.createElement(
+                  "button",
+                  {
+                    key: `header-mode-${mode.id}`,
+                    type: "button",
+                    className: `assistant-mode-option${mode.id === selectedAssistantMode.id ? " active" : ""}`,
+                    onClick: () => applyPersonalizationChange("assistant", mode.id),
+                    disabled: isSending || !isEmbeddingReady,
+                    role: "menuitemradio",
+                    "aria-checked": mode.id === selectedAssistantMode.id ? "true" : "false",
+                  },
+                  React.createElement(
+                    "div",
+                    { className: "assistant-mode-option-text" },
+                    React.createElement("strong", null, mode.label),
+                    React.createElement("small", null, mode.description)
+                  ),
+                  mode.id === selectedAssistantMode.id
+                    ? React.createElement("span", { className: "assistant-mode-option-check" }, icon(checkIconPath))
+                    : null
+                ))
+              )
+              : null
+          )
       )
     ),
     React.createElement(
@@ -1857,7 +1952,7 @@ function App() {
             "button",
             { className: "send", type: "submit", disabled: isSending || !isEmbeddingReady || !inputValue.trim() },
             icon("M2 21l20-9L2 3v7l14 2-14 2z"),
-            React.createElement("span", null, isSending ? "Sending..." : "Send")
+            React.createElement("span", null, sendButtonLabel)
           ),
           attachedPromptFiles.length > 0
             ? React.createElement(
