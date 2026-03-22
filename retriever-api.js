@@ -1339,11 +1339,14 @@ async function handlePersonalization(req, res) {
     const warm = String(body.warm || "").trim().toLowerCase();
     const enthusiastic = String(body.enthusiastic || "").trim().toLowerCase();
     const headersAndLists = String(body.headersAndLists || "").trim().toLowerCase();
+    const hasCustomInstructions = Object.prototype.hasOwnProperty.call(body, "customInstructions");
+    const customInstructions = hasCustomInstructions ? String(body.customInstructions || "") : "";
     const settings = await updateSessionPersonalizationSettings(sessionId, {
       ...(baseStyleTone ? { baseStyleTone } : {}),
       ...(warm ? { warm } : {}),
       ...(enthusiastic ? { enthusiastic } : {}),
       ...(headersAndLists ? { headersAndLists } : {}),
+      ...(hasCustomInstructions ? { customInstructions } : {}),
     });
     json(res, 200, {
       sessionId,
