@@ -129,6 +129,7 @@ export function renderPanelContent({
   saveOccupation,
   saveMoreAboutUser,
   icon,
+  t = (key, fallback = "") => fallback || key,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
   const disabledAssistantModeSet = new Set(
@@ -188,7 +189,7 @@ export function renderPanelContent({
       React.createElement(
         "section",
         { className: "config-section config-table-card" },
-        React.createElement("h4", null, "Change now (no restart)"),
+        React.createElement("h4", null, t("change_now", "Change now (no restart)")),
         React.createElement(
           "div",
           { className: "config-table" },
@@ -384,7 +385,7 @@ export function renderPanelContent({
                 React.createElement("textarea", {
                   className: "personalization-custom-instructions-input",
                   value: customInstructionsValue,
-                  placeholder: "Additional behavior, style, and tone preferences",
+                  placeholder: t("custom_instructions_placeholder", "Additional behavior, style, and tone preferences"),
                   rows: 1,
                   onChange: (event) => {
                     autoResizeTextarea(event.currentTarget);
@@ -426,7 +427,7 @@ export function renderPanelContent({
                 React.createElement("input", {
                   className: "personalization-custom-instructions-input",
                   value: nicknameValue,
-                  placeholder: "Nickname",
+                  placeholder: t("nickname_placeholder", "Nickname"),
                   onChange: (event) => updateNicknameDraft(event.currentTarget.value),
                   disabled: interactionDisabled,
                   "aria-label": "Nickname",
@@ -454,7 +455,7 @@ export function renderPanelContent({
                 React.createElement("input", {
                   className: "personalization-custom-instructions-input",
                   value: occupationValue,
-                  placeholder: "Occupation",
+                  placeholder: t("occupation_placeholder", "Occupation"),
                   onChange: (event) => updateOccupationDraft(event.currentTarget.value),
                   disabled: interactionDisabled,
                   "aria-label": "Occupation",
@@ -482,7 +483,7 @@ export function renderPanelContent({
                 React.createElement("textarea", {
                   className: "personalization-custom-instructions-input",
                   value: moreAboutUserValue,
-                  placeholder: "More about you",
+                  placeholder: t("more_about_you_placeholder", "More about you"),
                   rows: 1,
                   onChange: (event) => {
                     autoResizeTextarea(event.currentTarget);

@@ -934,13 +934,14 @@ async function handlePrompt(req, res) {
         stage: "drafting",
       });
 
+      const draftingPersonalizationSettings = await getSessionPersonalizationSettings(sessionId);
       const draftResponse = await chatModel.invoke([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
           sessionId,
-          personalizationSettings,
+          personalizationSettings: draftingPersonalizationSettings,
           includeAssistantModeLayer: false,
         }),
         [
@@ -958,13 +959,14 @@ async function handlePrompt(req, res) {
         stage: "refining",
       });
 
+      const refiningPersonalizationSettings = await getSessionPersonalizationSettings(sessionId);
       const refinedResponse = await chatModel.invoke([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
           sessionId,
-          personalizationSettings,
+          personalizationSettings: refiningPersonalizationSettings,
           includeAssistantModeLayer: false,
         }),
         [

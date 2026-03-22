@@ -23,6 +23,7 @@ import {
   buildFallbackChatExportPayload,
   triggerJsonDownload,
 } from "./chat-export.js";
+import { DEFAULT_LOCALE, createTranslator, normalizeLocale } from "./i18n.js";
 
 const UI_MODE_OPTIONS = [
   { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics.", shortDescription: "Focused chat view" },
@@ -80,14 +81,7 @@ const LIBRARY_UPLOAD_RULES = {
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
-const MENU_DIALOG_TABS = [
-  { id: "general", label: "General", command: "/general" },
-  { id: "personalization", label: "Personalization", command: "/personalization" },
-  { id: "settings", label: "Settings", command: "/config" },
-  { id: "info", label: "Info", command: "/info" },
-  { id: "archive", label: "Archive" },
-  { id: "help", label: "Help", command: "/help" },
-];
+const UI_LOCALE_STORAGE_KEY = "rag-ui-locale";
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -125,9 +119,6 @@ function getCurrentUiModeFromInfoText(infoText) {
   return uiModeEntry?.value || "clean";
 }
 
-function getMenuTabById(tabId) {
-  return MENU_DIALOG_TABS.find((tab) => tab.id === tabId) || MENU_DIALOG_TABS[0];
-}
 
 function getAssistantModeMeta(modeId) {
   const normalized = String(modeId || "").trim().toLowerCase();
@@ -139,27 +130,27 @@ function isAssistantModeTemporarilyDisabled(modeId) {
   return TEMPORARILY_DISABLED_ASSISTANT_MODES.has(normalized);
 }
 
-function getPendingAssistantMessage(modeId, chainStage) {
+function getPendingAssistantMessage(modeId, chainStage, t) {
   const normalizedMode = String(modeId || "").trim().toLowerCase();
   const normalizedStage = String(chainStage || "").trim().toLowerCase();
   if (normalizedStage === "searching") {
-    return "Searching the knowledge base…";
+    return t("searching", "Searching the knowledge base…");
   }
   if (normalizedMode === "refine") {
     if (normalizedStage === "refining") {
-      return "Refining the final answer…";
+      return t("refining", "Refining the final answer…");
     }
-    return "Drafting an answer…";
+    return t("drafting", "Drafting an answer…");
   }
-  return "Assistant is thinking…";
+  return t("assistant_thinking", "Assistant is thinking…");
 }
 
-function buildPendingAssistantTrailText(statusTrail) {
+function buildPendingAssistantTrailText(statusTrail, t) {
   const normalizedTrail = Array.isArray(statusTrail)
     ? statusTrail.map((item) => String(item || "").trim()).filter(Boolean)
     : [];
   if (normalizedTrail.length === 0) {
-    return "Assistant is thinking…";
+    return t("assistant_thinking", "Assistant is thinking…");
   }
   return normalizedTrail.join("\n");
 }
@@ -226,6 +217,8 @@ marked.setOptions({
 function App() {
   const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
   const [messages, setMessages] = useState([]);
+  const [uiLocale, setUiLocale] = useState(() => normalizeLocale(window.localStorage.getItem(UI_LOCALE_STORAGE_KEY) || DEFAULT_LOCALE));
+  const t = useMemo(() => createTranslator(uiLocale), [uiLocale]);
   const [inputValue, setInputValue] = useState("");
   const [attachedPromptFiles, setAttachedPromptFiles] = useState([]);
   const [attachmentNotice, setAttachmentNotice] = useState("");
@@ -288,12 +281,27 @@ function App() {
     () => Array.from(TEMPORARILY_DISABLED_ASSISTANT_MODES),
     []
   );
+
+  const menuDialogTabs = useMemo(() => ([
+    { id: "general", label: "General", command: "/general" },
+    { id: "personalization", label: t("personalization", "Personalization"), command: "/personalization" },
+    { id: "settings", label: t("settings", "Settings"), command: "/config" },
+    { id: "info", label: t("info", "Info"), command: "/info" },
+    { id: "archive", label: "Archive" },
+    { id: "help", label: t("help", "Help"), command: "/help" },
+  ]), [t]);
+
+  const getMenuTabById = (tabId) => menuDialogTabs.find((tab) => tab.id === tabId) || menuDialogTabs[0];
   const displayedChatList = volatileChat
     ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
     : chatList;
   const activeChainProgress = statusData?.assistant?.chainProgress || null;
   const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
 
+
+  useEffect(() => {
+    document.documentElement.lang = uiLocale;
+  }, [uiLocale]);
   useEffect(() => {
     if (!isSending) {
       return;
@@ -303,9 +311,9 @@ function App() {
       : [];
     const normalizedMode = String(activeChainProgress?.mode || currentAssistantMode || "").trim().toLowerCase();
     const mappedBackendTrail = dedupeStatusTrail(backendStageTrail.map((stage) => (
-      getPendingAssistantMessage(normalizedMode, stage)
+      getPendingAssistantMessage(normalizedMode, stage, t)
     )));
-    const nextPendingText = getPendingAssistantMessage(currentAssistantMode, activeChainStage);
+    const nextPendingText = getPendingAssistantMessage(currentAssistantMode, activeChainStage, t);
     setMessages((previous) => previous.map((message) => {
       if (!message.isPending || message.role !== "assistant") {
         return message;
@@ -321,7 +329,7 @@ function App() {
       if (nextTrail.length === 0) {
         nextTrail = [nextPendingText];
       }
-      const nextText = buildPendingAssistantTrailText(nextTrail);
+      const nextText = buildPendingAssistantTrailText(nextTrail, t);
       if (message.text === nextText) return message;
       return {
         ...message,
@@ -534,7 +542,7 @@ function App() {
       return {
         ...message,
         pendingStatusTrail: nextTrail,
-        text: buildPendingAssistantTrailText(nextTrail),
+        text: buildPendingAssistantTrailText(nextTrail, t),
       };
     }));
   }
@@ -929,7 +937,7 @@ function App() {
     }, 250);
     refreshStatus().catch(() => {});
     const pendingMessageId = crypto.randomUUID();
-    const initialPendingText = getPendingAssistantMessage(currentAssistantMode, "searching");
+    const initialPendingText = getPendingAssistantMessage(currentAssistantMode, "searching", t);
     setMessages((prev) => prev.concat(createMessage(
       "assistant",
       initialPendingText,
@@ -942,14 +950,14 @@ function App() {
     const fallbackStepTimers = [];
     if (String(currentAssistantMode || "").trim().toLowerCase() === "refine") {
       fallbackStepTimers.push(window.setTimeout(() => {
-        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "drafting"));
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "drafting", t));
       }, 550));
       fallbackStepTimers.push(window.setTimeout(() => {
-        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "refining"));
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "refining", t));
       }, 1300));
     } else {
       fallbackStepTimers.push(window.setTimeout(() => {
-        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("simple", "single_pass"));
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("simple", "single_pass", t));
       }, 650));
     }
 
@@ -1510,7 +1518,7 @@ function App() {
   const renderPendingAssistantTrail = (message) => {
     const trail = dedupeStatusTrail(message?.pendingStatusTrail);
     if (trail.length === 0) {
-      return renderAssistantMarkdown(message?.text || "Assistant is thinking…");
+      return renderAssistantMarkdown(message?.text || t("assistant_thinking", "Assistant is thinking…"));
     }
     return React.createElement(
       "div",
@@ -1596,13 +1604,13 @@ function App() {
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const sendButtonLabel = isSending
     ? activeChainStage === "searching"
-      ? "Searching..."
+      ? t("searching", "Searching...")
       : activeChainStage === "drafting"
-      ? "Drafting..."
+      ? t("drafting", "Drafting...")
       : activeChainStage === "refining"
-        ? "Refining..."
-        : "Thinking..."
-    : "Send";
+        ? t("refining", "Refining...")
+        : t("assistant_thinking", "Thinking...")
+    : t("send", "Send");
 
   function openLibraryPage() {
     setIsMenuOpen(false);
@@ -1916,7 +1924,7 @@ function App() {
             isAssistantModeMenuOpen
               ? React.createElement(
                 "div",
-                { className: "assistant-mode-dropdown", role: "menu", "aria-label": "Assistant modes" },
+                { className: "assistant-mode-dropdown", role: "menu", "aria-label": t("assistant_modes", "Assistant modes") },
                 ...ASSISTANT_MODE_OPTIONS.map((mode) => React.createElement(
                   "button",
                   {
@@ -1953,7 +1961,7 @@ function App() {
           "button",
           { type: "button", className: "side-nav-item", onClick: createNewChat },
           icon(plusChatIconPath),
-          React.createElement("span", null, "New chat")
+          React.createElement("span", null, t("new_chat", "New chat"))
         ),
         React.createElement(
           "button",
@@ -1963,7 +1971,7 @@ function App() {
             onClick: activeView === "library" ? openChatPage : openLibraryPage,
           },
           icon(activeView === "library" ? chatIconPath : libraryIconPath),
-          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
+          React.createElement("span", null, activeView === "library" ? t("chat", "Chat") : t("library", "Library"))
         ),
         React.createElement(
           "button",
@@ -1974,7 +1982,7 @@ function App() {
             disabled: isSending || !isEmbeddingReady,
           },
           icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
-          React.createElement("span", null, "Personalization")
+          React.createElement("span", null, t("personalization", "Personalization"))
         ),
         React.createElement(
           "button",
@@ -1985,15 +1993,31 @@ function App() {
             disabled: isSending || !isEmbeddingReady,
           },
           icon(settingsIconPath),
-          React.createElement("span", null, "Settings")
+          React.createElement("span", null, t("settings", "Settings"))
         )
       ),
-      React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
+      React.createElement("label", { className: "side-nav-language-label" }, t("language_label", "Language")),
+      React.createElement(
+        "select",
+        {
+          className: "side-nav-language-select",
+          value: uiLocale,
+          onChange: (event) => {
+            const nextLocale = normalizeLocale(event.target.value);
+            setUiLocale(nextLocale);
+            window.localStorage.setItem(UI_LOCALE_STORAGE_KEY, nextLocale);
+          },
+        },
+        React.createElement("option", { value: "en" }, t("language_english", "English")),
+        React.createElement("option", { value: "ru" }, t("language_russian", "Русский")),
+        React.createElement("option", { value: "uk" }, t("language_ukrainian", "Українська"))
+      ),
+      React.createElement("h3", { className: "side-nav-headline" }, t("your_chats", "Your chats")),
       React.createElement(
         "div",
         { className: "side-nav-chat-list", role: "navigation", "aria-label": "Your chats" },
         isLoadingChats
-          ? React.createElement("p", { className: "side-nav-loading" }, "Loading chats…")
+          ? React.createElement("p", { className: "side-nav-loading" }, t("loading_chats", "Loading chats…"))
           : null,
         ...displayedChatList.map((chat) => {
           const isActiveChat = chat.id === activeChatId;
@@ -2417,7 +2441,7 @@ function App() {
                 type: "button",
                 onClick: openPromptFilePicker,
                 disabled: isSending || !isEmbeddingReady,
-                "aria-label": "Attach files",
+                "aria-label": t("attach_files", "Attach files"),
                 "data-testid": "composer-attach-button",
                 title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
               },
@@ -2440,7 +2464,7 @@ function App() {
                 }
               },
               rows: 1,
-              placeholder: "Ask anything about your knowledge base...",
+              placeholder: t("ask_placeholder", "Ask anything about your knowledge base..."),
               disabled: isSending || !isEmbeddingReady,
             })
           ),
@@ -2454,7 +2478,7 @@ function App() {
             ? React.createElement(
               "p",
               { className: "composer-attachment-list" },
-              `Attached: ${attachedPromptFiles.map((file) => file.name).join(", ")}`
+              `${t("attached_prefix", "Attached")}: ${attachedPromptFiles.map((file) => file.name).join(", ")}`
             )
             : null,
           attachmentNotice
@@ -2488,38 +2512,38 @@ function App() {
             "button",
             { type: "button", onClick: () => openUnifiedDialog("info"), disabled: isSending || !isEmbeddingReady },
             icon("M11 17h2v-6h-2zm1-8a1.25 1.25 0 1 0 0 2.5A1.25 1.25 0 0 0 12 9m0 13A10 10 0 1 1 12 2a10 10 0 0 1 0 20"),
-            "Info"
+            t("info", "Info")
           ),
           activeView === "library"
             ? React.createElement(
               "button",
               { type: "button", onClick: openChatPage },
               icon(chatIconPath),
-              "Chat"
+              t("chat", "Chat")
             )
             : React.createElement(
               "button",
               { type: "button", onClick: openLibraryPage },
               icon(libraryIconPath),
-              "Library"
+              t("library", "Library")
             ),
           React.createElement(
             "button",
             { type: "button", onClick: openPersonalizationPanel, disabled: isSending || !isEmbeddingReady },
             icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
-            "Personalization"
+            t("personalization", "Personalization")
           ),
           React.createElement(
             "button",
             { type: "button", onClick: openSettingsDialog, disabled: isSending || !isEmbeddingReady },
             icon("M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5"),
-            "Settings"
+            t("settings", "Settings")
           ),
           React.createElement(
             "button",
             { type: "button", onClick: () => openUnifiedDialog("help"), disabled: isSending || !isEmbeddingReady },
             icon("M12 2 2 12l10 10 10-10Zm0 4.5a3 3 0 0 1 3 3c0 2.2-3 2.4-3 5h-2c0-3.4 3-3.8 3-5a1 1 0 0 0-2 0H9a3 3 0 0 1 3-3Zm-1 10h2v2h-2z"),
-            "Help"
+            t("help", "Help")
           )
         )
         : null,
