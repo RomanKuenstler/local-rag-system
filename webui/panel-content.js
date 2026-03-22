@@ -116,6 +116,18 @@ export function renderPanelContent({
   isCustomInstructionsDirty,
   updateCustomInstructionsDraft,
   saveCustomInstructions,
+  nicknameDraft,
+  occupationDraft,
+  moreAboutUserDraft,
+  isNicknameDirty,
+  isOccupationDirty,
+  isMoreAboutUserDirty,
+  updateNicknameDraft,
+  updateOccupationDraft,
+  updateMoreAboutUserDraft,
+  saveNickname,
+  saveOccupation,
+  saveMoreAboutUser,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
@@ -143,6 +155,12 @@ export function renderPanelContent({
   const saveIconPath = "M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14V7zm-7 0v4h4V3zm8 18H6v-6h12zm0-8H6V5h2v4h8V5h2z";
   const customInstructionsValue = String(customInstructionsDraft || "");
   const customInstructionsDisabled = interactionDisabled || !isCustomInstructionsDirty;
+  const nicknameValue = String(nicknameDraft || "");
+  const occupationValue = String(occupationDraft || "");
+  const moreAboutUserValue = String(moreAboutUserDraft || "");
+  const nicknameSaveDisabled = interactionDisabled || !isNicknameDirty;
+  const occupationSaveDisabled = interactionDisabled || !isOccupationDirty;
+  const moreAboutUserSaveDisabled = interactionDisabled || !isMoreAboutUserDirty;
   const autoResizeTextarea = (element) => {
     if (!element) return;
     element.style.height = "auto";
@@ -385,6 +403,104 @@ export function renderPanelContent({
                     disabled: customInstructionsDisabled,
                     "aria-label": "Save custom instructions",
                     title: "Save custom instructions",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            )
+          );
+        }
+
+        if (section.id === "about-you") {
+          return React.createElement(
+            "section",
+            { key: section.id, className: "info-group-card personalization-section-card" },
+            React.createElement("h4", null, section.title),
+            React.createElement("h5", { className: "personalization-subheadline" }, "Personal details"),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("input", {
+                  className: "personalization-custom-instructions-input",
+                  value: nicknameValue,
+                  placeholder: "Nickname",
+                  onChange: (event) => updateNicknameDraft(event.currentTarget.value),
+                  disabled: interactionDisabled,
+                  "aria-label": "Nickname",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${nicknameSaveDisabled ? "" : " active"}`,
+                    onClick: saveNickname,
+                    disabled: nicknameSaveDisabled,
+                    "aria-label": "Save nickname",
+                    title: "Save nickname",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            ),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("input", {
+                  className: "personalization-custom-instructions-input",
+                  value: occupationValue,
+                  placeholder: "Occupation",
+                  onChange: (event) => updateOccupationDraft(event.currentTarget.value),
+                  disabled: interactionDisabled,
+                  "aria-label": "Occupation",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${occupationSaveDisabled ? "" : " active"}`,
+                    onClick: saveOccupation,
+                    disabled: occupationSaveDisabled,
+                    "aria-label": "Save occupation",
+                    title: "Save occupation",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            ),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("textarea", {
+                  className: "personalization-custom-instructions-input",
+                  value: moreAboutUserValue,
+                  placeholder: "More about you",
+                  rows: 1,
+                  onChange: (event) => {
+                    autoResizeTextarea(event.currentTarget);
+                    updateMoreAboutUserDraft(event.currentTarget.value);
+                  },
+                  ref: autoResizeTextarea,
+                  disabled: interactionDisabled,
+                  "aria-label": "More about you",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${moreAboutUserSaveDisabled ? "" : " active"}`,
+                    onClick: saveMoreAboutUser,
+                    disabled: moreAboutUserSaveDisabled,
+                    "aria-label": "Save more about you",
+                    title: "Save more about you",
                   },
                   icon(saveIconPath)
                 )

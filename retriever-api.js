@@ -1341,12 +1341,21 @@ async function handlePersonalization(req, res) {
     const headersAndLists = String(body.headersAndLists || "").trim().toLowerCase();
     const hasCustomInstructions = Object.prototype.hasOwnProperty.call(body, "customInstructions");
     const customInstructions = hasCustomInstructions ? String(body.customInstructions || "") : "";
+    const hasNickname = Object.prototype.hasOwnProperty.call(body, "nickname");
+    const nickname = hasNickname ? String(body.nickname || "") : "";
+    const hasOccupation = Object.prototype.hasOwnProperty.call(body, "occupation");
+    const occupation = hasOccupation ? String(body.occupation || "") : "";
+    const hasMoreAboutUser = Object.prototype.hasOwnProperty.call(body, "moreAboutUser");
+    const moreAboutUser = hasMoreAboutUser ? String(body.moreAboutUser || "") : "";
     const settings = await updateSessionPersonalizationSettings(sessionId, {
       ...(baseStyleTone ? { baseStyleTone } : {}),
       ...(warm ? { warm } : {}),
       ...(enthusiastic ? { enthusiastic } : {}),
       ...(headersAndLists ? { headersAndLists } : {}),
       ...(hasCustomInstructions ? { customInstructions } : {}),
+      ...(hasNickname ? { nickname } : {}),
+      ...(hasOccupation ? { occupation } : {}),
+      ...(hasMoreAboutUser ? { moreAboutUser } : {}),
     });
     json(res, 200, {
       sessionId,

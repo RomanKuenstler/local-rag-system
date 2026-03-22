@@ -884,6 +884,10 @@ body {
 }
 .personalization-custom-instructions-row {
   display: block;
+  margin-top: 0.5rem;
+}
+.personalization-custom-instructions-row:first-of-type {
+  margin-top: 0.35rem;
 }
 .personalization-custom-instructions-input-shell {
   position: relative;
