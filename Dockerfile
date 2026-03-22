@@ -8,7 +8,7 @@ RUN npm install
 COPY apps ./apps
 COPY shared ./shared
 COPY migrations ./migrations
-COPY guardrails.md ./guardrails.md
+COPY ./shared/prompts/guardrails.md ./guardrails.md
 
 RUN groupadd --gid 1001 nodejs && \
     useradd --uid 1001 --gid nodejs --shell /bin/bash --create-home ai

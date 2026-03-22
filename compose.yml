@@ -173,4 +173,4 @@ models:
 
 configs:
   guardrails.md:
-    file: ./guardrails.md
+    file: ./shared/prompts/guardrails.md
