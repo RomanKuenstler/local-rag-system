@@ -68,6 +68,7 @@ import {
   getIndexStateMap,
   initializeRuntimeConfigDefaults,
   getSelectionState,
+  getSessionSetting,
   initializeStateDefaults,
   listSessionChats,
   listChatMessages,
@@ -77,6 +78,7 @@ import {
   setSessionActiveChat,
   updateChatName,
   updateSetting,
+  updateSessionSetting,
   updateChatStatus,
 } from "./src/state-store.js";
 import {
@@ -96,7 +98,6 @@ const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
 
-let assistantMode = initialAssistantMode;
 let profileId = initialProfileId;
 let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
@@ -109,6 +110,21 @@ const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", "
 const MAX_PROMPT_UPLOAD_FILES = 3;
 const MAX_REQUEST_BODY_BYTES = Number.parseInt(process.env.MAX_REQUEST_BODY_BYTES || String(10 * 1024 * 1024), 10);
 const pendingWeakAnswers = new Map();
+const assistantChainProgressBySession = new Map();
+const assistantChainProgressClearTimers = new Map();
+const REFINE_DRAFT_SYSTEM_PROMPT = String(process.env.REFINE_DRAFT_SYSTEM_PROMPT || [
+  "[CHAIN STEP: DRAFT]",
+  "Produce an initial draft answer using retrieved evidence as primary support.",
+  "The draft should be clear but does not need to be final polish.",
+  "Do not mention this chain step to the user.",
+].join("\n")).trim();
+const REFINE_FINAL_SYSTEM_PROMPT = String(process.env.REFINE_FINAL_SYSTEM_PROMPT || [
+  "[CHAIN STEP: REFINE]",
+  "You are refining an existing draft into the final response.",
+  "Improve clarity, accuracy, and structure while preserving evidence-grounded claims.",
+  "Remove redundancy, tighten wording, and keep uncertainties explicit where evidence is incomplete.",
+  "Do not mention the draft/refine process to the user.",
+].join("\n")).trim();
 const { runtimeConfig, setRuntimeConfigValue } = createRuntimeConfigManager({
   historyMessages: HISTORY_MESSAGES,
   maxSimilarities: MAX_SIMILARITIES,
@@ -130,6 +146,42 @@ function generateChatName() {
 
 function normalizePrompt(input) {
   return String(input || "").trim();
+}
+
+function setAssistantChainProgress(sessionId, progress) {
+  if (!sessionId) return;
+  const existingTimer = assistantChainProgressClearTimers.get(sessionId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    assistantChainProgressClearTimers.delete(sessionId);
+  }
+  assistantChainProgressBySession.set(sessionId, {
+    ...progress,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function clearAssistantChainProgress(sessionId) {
+  if (!sessionId) return;
+  const existingTimer = assistantChainProgressClearTimers.get(sessionId);
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    assistantChainProgressClearTimers.delete(sessionId);
+  }
+  assistantChainProgressBySession.delete(sessionId);
+}
+
+function markAssistantChainCompleted(sessionId, mode) {
+  if (!sessionId) return;
+  setAssistantChainProgress(sessionId, {
+    active: false,
+    mode,
+    stage: "completed",
+  });
+  const timer = setTimeout(() => {
+    clearAssistantChainProgress(sessionId);
+  }, 15000);
+  assistantChainProgressClearTimers.set(sessionId, timer);
 }
 
 async function normalizeUploadedPromptFile(file) {
@@ -371,6 +423,11 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   }
 
   if (normalizedPrompt === "/info") {
+    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }));
     return {
       statusCode: 200,
       payload: {
@@ -379,7 +436,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
           appName: APP_NAME,
           appVersion: APP_VERSION,
           uiMode,
-          assistantMode,
+          assistantMode: currentAssistantMode,
           profileId,
           chatModelName: chatModel.model,
           embeddingModelName: embeddingsModel.model,
@@ -416,6 +473,11 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
 
 
   if (normalizedPrompt === "/assistant") {
+    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }));
     const modes = listAssistantModes();
     return {
       statusCode: 200,
@@ -424,7 +486,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         answer: [
           "Assistant modes:",
           ...modes.map((mode) => `- ${mode.id}: ${mode.description}`),
-          `Current mode: ${assistantMode}`
+          `Current mode: ${currentAssistantMode}`
         ].join("\n"),
         evidenceSeverity: null,
         responseType: "assistant_mode",
@@ -491,14 +553,18 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
       };
     }
 
-    assistantMode = normalizeAssistantMode(requestedMode);
-    await updateSetting("assistant_mode", assistantMode);
+    const nextAssistantMode = normalizeAssistantMode(requestedMode);
+    await updateSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      value: nextAssistantMode,
+    });
 
     return {
       statusCode: 200,
       payload: {
         sessionId,
-        answer: `Assistant mode changed to: ${assistantMode}` ,
+        answer: `Assistant mode changed to: ${nextAssistantMode}` ,
         evidenceSeverity: "ok",
         responseType: "assistant_mode",
       },
@@ -751,6 +817,11 @@ async function handlePrompt(req, res) {
     return;
   }
   const { chatId, chatName } = resolvedChat;
+  const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
+    sessionId,
+    settingName: "assistant_mode",
+    fallbackValue: initialAssistantMode,
+  }));
 
   if (uploadedFiles.length > MAX_PROMPT_UPLOAD_FILES) {
     json(res, 400, {
@@ -813,18 +884,82 @@ async function handlePrompt(req, res) {
     cosineLimit: runtimeConfig.cosineLimit,
   });
 
-  const assistantResponse = await chatModel.invoke([
-    ...buildSystemPromptLayers({
-      guardrailsText,
-      ragContextPackage: searchResult.ragContextPackage,
-      assistantMode,
-      profileId,
-    }),
-    ...chatHistory,
-    ["human", promptForAssistant],
-  ]);
+  let answer = "";
+  try {
+    if (currentAssistantMode === "refine") {
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "drafting",
+      });
 
-  const answer = String(assistantResponse.content || "").trim();
+      const draftResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          profileId,
+        }),
+        ["system", REFINE_DRAFT_SYSTEM_PROMPT],
+        ...chatHistory,
+        ["human", promptForAssistant],
+      ]);
+
+      const draftAnswer = String(draftResponse.content || "").trim();
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "refining",
+      });
+
+      const refinedResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          profileId,
+        }),
+        ["system", REFINE_FINAL_SYSTEM_PROMPT],
+        ...chatHistory,
+        [
+          "human",
+          [
+            "Original user prompt:",
+            promptForAssistant,
+            "",
+            "Draft answer to refine:",
+            draftAnswer || "(empty draft)",
+            "",
+            "Return only the final refined answer.",
+          ].join("\n"),
+        ],
+      ]);
+
+      answer = String(refinedResponse.content || "").trim();
+      markAssistantChainCompleted(sessionId, currentAssistantMode);
+    } else {
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "single_pass",
+      });
+      const assistantResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          profileId,
+        }),
+        ...chatHistory,
+        ["human", promptForAssistant],
+      ]);
+      answer = String(assistantResponse.content || "").trim();
+      markAssistantChainCompleted(sessionId, currentAssistantMode);
+    }
+  } catch (error) {
+    clearAssistantChainProgress(sessionId);
+    throw error;
+  }
   const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
 
   const hasUploadedContext = Boolean(uploadInfo?.uploadedCount);
@@ -1144,6 +1279,15 @@ async function handleDownloadChat(req, res, chatId) {
 }
 
 async function handleStatus(_req, res) {
+  const url = new URL(_req.url, `http://${_req.headers.host || "localhost"}`);
+  const sessionId = String(url.searchParams.get("sessionId") || "").trim();
+  const currentAssistantMode = sessionId
+    ? normalizeAssistantMode(await getSessionSetting({
+      sessionId,
+      settingName: "assistant_mode",
+      fallbackValue: initialAssistantMode,
+    }))
+    : initialAssistantMode;
   const readiness = await getEmbeddingReadiness();
   const embeddingStatus = await readEmbeddingStatus();
 
@@ -1155,8 +1299,9 @@ async function handleStatus(_req, res) {
       uiMode,
     },
     assistant: {
-      mode: assistantMode,
+      mode: currentAssistantMode,
       profile: profileId,
+      chainProgress: sessionId ? (assistantChainProgressBySession.get(sessionId) || null) : null,
       availableModes: listAssistantModes().map((mode) => ({ id: mode.id, label: mode.label })),
       availableProfiles: listProfiles().map((profile) => ({ id: profile.id, label: profile.label })),
     },
@@ -1299,7 +1444,6 @@ await initializeRuntimeConfigDefaults({
 });
 const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
 uiMode = persistedSelections.uiMode;
-assistantMode = normalizeAssistantMode(persistedSelections.assistantMode);
 profileId = normalizeProfile(persistedSelections.profileId);
 const persistedRuntimeConfig = await getRuntimeConfigState({
   historyMessages: runtimeConfig.historyMessages,

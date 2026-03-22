@@ -82,7 +82,12 @@ async function fetchJson(url) {
 }
 
 async function handleStatus(req, res) {
-  const retrieverStatusPromise = fetchJson(`${RETRIEVER_BASE_URL}/internal/retriever/status`);
+  const requestUrl = new URL(req.url || "/api/status", `http://${req.headers.host || "localhost"}`);
+  const sessionId = String(requestUrl.searchParams.get("sessionId") || "").trim();
+  const retrieverStatusUrl = sessionId
+    ? `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`
+    : `${RETRIEVER_BASE_URL}/internal/retriever/status`;
+  const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
 
   const [retrieverStatus, embedderStatus] = await Promise.all([retrieverStatusPromise, embedderStatusPromise]);
