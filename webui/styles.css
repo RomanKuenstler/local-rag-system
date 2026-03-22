@@ -893,6 +893,9 @@ body {
   position: relative;
 }
 .personalization-custom-instructions-input {
+  width: 100%;
+  display: block;
+  box-sizing: border-box;
   min-height: 22px;
   max-height: none;
   line-height: 1.35;
