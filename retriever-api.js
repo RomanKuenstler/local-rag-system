@@ -888,6 +888,7 @@ async function handlePrompt(req, res) {
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
           profileId,
+          includeAssistantModeLayer: false,
         }),
         [
           "system",
@@ -910,6 +911,7 @@ async function handlePrompt(req, res) {
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
           profileId,
+          includeAssistantModeLayer: false,
         }),
         [
           "system",

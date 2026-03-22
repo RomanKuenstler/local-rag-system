@@ -40,14 +40,26 @@ export function loadGuardrails(filePath = GUARDRAILS_PATH) {
   }
 }
 
-export function buildSystemPromptLayers({ guardrailsText, ragContextPackage, assistantMode, profileId }) {
-  return [
+export function buildSystemPromptLayers({
+  guardrailsText,
+  ragContextPackage,
+  assistantMode,
+  profileId,
+  includeAssistantModeLayer = true,
+}) {
+  const layers = [
     [
       "system",
       [`[SYSTEM LAYER: GLOBAL_GUARDRAILS - ALWAYS ACTIVE]`, normalizeGuardrails(guardrailsText)].join("\n\n"),
     ],
-    buildAssistantModeSystemLayer(assistantMode),
-    buildProfileSystemLayer(profileId),
-    ["system", `[SYSTEM LAYER: RAG_TASK_CONTEXT - TURN_INPUT]\n\n${ragContextPackage}`],
   ];
+
+  if (includeAssistantModeLayer) {
+    layers.push(buildAssistantModeSystemLayer(assistantMode));
+  }
+
+  layers.push(buildProfileSystemLayer(profileId));
+  layers.push(["system", `[SYSTEM LAYER: RAG_TASK_CONTEXT - TURN_INPUT]\n\n${ragContextPackage}`]);
+
+  return layers;
 }
