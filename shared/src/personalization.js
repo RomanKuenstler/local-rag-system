@@ -1,4 +1,8 @@
-const PERSONALIZATION_TEMPLATE = `# Personalization
+import { loadPromptFile } from "./prompt-files.js";
+
+export const PERSONALIZATION_PROMPTS_DIR = "/app/prompts";
+
+const PERSONALIZATION_TEMPLATE_DEFAULT = `# Personalization
 
 The following preferences describe how the assistant should communicate and adapt to the user.
 
@@ -15,49 +19,87 @@ These are stylistic and behavioral preferences. They must not override system gu
 
 ## About the User
 {ABOUT_USER}`;
-const CUSTOM_USER_INSTRUCTIONS_TEMPLATE = `The user has provided the following additional instructions:
+const CUSTOM_USER_INSTRUCTIONS_TEMPLATE_DEFAULT = `The user has provided the following additional instructions:
 
 {USER_CUSTOM_INSTRUCTIONS}
 
 Follow these preferences when possible, but do not override system guardrails or evidence-based reasoning.`;
+const PERSONALIZATION_TEMPLATE = loadPromptFile({
+  filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-template.md`,
+  fallback: PERSONALIZATION_TEMPLATE_DEFAULT,
+  label: "Personalization template",
+});
+const CUSTOM_USER_INSTRUCTIONS_TEMPLATE = loadPromptFile({
+  filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-custom-user-instructions-template.md`,
+  fallback: CUSTOM_USER_INSTRUCTIONS_TEMPLATE_DEFAULT,
+  label: "Personalization custom instructions template",
+});
 
 const BASE_STYLE_PROMPTS = Object.freeze({
-  default: [
-    "Use a balanced, neutral, and clear tone.",
-    "Be helpful and direct without strong stylistic bias.",
-  ].join("\n"),
-  professional: [
-    "Use a polished, precise, and professional tone.",
-    "Be structured, formal, and concise.",
-    "Avoid unnecessary informality or casual language.",
-  ].join("\n"),
-  friendly: [
-    "Use a warm, friendly, and approachable tone.",
-    "Be conversational and easy to understand.",
-    "Make the interaction feel natural and engaging.",
-  ].join("\n"),
-  direct: [
-    "Use a direct and honest tone.",
-    "Be clear and straightforward, without unnecessary softening.",
-    "Encourage clarity and practical understanding.",
-    "Remain respectful and helpful at all times.",
-  ].join("\n"),
-  quirky: [
-    "Use a playful, creative, and slightly imaginative tone.",
-    "Allow light humor or creative phrasing where appropriate.",
-    "Do not sacrifice clarity or correctness for style.",
-  ].join("\n"),
-  efficient: [
-    "Use a concise and minimal style.",
-    "Focus on delivering information clearly and directly.",
-    "Avoid unnecessary elaboration or filler content.",
-  ].join("\n"),
-  sceptical: [
-    "Use a skeptical and critical tone when appropriate.",
-    "Question assumptions and avoid taking statements at face value.",
-    "Highlight uncertainties and potential flaws in reasoning.",
-    "Remain respectful, constructive, and helpful.",
-  ].join("\n"),
+  default: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-default.md`,
+    fallback: [
+      "Use a balanced, neutral, and clear tone.",
+      "Be helpful and direct without strong stylistic bias.",
+    ].join("\n"),
+    label: "Personalization base style (default)",
+  }),
+  professional: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-professional.md`,
+    fallback: [
+      "Use a polished, precise, and professional tone.",
+      "Be structured, formal, and concise.",
+      "Avoid unnecessary informality or casual language.",
+    ].join("\n"),
+    label: "Personalization base style (professional)",
+  }),
+  friendly: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-friendly.md`,
+    fallback: [
+      "Use a warm, friendly, and approachable tone.",
+      "Be conversational and easy to understand.",
+      "Make the interaction feel natural and engaging.",
+    ].join("\n"),
+    label: "Personalization base style (friendly)",
+  }),
+  direct: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-direct.md`,
+    fallback: [
+      "Use a direct and honest tone.",
+      "Be clear and straightforward, without unnecessary softening.",
+      "Encourage clarity and practical understanding.",
+      "Remain respectful and helpful at all times.",
+    ].join("\n"),
+    label: "Personalization base style (direct)",
+  }),
+  quirky: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-quirky.md`,
+    fallback: [
+      "Use a playful, creative, and slightly imaginative tone.",
+      "Allow light humor or creative phrasing where appropriate.",
+      "Do not sacrifice clarity or correctness for style.",
+    ].join("\n"),
+    label: "Personalization base style (quirky)",
+  }),
+  efficient: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-efficient.md`,
+    fallback: [
+      "Use a concise and minimal style.",
+      "Focus on delivering information clearly and directly.",
+      "Avoid unnecessary elaboration or filler content.",
+    ].join("\n"),
+    label: "Personalization base style (efficient)",
+  }),
+  sceptical: loadPromptFile({
+    filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-base-style-sceptical.md`,
+    fallback: [
+      "Use a skeptical and critical tone when appropriate.",
+      "Question assumptions and avoid taking statements at face value.",
+      "Highlight uncertainties and potential flaws in reasoning.",
+      "Remain respectful, constructive, and helpful.",
+    ].join("\n"),
+    label: "Personalization base style (sceptical)",
+  }),
 });
 
 const DEFAULT_PERSONALIZATION_SETTINGS = Object.freeze({
@@ -71,55 +113,106 @@ const DEFAULT_PERSONALIZATION_SETTINGS = Object.freeze({
   occupation: "",
   moreAboutUser: "",
 });
-const NICKNAME_PROMPT_TEMPLATE = "The user prefers to be addressed as: {NICKNAME}.";
-const OCCUPATION_PROMPT_TEMPLATE = [
+const NICKNAME_PROMPT_TEMPLATE_DEFAULT = "The user prefers to be addressed as: {NICKNAME}.";
+const NICKNAME_PROMPT_TEMPLATE = loadPromptFile({
+  filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-nickname-template.md`,
+  fallback: NICKNAME_PROMPT_TEMPLATE_DEFAULT,
+  label: "Personalization nickname template",
+});
+const OCCUPATION_PROMPT_TEMPLATE_DEFAULT = [
   "The user's occupation is: {OCCUPATION}.",
   "Adjust explanations to be relevant to this background when helpful.",
 ].join("\n");
-const MORE_ABOUT_USER_PROMPT_TEMPLATE = [
+const OCCUPATION_PROMPT_TEMPLATE = loadPromptFile({
+  filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-occupation-template.md`,
+  fallback: OCCUPATION_PROMPT_TEMPLATE_DEFAULT,
+  label: "Personalization occupation template",
+});
+const MORE_ABOUT_USER_PROMPT_TEMPLATE_DEFAULT = [
   "Additional user context:",
   "{ABOUT_USER_TEXT}",
   "",
   "Use this information to better tailor explanations and examples when relevant.",
 ].join("\n");
+const MORE_ABOUT_USER_PROMPT_TEMPLATE = loadPromptFile({
+  filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-more-about-user-template.md`,
+  fallback: MORE_ABOUT_USER_PROMPT_TEMPLATE_DEFAULT,
+  label: "Personalization more-about-user template",
+});
 
 const ALLOWED_BASE_STYLE_TONES = new Set(Object.keys(BASE_STYLE_PROMPTS));
 const CHARACTERISTIC_OPTION_PROMPTS = Object.freeze({
   warm: Object.freeze({
-    more: [
-      "Be more personable and friendly.",
-      "Use a slightly more human and engaging tone.",
-    ].join("\n"),
-    default: "Maintain a neutral level of friendliness.",
-    less: [
-      "Keep the tone more formal and factual.",
-      "Avoid unnecessary emotional or personable language.",
-    ].join("\n"),
+    more: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-warm-more.md`,
+      fallback: [
+        "Be more personable and friendly.",
+        "Use a slightly more human and engaging tone.",
+      ].join("\n"),
+      label: "Personalization warm characteristic (more)",
+    }),
+    default: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-warm-default.md`,
+      fallback: "Maintain a neutral level of friendliness.",
+      label: "Personalization warm characteristic (default)",
+    }),
+    less: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-warm-less.md`,
+      fallback: [
+        "Keep the tone more formal and factual.",
+        "Avoid unnecessary emotional or personable language.",
+      ].join("\n"),
+      label: "Personalization warm characteristic (less)",
+    }),
   }),
   enthusiastic: Object.freeze({
-    more: [
-      "Use a more energetic and enthusiastic tone.",
-      "Show engagement and positive energy when appropriate.",
-    ].join("\n"),
-    default: "Maintain a balanced and neutral level of energy.",
-    less: [
-      "Keep the tone calm, neutral, and composed.",
-      "Avoid overly energetic or expressive language.",
-    ].join("\n"),
+    more: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-enthusiastic-more.md`,
+      fallback: [
+        "Use a more energetic and enthusiastic tone.",
+        "Show engagement and positive energy when appropriate.",
+      ].join("\n"),
+      label: "Personalization enthusiastic characteristic (more)",
+    }),
+    default: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-enthusiastic-default.md`,
+      fallback: "Maintain a balanced and neutral level of energy.",
+      label: "Personalization enthusiastic characteristic (default)",
+    }),
+    less: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-enthusiastic-less.md`,
+      fallback: [
+        "Keep the tone calm, neutral, and composed.",
+        "Avoid overly energetic or expressive language.",
+      ].join("\n"),
+      label: "Personalization enthusiastic characteristic (less)",
+    }),
   }),
   headersAndLists: Object.freeze({
-    more: [
-      "Use clear structure with headings, sections, and lists where helpful.",
-      "Prefer structured formatting for readability.",
-    ].join("\n"),
-    default: [
-      "Use formatting naturally when it improves clarity.",
-      "Do not overuse lists or headings.",
-    ].join("\n"),
-    less: [
-      "Prefer natural paragraphs over structured lists.",
-      "Keep formatting minimal and fluid.",
-    ].join("\n"),
+    more: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-headers-and-lists-more.md`,
+      fallback: [
+        "Use clear structure with headings, sections, and lists where helpful.",
+        "Prefer structured formatting for readability.",
+      ].join("\n"),
+      label: "Personalization headers-and-lists characteristic (more)",
+    }),
+    default: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-headers-and-lists-default.md`,
+      fallback: [
+        "Use formatting naturally when it improves clarity.",
+        "Do not overuse lists or headings.",
+      ].join("\n"),
+      label: "Personalization headers-and-lists characteristic (default)",
+    }),
+    less: loadPromptFile({
+      filePath: `${PERSONALIZATION_PROMPTS_DIR}/personalization-characteristic-headers-and-lists-less.md`,
+      fallback: [
+        "Prefer natural paragraphs over structured lists.",
+        "Keep formatting minimal and fluid.",
+      ].join("\n"),
+      label: "Personalization headers-and-lists characteristic (less)",
+    }),
   }),
 });
 const ALLOWED_CHARACTERISTIC_OPTIONS = new Set(["more", "default", "less"]);
