@@ -892,7 +892,19 @@ async function handlePrompt(req, res) {
     };
   }
 
-  const searchResult = await searchKnowledgeBase(promptForRetrieval);
+  setAssistantChainProgress(sessionId, {
+    active: true,
+    mode: currentAssistantMode,
+    stage: "searching",
+  });
+
+  let searchResult;
+  try {
+    searchResult = await searchKnowledgeBase(promptForRetrieval);
+  } catch (error) {
+    clearAssistantChainProgress(sessionId);
+    throw error;
+  }
   const historyEntryLimit = runtimeConfig.historyMessages * 2;
   const chatHistory = await listRecentPromptHistory({ sessionId, chatId, limit: historyEntryLimit });
   const personalizationSettings = await getSessionPersonalizationSettings(sessionId);

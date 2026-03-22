@@ -142,13 +142,26 @@ function isAssistantModeTemporarilyDisabled(modeId) {
 function getPendingAssistantMessage(modeId, chainStage) {
   const normalizedMode = String(modeId || "").trim().toLowerCase();
   const normalizedStage = String(chainStage || "").trim().toLowerCase();
+  if (normalizedStage === "searching") {
+    return "Searching the knowledge base…";
+  }
   if (normalizedMode === "refine") {
     if (normalizedStage === "refining") {
-      return "Assistant is refining the answer…";
+      return "Refining the final answer…";
     }
-    return "Assistant is drafting an answer…";
+    return "Drafting an answer…";
   }
   return "Assistant is thinking…";
+}
+
+function buildPendingAssistantTrailText(statusTrail) {
+  const normalizedTrail = Array.isArray(statusTrail)
+    ? statusTrail.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (normalizedTrail.length === 0) {
+    return "Assistant is thinking…";
+  }
+  return normalizedTrail.join("\n");
 }
 
 function buildPersonalizationContent(preferences) {
@@ -278,12 +291,18 @@ function App() {
       if (!message.isPending || message.role !== "assistant") {
         return message;
       }
-      if (message.text === nextPendingText) {
+      const previousTrail = Array.isArray(message.pendingStatusTrail)
+        ? message.pendingStatusTrail.filter(Boolean)
+        : [];
+      const currentStep = previousTrail[previousTrail.length - 1] || "";
+      if (currentStep === nextPendingText) {
         return message;
       }
+      const nextTrail = previousTrail.concat(nextPendingText);
       return {
         ...message,
-        text: nextPendingText,
+        pendingStatusTrail: nextTrail,
+        text: buildPendingAssistantTrailText(nextTrail),
       };
     }));
   }, [isSending, currentAssistantMode, activeChainStage]);
@@ -863,12 +882,14 @@ function App() {
       refreshStatus().catch(() => {});
     }, 900);
     const pendingMessageId = crypto.randomUUID();
+    const initialPendingText = getPendingAssistantMessage(currentAssistantMode, activeChainStage);
     setMessages((prev) => prev.concat(createMessage(
       "assistant",
-      getPendingAssistantMessage(currentAssistantMode, activeChainStage),
+      initialPendingText,
       {
-      id: pendingMessageId,
-      isPending: true,
+        id: pendingMessageId,
+        isPending: true,
+        pendingStatusTrail: [initialPendingText],
       }
     )));
 
@@ -1490,11 +1511,13 @@ function App() {
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const sendButtonLabel = isSending
-    ? activeChainStage === "drafting"
+    ? activeChainStage === "searching"
+      ? "Searching..."
+      : activeChainStage === "drafting"
       ? "Drafting..."
       : activeChainStage === "refining"
         ? "Refining..."
-        : "Sending..."
+        : "Thinking..."
     : "Send";
 
   function openLibraryPage() {
