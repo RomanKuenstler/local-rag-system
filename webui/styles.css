@@ -773,6 +773,7 @@ body {
   padding: 0.95rem 1rem 1rem;
   display: grid;
   gap: 0.75rem;
+  align-content: start;
 }
 .panel-modal-with-tabs {
   grid-template-rows: auto minmax(0, 1fr);
@@ -818,7 +819,12 @@ body {
 }
 
 .info-groups,
-.assistant-mode-grid { display: grid; gap: 0.65rem; }
+.assistant-mode-grid {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+  align-self: start;
+}
 .info-group-card,
 .assistant-mode-card {
   background: #ffffff;
@@ -938,6 +944,20 @@ body {
 .general-dropdown-option.active { background: #e5e7eb; font-weight: 500; }
 .general-dropdown-option:disabled { opacity: 0.45; cursor: not-allowed; }
 .general-dropdown-check { color: inherit; font-weight: 600; }
+.general-dropdown-option-copy {
+  display: grid;
+  text-align: left;
+  gap: 0.05rem;
+}
+.general-dropdown-option-copy strong {
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+.general-dropdown-option-copy small {
+  color: #6b7280;
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
 
 .info-row {
   display: grid;

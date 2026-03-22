@@ -25,13 +25,13 @@ import {
 } from "./chat-export.js";
 
 const UI_MODE_OPTIONS = [
-  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
-  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details." },
+  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics.", shortDescription: "Focused chat view" },
+  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details.", shortDescription: "Show retrieval details" },
 ];
 const ASSISTANT_MODE_OPTIONS = [
-  { id: "simple", label: "Simple", description: "For everyday simple tasks" },
-  { id: "refine", label: "Refine", description: "For getting refined answers" },
-  { id: "thinking", label: "Thinking", description: "For complex questions" },
+  { id: "simple", label: "Simple", description: "For everyday simple tasks", shortDescription: "Fast and direct" },
+  { id: "refine", label: "Refine", description: "For getting refined answers", shortDescription: "Draft then improve" },
+  { id: "thinking", label: "Thinking", description: "For complex questions", shortDescription: "Deeper reasoning mode" },
 ];
 const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {

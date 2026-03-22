@@ -234,7 +234,12 @@ export function renderPanelContent({
                   applyPersonalizationChange(kind, optionId);
                 },
               },
-              React.createElement("span", null, optionId),
+              React.createElement(
+                "span",
+                { className: "general-dropdown-option-copy" },
+                React.createElement("strong", null, optionId),
+                React.createElement("small", null, option.shortDescription || option.description || "")
+              ),
               active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
             );
           })
