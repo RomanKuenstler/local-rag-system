@@ -1653,6 +1653,7 @@ function App() {
   const libraryRows = pendingLibraryUploads.concat(dbRows);
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
+  const isNavigationLocked = isSending;
   const sendButtonLabel = isSending
     ? activeChainStage === "searching"
       ? "Searching..."
@@ -2010,7 +2011,7 @@ function App() {
         { className: "side-nav-top" },
         React.createElement(
           "button",
-          { type: "button", className: "side-nav-item", onClick: createNewChat },
+          { type: "button", className: "side-nav-item", onClick: createNewChat, disabled: isNavigationLocked },
           icon(plusChatIconPath),
           React.createElement("span", null, "New chat")
         ),
@@ -2020,6 +2021,7 @@ function App() {
             type: "button",
             className: "side-nav-item",
             onClick: activeView === "library" ? openChatPage : openLibraryPage,
+            disabled: isNavigationLocked,
           },
           icon(activeView === "library" ? chatIconPath : libraryIconPath),
           React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
@@ -2030,7 +2032,7 @@ function App() {
             type: "button",
             className: `side-nav-item${isUnifiedDialogOpen && activeDialogTab === "personalization" ? " active" : ""}`,
             onClick: openPersonalizationPanel,
-            disabled: isSending || !isEmbeddingReady,
+            disabled: isNavigationLocked || !isEmbeddingReady,
           },
           icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
           React.createElement("span", null, "Personalization")
@@ -2041,7 +2043,7 @@ function App() {
             type: "button",
             className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && (activeDialogTab === "general" || activeDialogTab === "settings")) ? " active" : ""}`,
             onClick: openSettingsDialog,
-            disabled: isSending || !isEmbeddingReady,
+            disabled: isNavigationLocked || !isEmbeddingReady,
           },
           icon(settingsIconPath),
           React.createElement("span", null, "Settings")
@@ -2069,7 +2071,7 @@ function App() {
                 type: "button",
                 className: `side-nav-chat-item${isActiveChat ? " active" : ""}`,
                 onClick: () => switchChat(chat.id),
-                disabled: isLoadingChats,
+                disabled: isLoadingChats || isNavigationLocked,
               },
               chat.name
             ),
@@ -2084,6 +2086,7 @@ function App() {
                   "aria-label": `Open actions for ${chat.name}`,
                   "aria-haspopup": "menu",
                   "aria-expanded": isMenuOpenForChat ? "true" : "false",
+                  disabled: isNavigationLocked,
                   onClick: (event) => {
                     event.stopPropagation();
                     setOpenChatMenuId((previous) => previous === chat.id ? null : chat.id);
@@ -2104,6 +2107,7 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option",
                         role: "menuitem",
+                        disabled: isNavigationLocked,
                         onClick: () => openRenameDialog(chat),
                       },
                       icon(renameIconPath),
@@ -2119,6 +2123,7 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option",
                         role: "menuitem",
+                        disabled: isNavigationLocked,
                         onClick: async () => {
                           setOpenChatMenuId(null);
                           try {
@@ -2144,6 +2149,7 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option",
                         role: "menuitem",
+                        disabled: isNavigationLocked,
                         onClick: () => archiveChat(chat.id),
                       },
                       icon(archiveIconPath),
@@ -2159,6 +2165,7 @@ function App() {
                         type: "button",
                         className: "chat-item-actions-option delete",
                         role: "menuitem",
+                        disabled: isNavigationLocked,
                         onClick: () => {
                           setOpenChatMenuId(null);
                           setDeleteConfirmChat(chat);
@@ -2535,6 +2542,7 @@ function App() {
           className: "floating-menu-toggle",
           type: "button",
           onClick: () => setIsMenuOpen((current) => !current),
+          disabled: isNavigationLocked,
           "aria-label": isMenuOpen ? "Close quick actions" : "Open quick actions",
         },
         icon("M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z")
@@ -2545,38 +2553,38 @@ function App() {
           { className: "floating-menu-panel" },
           React.createElement(
             "button",
-            { type: "button", onClick: () => openUnifiedDialog("info"), disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("info"), disabled: isNavigationLocked || !isEmbeddingReady },
             icon("M11 17h2v-6h-2zm1-8a1.25 1.25 0 1 0 0 2.5A1.25 1.25 0 0 0 12 9m0 13A10 10 0 1 1 12 2a10 10 0 0 1 0 20"),
             "Info"
           ),
           activeView === "library"
             ? React.createElement(
               "button",
-              { type: "button", onClick: openChatPage },
+              { type: "button", onClick: openChatPage, disabled: isNavigationLocked },
               icon(chatIconPath),
               "Chat"
             )
             : React.createElement(
               "button",
-              { type: "button", onClick: openLibraryPage },
+              { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
               icon(libraryIconPath),
               "Library"
             ),
           React.createElement(
             "button",
-            { type: "button", onClick: openPersonalizationPanel, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: openPersonalizationPanel, disabled: isNavigationLocked || !isEmbeddingReady },
             icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
             "Personalization"
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: openSettingsDialog, disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: openSettingsDialog, disabled: isNavigationLocked || !isEmbeddingReady },
             icon("M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5"),
             "Settings"
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: () => openUnifiedDialog("help"), disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: () => openUnifiedDialog("help"), disabled: isNavigationLocked || !isEmbeddingReady },
             icon("M12 2 2 12l10 10 10-10Zm0 4.5a3 3 0 0 1 3 3c0 2.2-3 2.4-3 5h-2c0-3.4 3-3.8 3-5a1 1 0 0 0-2 0H9a3 3 0 0 1 3-3Zm-1 10h2v2h-2z"),
             "Help"
           )
