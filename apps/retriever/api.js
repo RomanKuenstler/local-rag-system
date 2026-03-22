@@ -19,6 +19,7 @@ import {
   MAX_EMBEDDING_CHARS,
   MIN_SIMILARITIES,
   EMBEDDING_STATUS_FILE,
+  DEFAULT_FILE_TAG,
   PDF_MIN_EXTRACTED_CHARS,
   POSTGRES_DB,
   POSTGRES_HOST,
@@ -71,6 +72,7 @@ import {
   listChatMessages,
   listRecentPromptHistory,
   listFileMetadata,
+  listTagsForFilePathMap,
   updateFileTags,
   resolveSessionChatId,
   setSessionActiveChat,
@@ -729,15 +731,38 @@ async function searchKnowledgeBase(prompt) {
     .filter((result) => result.score >= runtimeConfig.cosineLimit)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const selectedResults = filteredResults.slice(0, runtimeConfig.maxSimilarities);
-  const hasSufficientEvidence = selectedResults.length >= runtimeConfig.minSimilarities;
-  const evidenceQuality = getEvidenceQuality(selectedResults, runtimeConfig.minSimilarities);
+  const resultSourcePaths = [...new Set(
+    selectedResults
+      .map((result) => String(result?.payload?.source || "").trim())
+      .filter(Boolean)
+  )];
+  const tagsByPath = await listTagsForFilePathMap(resultSourcePaths);
+  const selectedResultsWithTags = selectedResults.map((result) => {
+    const payload = result?.payload && typeof result.payload === "object" ? result.payload : {};
+    const sourcePath = String(payload.source || "").trim();
+    const payloadTags = Array.isArray(payload.tags)
+      ? payload.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
+      : [];
+    const resolvedTags = payloadTags.length > 0
+      ? payloadTags
+      : tagsByPath.get(sourcePath) || [DEFAULT_FILE_TAG];
+    return {
+      ...result,
+      payload: {
+        ...payload,
+        tags: resolvedTags,
+      },
+    };
+  });
+
+  const evidenceQuality = getEvidenceQuality(selectedResultsWithTags, runtimeConfig.minSimilarities);
 
   return {
-    results: selectedResults,
+    results: selectedResultsWithTags,
     evidenceQuality,
-    hasSufficientEvidence,
+    hasSufficientEvidence: selectedResultsWithTags.length >= runtimeConfig.minSimilarities,
     ragContextPackage: buildRagContextPackage({
-      results: selectedResults,
+      results: selectedResultsWithTags,
       userMessage: prompt,
       evidenceQuality,
     }),

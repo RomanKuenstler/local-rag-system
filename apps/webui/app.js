@@ -2443,7 +2443,7 @@ function App() {
                                   ...match.tags.map((tag) => React.createElement(
                                     "span",
                                     { key: `${message.id}-${match.rank}-${tag}`, className: "assistant-evidence-tag-line" },
-                                    tag
+                                    `tag: ${tag}`
                                   ))
                                 )
                                 : null,
