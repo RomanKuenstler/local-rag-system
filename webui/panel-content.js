@@ -1,10 +1,107 @@
 import React from "https://esm.sh/react@18";
 
+function GeneralDropdown({
+  label,
+  currentId,
+  options,
+  kind,
+  interactionDisabled,
+  isOptionDisabled,
+  applyPersonalizationChange,
+  chevron,
+  check,
+}) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
+
+  return React.createElement(
+    "div",
+    { className: "general-setting-row", key: `setting-${kind}-${label}` },
+    React.createElement("span", { className: "general-setting-label" }, label),
+    React.createElement(
+      "details",
+      {
+        className: "general-dropdown",
+        open: isOpen,
+        ref: rootRef,
+      },
+      React.createElement(
+        "summary",
+        {
+          className: "general-dropdown-trigger",
+          onClick: (event) => {
+            event.preventDefault();
+            setIsOpen((prev) => !prev);
+          },
+        },
+        React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
+        React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
+      ),
+      React.createElement(
+        "div",
+        { className: "general-dropdown-menu", role: "menu" },
+        ...options.map((option) => {
+          const optionId = String(option.id || "").trim().toLowerCase();
+          const active = optionId === String(currentId || "").trim().toLowerCase();
+          const optionDisabled = Boolean(isOptionDisabled?.(optionId));
+
+          return React.createElement(
+            "button",
+            {
+              key: `${kind}-${optionId}`,
+              type: "button",
+              className: `general-dropdown-option${active ? " active" : ""}`,
+              role: "menuitemradio",
+              "aria-checked": active ? "true" : "false",
+              disabled: interactionDisabled || optionDisabled,
+              onClick: (event) => {
+                event.preventDefault();
+                applyPersonalizationChange(kind, optionId);
+                setIsOpen(false);
+              },
+            },
+            React.createElement(
+              "span",
+              { className: "general-dropdown-option-copy" },
+              React.createElement("strong", null, optionId),
+              React.createElement("small", null, option.shortDescription || option.description || "")
+            ),
+            active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
+          );
+        })
+      )
+    )
+  );
+}
+
 export function renderPanelContent({
   panelData,
   parsedInfoGroups,
   parsedAssistantPanel,
-  parsedProfilePanel,
   parsedHelpPanel,
   editableConfigRows,
   restartConfigRows,
@@ -15,6 +112,22 @@ export function renderPanelContent({
   disabledAssistantModes = [],
   submitConfigChange,
   applyPersonalizationChange,
+  customInstructionsDraft,
+  isCustomInstructionsDirty,
+  updateCustomInstructionsDraft,
+  saveCustomInstructions,
+  nicknameDraft,
+  occupationDraft,
+  moreAboutUserDraft,
+  isNicknameDirty,
+  isOccupationDirty,
+  isMoreAboutUserDirty,
+  updateNicknameDraft,
+  updateOccupationDraft,
+  updateMoreAboutUserDraft,
+  saveNickname,
+  saveOccupation,
+  saveMoreAboutUser,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
@@ -36,6 +149,36 @@ export function renderPanelContent({
     },
     React.createElement("strong", null, id),
     React.createElement("p", null, description)
+  );
+  const chevron = "▾";
+  const check = "✓";
+  const saveIconPath = "M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14V7zm-7 0v4h4V3zm8 18H6v-6h12zm0-8H6V5h2v4h8V5h2z";
+  const customInstructionsValue = String(customInstructionsDraft || "");
+  const customInstructionsDisabled = interactionDisabled || !isCustomInstructionsDirty;
+  const nicknameValue = String(nicknameDraft || "");
+  const occupationValue = String(occupationDraft || "");
+  const moreAboutUserValue = String(moreAboutUserDraft || "");
+  const nicknameSaveDisabled = interactionDisabled || !isNicknameDirty;
+  const occupationSaveDisabled = interactionDisabled || !isOccupationDirty;
+  const moreAboutUserSaveDisabled = interactionDisabled || !isMoreAboutUserDirty;
+  const autoResizeTextarea = (element) => {
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.max(element.scrollHeight, 24)}px`;
+  };
+  const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
+    GeneralDropdown,
+    {
+      label,
+      currentId,
+      options,
+      kind,
+      interactionDisabled,
+      isOptionDisabled,
+      applyPersonalizationChange,
+      chevron,
+      check,
+    }
   );
 
   if (panelData.command === "/config" && panelData.configView) {
@@ -192,57 +335,220 @@ export function renderPanelContent({
     );
   }
 
-  if (panelData.command === "/profile" && parsedProfilePanel) {
-    return React.createElement(
-      "div",
-      { className: "assistant-mode-grid" },
-      parsedProfilePanel.currentProfile
-        ? React.createElement("div", { className: "assistant-current" }, `Current profile: ${parsedProfilePanel.currentProfile}`)
-        : null,
-      ...parsedProfilePanel.profiles.map((profile) => renderSelectableModeCard({
-        key: profile.id,
-        id: profile.id,
-        description: profile.description,
-        isActive: profile.id === parsedProfilePanel.currentProfile,
-        onSelect: (id) => applyPersonalizationChange("profile", id),
-      }))
-    );
-  }
-
-  if (panelData.command === "/personalization" && panelData.content) {
+  if (panelData.command === "/general" && panelData.content) {
     const uiModes = panelData.content.ui?.modes || [];
     const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
     const currentAssistantMode = panelData.content.assistant?.currentMode || null;
+    return React.createElement(
+      "div",
+      { className: "info-groups general-settings-grid" },
+      React.createElement(
+        "section",
+        { className: "info-group-card general-settings-card" },
+        renderModeDropdown({
+          label: "UI-Mode",
+          currentId: currentUiMode,
+          options: uiModes,
+          kind: "ui",
+          isOptionDisabled: null,
+        }),
+        renderModeDropdown({
+          label: "Assistant mode",
+          currentId: currentAssistantMode,
+          options: assistantModes,
+          kind: "assistant",
+          isOptionDisabled: (optionId) => disabledAssistantModeSet.has(optionId),
+        })
+      )
+    );
+  }
 
+  if (panelData.command === "/personalization" && panelData.content) {
+    const sections = Array.isArray(panelData.content.sections) ? panelData.content.sections : [];
     return React.createElement(
       "div",
       { className: "info-groups" },
-      React.createElement(
-        "section",
-        { className: "info-group-card" },
-        React.createElement("h4", null, "UI mode"),
-        ...uiModes.map((mode) => renderSelectableModeCard({
-          key: `personalization-ui-${mode.id}`,
-          id: mode.id,
-          description: mode.description,
-          isActive: mode.id === currentUiMode,
-          onSelect: (id) => applyPersonalizationChange("ui", id),
-        }))
-      ),
-      React.createElement(
-        "section",
-        { className: "info-group-card" },
-        React.createElement("h4", null, "Assistant mode"),
-        ...assistantModes.map((mode) => renderSelectableModeCard({
-          key: `personalization-mode-${mode.id}`,
-          id: mode.id,
-          description: mode.description,
-          isActive: mode.id === currentAssistantMode,
-          isDisabled: disabledAssistantModeSet.has(String(mode.id || "").trim().toLowerCase()),
-          onSelect: (id) => applyPersonalizationChange("assistant", id),
-        }))
-      )
+      ...sections.map((section) => {
+        if (section.id === "custom-instructions") {
+          return React.createElement(
+            "section",
+            { key: section.id, className: "info-group-card personalization-section-card" },
+            React.createElement("h4", null, section.title),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("textarea", {
+                  className: "personalization-custom-instructions-input",
+                  value: customInstructionsValue,
+                  placeholder: "Additional behavior, style, and tone preferences",
+                  rows: 1,
+                  onChange: (event) => {
+                    autoResizeTextarea(event.currentTarget);
+                    updateCustomInstructionsDraft(event.currentTarget.value);
+                  },
+                  ref: autoResizeTextarea,
+                  disabled: interactionDisabled,
+                  "aria-label": "Custom instructions",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${customInstructionsDisabled ? "" : " active"}`,
+                    onClick: saveCustomInstructions,
+                    disabled: customInstructionsDisabled,
+                    "aria-label": "Save custom instructions",
+                    title: "Save custom instructions",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            )
+          );
+        }
+
+        if (section.id === "about-you") {
+          return React.createElement(
+            "section",
+            { key: section.id, className: "info-group-card personalization-section-card" },
+            React.createElement("h4", null, section.title),
+            React.createElement("h5", { className: "personalization-subheadline" }, "Personal details"),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("input", {
+                  className: "personalization-custom-instructions-input",
+                  value: nicknameValue,
+                  placeholder: "Nickname",
+                  onChange: (event) => updateNicknameDraft(event.currentTarget.value),
+                  disabled: interactionDisabled,
+                  "aria-label": "Nickname",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${nicknameSaveDisabled ? "" : " active"}`,
+                    onClick: saveNickname,
+                    disabled: nicknameSaveDisabled,
+                    "aria-label": "Save nickname",
+                    title: "Save nickname",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            ),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("input", {
+                  className: "personalization-custom-instructions-input",
+                  value: occupationValue,
+                  placeholder: "Occupation",
+                  onChange: (event) => updateOccupationDraft(event.currentTarget.value),
+                  disabled: interactionDisabled,
+                  "aria-label": "Occupation",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${occupationSaveDisabled ? "" : " active"}`,
+                    onClick: saveOccupation,
+                    disabled: occupationSaveDisabled,
+                    "aria-label": "Save occupation",
+                    title: "Save occupation",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            ),
+            React.createElement(
+              "div",
+              { className: "personalization-custom-instructions-row" },
+              React.createElement(
+                "div",
+                { className: "personalization-custom-instructions-input-shell" },
+                React.createElement("textarea", {
+                  className: "personalization-custom-instructions-input",
+                  value: moreAboutUserValue,
+                  placeholder: "More about you",
+                  rows: 1,
+                  onChange: (event) => {
+                    autoResizeTextarea(event.currentTarget);
+                    updateMoreAboutUserDraft(event.currentTarget.value);
+                  },
+                  ref: autoResizeTextarea,
+                  disabled: interactionDisabled,
+                  "aria-label": "More about you",
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: `personalization-custom-save-button${moreAboutUserSaveDisabled ? "" : " active"}`,
+                    onClick: saveMoreAboutUser,
+                    disabled: moreAboutUserSaveDisabled,
+                    "aria-label": "Save more about you",
+                    title: "Save more about you",
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            )
+          );
+        }
+
+        if (section.id !== "personalization" || !section.settings) {
+          return React.createElement(
+            "section",
+            { key: section.id, className: "info-group-card personalization-section-card" },
+            React.createElement("h4", null, section.title),
+            React.createElement("p", { className: "config-help" }, section.description || "")
+          );
+        }
+
+        return React.createElement(
+          "section",
+          { key: section.id, className: "info-group-card general-settings-card personalization-settings-card" },
+          React.createElement("h4", null, section.title),
+          renderModeDropdown({
+            label: section.settings.baseStyleTone.label,
+            currentId: section.settings.baseStyleTone.currentId,
+            options: section.settings.baseStyleTone.options,
+            kind: "personalization:baseStyleTone",
+          }),
+          React.createElement("h5", { className: "personalization-subheadline" }, "Characteristics"),
+          renderModeDropdown({
+            label: section.settings.warm.label,
+            currentId: section.settings.warm.currentId,
+            options: section.settings.warm.options,
+            kind: "personalization:warm",
+          }),
+          renderModeDropdown({
+            label: section.settings.enthusiastic.label,
+            currentId: section.settings.enthusiastic.currentId,
+            options: section.settings.enthusiastic.options,
+            kind: "personalization:enthusiastic",
+          }),
+          renderModeDropdown({
+            label: section.settings.headersAndLists.label,
+            currentId: section.settings.headersAndLists.currentId,
+            options: section.settings.headersAndLists.options,
+            kind: "personalization:headersAndLists",
+          })
+        );
+      })
     );
   }
 

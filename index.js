@@ -36,12 +36,7 @@ import {
   listAssistantModes,
   normalizeAssistantMode,
 } from "./src/assistant-modes.js";
-import {
-  DEFAULT_PROFILE,
-  isProfileSupported,
-  listProfiles,
-  normalizeProfile,
-} from "./src/profiles.js";
+import { getDefaultPersonalizationSettings } from "./src/personalization.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
 import {
   buildActiveConfigMessage,
@@ -324,7 +319,7 @@ async function searchKnowledgeBase(userMessage) {
 
 const guardrailsText = loadGuardrails();
 let assistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
-let profileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
+const personalizationSettings = getDefaultPersonalizationSettings();
 
 validateRetrievalConfig();
 ui.renderLoadingScreen();
@@ -406,7 +401,7 @@ while (!exit) {
       [
         "Assistant modes:",
         "",
-        "In this system, assistant mode defines the system-level response behavior profile used to generate answers.",
+        "In this system, assistant mode defines the system-level response behavior used to generate answers.",
         "",
         modeList,
         "",
@@ -433,48 +428,13 @@ while (!exit) {
     continue;
   }
 
-  if (normalizedUserMessage === "/profile") {
-    const profileList = listProfiles()
-      .map((profile) => `- ${profile.id}: ${profile.description}`)
-      .join("\n");
-
-    ui.printAssistantMessage(
-      [
-        "Profiles:",
-        "",
-        "Profiles define additional response tone/behavior that applies on top of assistant mode and guardrails.",
-        "",
-        profileList,
-        "",
-        `Current profile: ${profileId}`,
-        "Use /profile <name>, e.g. /profile default or /profile alice.",
-      ].join("\n")
-    );
-    continue;
-  }
-
-  if (normalizedUserMessage.startsWith("/profile ")) {
-    const requestedProfile = normalizedUserMessage.slice("/profile ".length).trim();
-
-    if (!isProfileSupported(requestedProfile)) {
-      ui.printAssistantMessage(
-        `Unsupported profile: ${requestedProfile}. Use /profile to see available profiles.`
-      );
-      continue;
-    }
-
-    profileId = normalizeProfile(requestedProfile);
-    ui.printAssistantMessage(`Profile changed to: ${profileId}`);
-    continue;
-  }
-
   if (normalizedUserMessage === "/info") {
     ui.printAssistantMessage(buildSystemInfoMessage({
       appName: APP_NAME,
       appVersion: APP_VERSION,
       uiMode: ui.getTuiMode(),
       assistantMode,
-      profileId,
+      personalizationSettings,
       chatModelName: chatModel.model,
       embeddingModelName: embeddingsModel.model,
       qdrantUrl: QDRANT_URL,
@@ -605,7 +565,8 @@ while (!exit) {
       guardrailsText,
       ragContextPackage,
       assistantMode,
-      profileId,
+      sessionId: DEFAULT_SESSION_ID,
+      personalizationSettings,
     }),
     ...history,
     ["user", promptForAssistant],

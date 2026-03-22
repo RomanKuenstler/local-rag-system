@@ -14,7 +14,6 @@ import {
   parseAssistantModeContent,
   parseHelpContent,
   parsePanelText,
-  parseProfileContent,
   parseSystemInfoContent,
   resizeComposerInput,
 } from "./utils.js";
@@ -26,14 +25,50 @@ import {
 } from "./chat-export.js";
 
 const UI_MODE_OPTIONS = [
-  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics." },
-  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details." },
+  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics.", shortDescription: "Focused chat view" },
+  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details.", shortDescription: "Show retrieval details" },
 ];
 const ASSISTANT_MODE_OPTIONS = [
-  { id: "simple", label: "Simple", description: "For everyday simple tasks" },
-  { id: "refine", label: "Refine", description: "For getting refined answers" },
-  { id: "thinking", label: "Thinking", description: "For complex questions" },
+  { id: "simple", label: "Simple", description: "For everyday simple tasks", shortDescription: "Fast and direct" },
+  { id: "refine", label: "Refine", description: "For getting refined answers", shortDescription: "Draft then improve" },
+  { id: "thinking", label: "Thinking", description: "For complex questions", shortDescription: "Deeper reasoning mode" },
 ];
+const PERSONALIZATION_OPTIONS = {
+  baseStyleTone: [
+    { id: "default", description: "Default response style." },
+    { id: "professional", description: "Polished and precise." },
+    { id: "friendly", description: "Warm and chatty." },
+    { id: "direct", description: "Direct and encouraging." },
+    { id: "quirky", description: "Playful and imaginative." },
+    { id: "efficient", description: "Concise and plain." },
+    { id: "sceptical", description: "Sceptical and critical." },
+  ],
+  warm: [
+    { id: "more", description: "Friendlier and personable." },
+    { id: "default", description: "Balanced warmth." },
+    { id: "less", description: "More professional and factual." },
+  ],
+  enthusiastic: [
+    { id: "more", description: "More energy and excitement." },
+    { id: "default", description: "Balanced enthusiasm." },
+    { id: "less", description: "Calmer and more neutral." },
+  ],
+  headersAndLists: [
+    { id: "more", description: "Use clear formatting and lists." },
+    { id: "default", description: "Balanced formatting and paragraphs." },
+    { id: "less", description: "More paragraphs instead of lists." },
+  ],
+};
+const DEFAULT_PERSONALIZATION_PREFERENCES = {
+  baseStyleTone: "default",
+  warm: "default",
+  enthusiastic: "default",
+  headersAndLists: "default",
+  customInstructions: "",
+  nickname: "",
+  occupation: "",
+  moreAboutUser: "",
+};
 const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
@@ -46,8 +81,9 @@ const LIBRARY_UPLOAD_RULES = {
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 const MENU_DIALOG_TABS = [
-  { id: "settings", label: "Settings", command: "/config" },
+  { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
+  { id: "settings", label: "Settings", command: "/config" },
   { id: "info", label: "Info", command: "/info" },
   { id: "archive", label: "Archive" },
   { id: "help", label: "Help", command: "/help" },
@@ -106,13 +142,80 @@ function isAssistantModeTemporarilyDisabled(modeId) {
 function getPendingAssistantMessage(modeId, chainStage) {
   const normalizedMode = String(modeId || "").trim().toLowerCase();
   const normalizedStage = String(chainStage || "").trim().toLowerCase();
+  if (normalizedStage === "searching") {
+    return "Searching the knowledge base…";
+  }
   if (normalizedMode === "refine") {
     if (normalizedStage === "refining") {
-      return "Assistant is refining the answer…";
+      return "Refining the final answer…";
     }
-    return "Assistant is drafting an answer…";
+    return "Drafting an answer…";
   }
   return "Assistant is thinking…";
+}
+
+function buildPendingAssistantTrailText(statusTrail) {
+  const normalizedTrail = Array.isArray(statusTrail)
+    ? statusTrail.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  if (normalizedTrail.length === 0) {
+    return "Assistant is thinking…";
+  }
+  return normalizedTrail.join("\n");
+}
+
+function dedupeStatusTrail(statusTrail) {
+  const deduped = [];
+  for (const step of Array.isArray(statusTrail) ? statusTrail : []) {
+    const normalized = String(step || "").trim();
+    if (!normalized) continue;
+    if (deduped[deduped.length - 1] === normalized) continue;
+    deduped.push(normalized);
+  }
+  return deduped;
+}
+
+function buildPersonalizationContent(preferences) {
+  return {
+    sections: [
+      {
+        id: "personalization",
+        title: "Personalization",
+        settings: {
+          baseStyleTone: {
+            label: "Base style and tone",
+            currentId: preferences.baseStyleTone,
+            options: PERSONALIZATION_OPTIONS.baseStyleTone,
+          },
+          warm: {
+            label: "Warm",
+            currentId: preferences.warm,
+            options: PERSONALIZATION_OPTIONS.warm,
+          },
+          enthusiastic: {
+            label: "Enthusiastic",
+            currentId: preferences.enthusiastic,
+            options: PERSONALIZATION_OPTIONS.enthusiastic,
+          },
+          headersAndLists: {
+            label: "Headers and Lists",
+            currentId: preferences.headersAndLists,
+            options: PERSONALIZATION_OPTIONS.headersAndLists,
+          },
+        },
+      },
+      {
+        id: "custom-instructions",
+        title: "Custom Instructions",
+        description: "Define custom response instructions that will be merged into your session profile prompt.",
+      },
+      {
+        id: "about-you",
+        title: "About You",
+        description: "Store user context and background details for this session profile.",
+      },
+    ],
+  };
 }
 
 marked.setOptions({
@@ -138,7 +241,7 @@ function App() {
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
-  const [activeDialogTab, setActiveDialogTab] = useState("settings");
+  const [activeDialogTab, setActiveDialogTab] = useState("general");
   const [dialogTabPanels, setDialogTabPanels] = useState({});
   const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
   const [dialogTabError, setDialogTabError] = useState("");
@@ -156,6 +259,15 @@ function App() {
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
+  const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
+  const [customInstructionsDraft, setCustomInstructionsDraft] = useState("");
+  const [isCustomInstructionsDirty, setIsCustomInstructionsDirty] = useState(false);
+  const [nicknameDraft, setNicknameDraft] = useState("");
+  const [occupationDraft, setOccupationDraft] = useState("");
+  const [moreAboutUserDraft, setMoreAboutUserDraft] = useState("");
+  const [isNicknameDirty, setIsNicknameDirty] = useState(false);
+  const [isOccupationDirty, setIsOccupationDirty] = useState(false);
+  const [isMoreAboutUserDirty, setIsMoreAboutUserDirty] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -179,26 +291,95 @@ function App() {
   const displayedChatList = volatileChat
     ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
     : chatList;
-  const activeChainStage = String(statusData?.assistant?.chainProgress?.stage || "").toLowerCase();
+  const activeChainProgress = statusData?.assistant?.chainProgress || null;
+  const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
 
   useEffect(() => {
     if (!isSending) {
       return;
     }
+    const backendStageTrail = Array.isArray(activeChainProgress?.trail)
+      ? activeChainProgress.trail
+      : [];
+    const normalizedMode = String(activeChainProgress?.mode || currentAssistantMode || "").trim().toLowerCase();
+    const mappedBackendTrail = dedupeStatusTrail(backendStageTrail.map((stage) => (
+      getPendingAssistantMessage(normalizedMode, stage)
+    )));
     const nextPendingText = getPendingAssistantMessage(currentAssistantMode, activeChainStage);
     setMessages((previous) => previous.map((message) => {
       if (!message.isPending || message.role !== "assistant") {
         return message;
       }
-      if (message.text === nextPendingText) {
-        return message;
+      let nextTrail = Array.isArray(message.pendingStatusTrail)
+        ? dedupeStatusTrail(message.pendingStatusTrail)
+        : [];
+      if (mappedBackendTrail.length > 0) {
+        nextTrail = mappedBackendTrail;
+      } else if (nextTrail[nextTrail.length - 1] !== nextPendingText) {
+        nextTrail = dedupeStatusTrail(nextTrail.concat(nextPendingText));
       }
+      if (nextTrail.length === 0) {
+        nextTrail = [nextPendingText];
+      }
+      const nextText = buildPendingAssistantTrailText(nextTrail);
+      if (message.text === nextText) return message;
       return {
         ...message,
-        text: nextPendingText,
+        pendingStatusTrail: nextTrail,
+        text: nextText,
       };
     }));
-  }, [isSending, currentAssistantMode, activeChainStage]);
+  }, [isSending, currentAssistantMode, activeChainProgress, activeChainStage]);
+
+  useEffect(() => {
+    const persistedSettings = statusData?.assistant?.personalization || {};
+    const persistedBaseStyleTone = String(persistedSettings.baseStyleTone || "").trim().toLowerCase();
+    const persistedWarm = String(persistedSettings.warm || "").trim().toLowerCase();
+    const persistedEnthusiastic = String(persistedSettings.enthusiastic || "").trim().toLowerCase();
+    const persistedHeadersAndLists = String(persistedSettings.headersAndLists || "").trim().toLowerCase();
+    const persistedCustomInstructions = String(persistedSettings.customInstructions || "");
+    const persistedNickname = String(persistedSettings.nickname || "");
+    const persistedOccupation = String(persistedSettings.occupation || "");
+    const persistedMoreAboutUser = String(persistedSettings.moreAboutUser || persistedSettings.aboutUser || "");
+    setPersonalizationPreferences((previous) => {
+      const nextPreferences = {
+        ...previous,
+        baseStyleTone: persistedBaseStyleTone || DEFAULT_PERSONALIZATION_PREFERENCES.baseStyleTone,
+        warm: persistedWarm || DEFAULT_PERSONALIZATION_PREFERENCES.warm,
+        enthusiastic: persistedEnthusiastic || DEFAULT_PERSONALIZATION_PREFERENCES.enthusiastic,
+        headersAndLists: persistedHeadersAndLists || DEFAULT_PERSONALIZATION_PREFERENCES.headersAndLists,
+        customInstructions: persistedCustomInstructions,
+        nickname: persistedNickname,
+        occupation: persistedOccupation,
+        moreAboutUser: persistedMoreAboutUser,
+      };
+      if (
+        previous.baseStyleTone === nextPreferences.baseStyleTone
+        && previous.warm === nextPreferences.warm
+        && previous.enthusiastic === nextPreferences.enthusiastic
+        && previous.headersAndLists === nextPreferences.headersAndLists
+        && previous.customInstructions === nextPreferences.customInstructions
+        && previous.nickname === nextPreferences.nickname
+        && previous.occupation === nextPreferences.occupation
+        && previous.moreAboutUser === nextPreferences.moreAboutUser
+      ) return previous;
+      return {
+        ...nextPreferences,
+      };
+    });
+    if (!isCustomInstructionsDirty) {
+      setCustomInstructionsDraft(persistedCustomInstructions);
+    }
+    if (!isNicknameDirty) {
+      setNicknameDraft(persistedNickname);
+    }
+    if (!isOccupationDirty) {
+      setOccupationDraft(persistedOccupation);
+    }
+    if (!isMoreAboutUserDirty) {
+      setMoreAboutUserDraft(persistedMoreAboutUser);
+    }
+  }, [statusData, isCustomInstructionsDirty, isNicknameDirty, isOccupationDirty, isMoreAboutUserDirty]);
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -334,6 +515,28 @@ function App() {
     } finally {
       setIsLoadingChats(false);
     }
+  }
+
+  function appendPendingStatusStep(pendingMessageId, stepText) {
+    const normalizedStep = String(stepText || "").trim();
+    if (!normalizedStep) return;
+    setMessages((previous) => previous.map((message) => {
+      if (message.id !== pendingMessageId || !message.isPending || message.role !== "assistant") {
+        return message;
+      }
+      const previousTrail = Array.isArray(message.pendingStatusTrail)
+        ? dedupeStatusTrail(message.pendingStatusTrail)
+        : [];
+      if (previousTrail[previousTrail.length - 1] === normalizedStep) {
+        return message;
+      }
+      const nextTrail = dedupeStatusTrail(previousTrail.concat(normalizedStep));
+      return {
+        ...message,
+        pendingStatusTrail: nextTrail,
+        text: buildPendingAssistantTrailText(nextTrail),
+      };
+    }));
   }
 
   useEffect(() => {
@@ -723,16 +926,32 @@ function App() {
     }
     sendingStatusPollRef.current = window.setInterval(() => {
       refreshStatus().catch(() => {});
-    }, 900);
+    }, 250);
+    refreshStatus().catch(() => {});
     const pendingMessageId = crypto.randomUUID();
+    const initialPendingText = getPendingAssistantMessage(currentAssistantMode, "searching");
     setMessages((prev) => prev.concat(createMessage(
       "assistant",
-      getPendingAssistantMessage(currentAssistantMode, activeChainStage),
+      initialPendingText,
       {
-      id: pendingMessageId,
-      isPending: true,
+        id: pendingMessageId,
+        isPending: true,
+        pendingStatusTrail: [initialPendingText],
       }
     )));
+    const fallbackStepTimers = [];
+    if (String(currentAssistantMode || "").trim().toLowerCase() === "refine") {
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "drafting"));
+      }, 550));
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "refining"));
+      }, 1300));
+    } else {
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("simple", "single_pass"));
+      }, 650));
+    }
 
     try {
       if (isPanelCommand && hasPromptFiles) {
@@ -796,6 +1015,9 @@ function App() {
         };
       }));
     } finally {
+      for (const timerId of fallbackStepTimers) {
+        window.clearTimeout(timerId);
+      }
       if (sendingStatusPollRef.current) {
         window.clearInterval(sendingStatusPollRef.current);
         sendingStatusPollRef.current = null;
@@ -871,15 +1093,15 @@ function App() {
 
     try {
       let nextPanel = null;
-      if (selectedTab.command === "/personalization") {
+      if (selectedTab.id === "general") {
         const [assistantPayload, infoPayload] = await Promise.all([
           fetchPanelCommand("/assistant"),
           fetchPanelCommand("/info"),
         ]);
         nextPanel = {
           id: crypto.randomUUID(),
-          command: "/personalization",
-          title: "Personalization",
+          command: "/general",
+          title: "General",
           content: {
             ui: {
               currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
@@ -887,6 +1109,16 @@ function App() {
             },
             assistant: parseAssistantModeContent(assistantPayload.answer || ""),
           },
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else if (selectedTab.id === "personalization") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/personalization",
+          title: "Personalization",
+          content: buildPersonalizationContent(personalizationPreferences),
           severity: null,
           responseType: null,
           configView: null,
@@ -964,21 +1196,7 @@ function App() {
       return;
     }
 
-    if (activeCommand === "/profile") {
-      const profilePayload = await fetchPanelCommand("/profile");
-      setPanelData({
-        id: crypto.randomUUID(),
-        command: "/profile",
-        title: profilePayload.responseType || "/profile",
-        content: parsePanelText(profilePayload.answer || ""),
-        severity: profilePayload.evidenceSeverity || null,
-        responseType: profilePayload.responseType || null,
-        configView: profilePayload.configView || profilePayload.webConfigView || null,
-      });
-      return;
-    }
-
-    if (activeCommand === "/personalization") {
+    if (activeCommand === "/general") {
       const [assistantPayload, infoPayload] = await Promise.all([
         fetchPanelCommand("/assistant"),
         fetchPanelCommand("/info"),
@@ -986,8 +1204,8 @@ function App() {
 
       setPanelData({
         id: crypto.randomUUID(),
-        command: "/personalization",
-        title: "Personalization",
+        command: "/general",
+        title: "General",
         content: {
           ui: {
             currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
@@ -999,18 +1217,92 @@ function App() {
         responseType: null,
         configView: null,
       });
+      return;
+    }
+
+    if (activeCommand === "/personalization") {
+      setPanelData({
+        id: crypto.randomUUID(),
+        command: "/personalization",
+        title: "Personalization",
+        content: buildPersonalizationContent(personalizationPreferences),
+        severity: null,
+        responseType: null,
+        configView: null,
+      });
     }
   }
 
   async function applyPersonalizationChange(kind, selectedId) {
     if (isSending || !isEmbeddingReady) return;
     if (kind === "assistant" && isAssistantModeTemporarilyDisabled(selectedId)) return;
+    if (kind.startsWith("personalization:")) {
+      const settingKey = kind.replace("personalization:", "");
+      if (!Object.prototype.hasOwnProperty.call(DEFAULT_PERSONALIZATION_PREFERENCES, settingKey)) return;
+      let nextPreferences = null;
+      setPersonalizationPreferences((previous) => {
+        nextPreferences = {
+          ...previous,
+          [settingKey]: selectedId,
+        };
+        return nextPreferences;
+      });
+      const effectivePreferences = nextPreferences || {
+        ...personalizationPreferences,
+        [settingKey]: selectedId,
+      };
+      setDialogTabPanels((previousPanels) => {
+        const personalizationPanel = previousPanels.personalization;
+        if (!personalizationPanel) return previousPanels;
+        return {
+          ...previousPanels,
+          personalization: {
+            ...personalizationPanel,
+            content: buildPersonalizationContent(effectivePreferences),
+          },
+        };
+      });
+      if (panelData?.command === "/personalization") {
+        setPanelData((previousPanel) => {
+          if (!previousPanel) return previousPanel;
+          return {
+            ...previousPanel,
+            content: buildPersonalizationContent(effectivePreferences),
+          };
+        });
+      }
+
+      setIsSending(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sessionId: sessionIdRef.current,
+            [settingKey]: selectedId,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to save personalization setting");
+        }
+        await refreshStatus();
+      } catch (error) {
+        setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+          evidenceSeverity: "error",
+          isVolatile: true,
+        })));
+      } finally {
+        setIsSending(false);
+      }
+      return;
+    }
 
     const command = kind === "assistant"
       ? `/assistant ${selectedId}`
-      : kind === "profile"
-        ? `/profile ${selectedId}`
-        : `/mode ${selectedId}`;
+      : `/mode ${selectedId}`;
 
     setIsSending(true);
     try {
@@ -1022,6 +1314,7 @@ function App() {
       if (isUnifiedDialogOpen) {
         setDialogTabPanels((previous) => {
           const nextPanels = { ...previous };
+          delete nextPanels.general;
           delete nextPanels.personalization;
           delete nextPanels.info;
           return nextPanels;
@@ -1039,6 +1332,123 @@ function App() {
       setIsSending(false);
       await refreshStatus();
     }
+  }
+
+  function updateCustomInstructionsDraft(value) {
+    const nextDraft = String(value || "");
+    setCustomInstructionsDraft(nextDraft);
+    setIsCustomInstructionsDirty(nextDraft !== String(personalizationPreferences.customInstructions || ""));
+  }
+
+  function updateNicknameDraft(value) {
+    const nextDraft = String(value || "");
+    setNicknameDraft(nextDraft);
+    setIsNicknameDirty(nextDraft !== String(personalizationPreferences.nickname || ""));
+  }
+
+  function updateOccupationDraft(value) {
+    const nextDraft = String(value || "");
+    setOccupationDraft(nextDraft);
+    setIsOccupationDirty(nextDraft !== String(personalizationPreferences.occupation || ""));
+  }
+
+  function updateMoreAboutUserDraft(value) {
+    const nextDraft = String(value || "");
+    setMoreAboutUserDraft(nextDraft);
+    setIsMoreAboutUserDirty(nextDraft !== String(personalizationPreferences.moreAboutUser || ""));
+  }
+
+  async function saveCustomInstructions() {
+    if (isSending || !isEmbeddingReady || !isCustomInstructionsDirty) return;
+    setIsSending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          customInstructions: customInstructionsDraft,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save custom instructions");
+      }
+      const savedCustomInstructions = String(payload?.settings?.customInstructions || "");
+      setPersonalizationPreferences((previous) => ({
+        ...previous,
+        customInstructions: savedCustomInstructions,
+      }));
+      setCustomInstructionsDraft(savedCustomInstructions);
+      setIsCustomInstructionsDirty(false);
+      await refreshStatus();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  async function saveAboutYouSetting(settingKey, draftValue, setDirtyState) {
+    if (isSending || !isEmbeddingReady) return;
+    setIsSending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          [settingKey]: draftValue,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save about-you setting");
+      }
+      const savedValue = String(payload?.settings?.[settingKey] || "");
+      setPersonalizationPreferences((previous) => ({
+        ...previous,
+        [settingKey]: savedValue,
+      }));
+      if (settingKey === "nickname") {
+        setNicknameDraft(savedValue);
+      } else if (settingKey === "occupation") {
+        setOccupationDraft(savedValue);
+      } else if (settingKey === "moreAboutUser") {
+        setMoreAboutUserDraft(savedValue);
+      }
+      setDirtyState(false);
+      await refreshStatus();
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  async function saveNickname() {
+    if (!isNicknameDirty) return;
+    await saveAboutYouSetting("nickname", nicknameDraft, setIsNicknameDirty);
+  }
+
+  async function saveOccupation() {
+    if (!isOccupationDirty) return;
+    await saveAboutYouSetting("occupation", occupationDraft, setIsOccupationDirty);
+  }
+
+  async function saveMoreAboutUser() {
+    if (!isMoreAboutUserDirty) return;
+    await saveAboutYouSetting("moreAboutUser", moreAboutUserDraft, setIsMoreAboutUserDirty);
   }
 
   async function sendPrompt(event) {
@@ -1097,6 +1507,27 @@ function App() {
       dangerouslySetInnerHTML: { __html: sanitized },
     });
   };
+  const renderPendingAssistantTrail = (message) => {
+    const trail = dedupeStatusTrail(message?.pendingStatusTrail);
+    if (trail.length === 0) {
+      return renderAssistantMarkdown(message?.text || "Assistant is thinking…");
+    }
+    return React.createElement(
+      "div",
+      { className: "assistant-pending-trail", role: "status", "aria-live": "polite" },
+      ...trail.map((step, index) => {
+        const isLast = index === trail.length - 1;
+        return React.createElement(
+          "div",
+          { key: `${message.id}-pending-step-${index}`, className: `assistant-pending-step ${isLast ? "active" : "done"}` },
+          React.createElement("span", { className: "assistant-pending-step-label" }, step),
+          isLast
+            ? null
+            : React.createElement("span", { className: "assistant-pending-step-check", "aria-hidden": "true" }, "✓")
+        );
+      })
+    );
+  };
 
   const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
   const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
@@ -1105,9 +1536,6 @@ function App() {
 
   const parsedAssistantPanel = activeModalPanel?.command === "/assistant"
     ? parseAssistantModeContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
-    : null;
-  const parsedProfilePanel = activeModalPanel?.command === "/profile"
-    ? parseProfileContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
   const parsedInfoGroups = activeModalPanel?.command === "/info"
     ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
@@ -1167,11 +1595,13 @@ function App() {
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const sendButtonLabel = isSending
-    ? activeChainStage === "drafting"
+    ? activeChainStage === "searching"
+      ? "Searching..."
+      : activeChainStage === "drafting"
       ? "Drafting..."
       : activeChainStage === "refining"
         ? "Refining..."
-        : "Sending..."
+        : "Thinking..."
     : "Send";
 
   function openLibraryPage() {
@@ -1443,7 +1873,7 @@ function App() {
   }
 
   async function openSettingsDialog() {
-    await openUnifiedDialog("settings");
+    await openUnifiedDialog("general");
   }
 
   return React.createElement(
@@ -1539,7 +1969,18 @@ function App() {
           "button",
           {
             type: "button",
-            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && activeDialogTab === "settings") ? " active" : ""}`,
+            className: `side-nav-item${isUnifiedDialogOpen && activeDialogTab === "personalization" ? " active" : ""}`,
+            onClick: openPersonalizationPanel,
+            disabled: isSending || !isEmbeddingReady,
+          },
+          icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
+          React.createElement("span", null, "Personalization")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && (activeDialogTab === "general" || activeDialogTab === "settings")) ? " active" : ""}`,
             onClick: openSettingsDialog,
             disabled: isSending || !isEmbeddingReady,
           },
@@ -1881,7 +2322,9 @@ function App() {
                       "section",
                       { className: "assistant-answer-block" },
                       React.createElement("small", null, "Answer"),
-                      renderAssistantMarkdown(message.text)
+                      message.isPending
+                        ? renderPendingAssistantTrail(message)
+                        : renderAssistantMarkdown(message.text)
                     ),
                     React.createElement(
                       "details",
@@ -1922,7 +2365,11 @@ function App() {
                     )
                   )
                   : message.role === "assistant"
-                    ? renderAssistantMarkdown(message.text)
+                    ? (
+                      message.isPending
+                        ? renderPendingAssistantTrail(message)
+                        : renderAssistantMarkdown(message.text)
+                    )
                     : React.createElement(
                       "div",
                       { className: "user-message-content" },
@@ -2064,7 +2511,7 @@ function App() {
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: () => openUnifiedDialog("settings"), disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: openSettingsDialog, disabled: isSending || !isEmbeddingReady },
             icon("M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5"),
             "Settings"
           ),
@@ -2394,7 +2841,6 @@ function App() {
                       panelData: activeModalPanel,
                       parsedInfoGroups,
                       parsedAssistantPanel,
-                      parsedProfilePanel,
                       parsedHelpPanel,
                       editableConfigRows,
                       restartConfigRows,
@@ -2405,6 +2851,22 @@ function App() {
                       disabledAssistantModes: disabledAssistantModesList,
                       submitConfigChange,
                       applyPersonalizationChange,
+                      customInstructionsDraft,
+                      isCustomInstructionsDirty,
+                      updateCustomInstructionsDraft,
+                      saveCustomInstructions,
+                      nicknameDraft,
+                      occupationDraft,
+                      moreAboutUserDraft,
+                      isNicknameDirty,
+                      isOccupationDirty,
+                      isMoreAboutUserDirty,
+                      updateNicknameDraft,
+                      updateOccupationDraft,
+                      updateMoreAboutUserDraft,
+                      saveNickname,
+                      saveOccupation,
+                      saveMoreAboutUser,
                       icon,
                     })
                     : React.createElement("p", null, "Select a section.")
@@ -2462,7 +2924,6 @@ function App() {
               panelData,
               parsedInfoGroups,
               parsedAssistantPanel,
-              parsedProfilePanel,
               parsedHelpPanel,
               editableConfigRows,
               restartConfigRows,
@@ -2473,6 +2934,22 @@ function App() {
               disabledAssistantModes: disabledAssistantModesList,
               submitConfigChange,
               applyPersonalizationChange,
+              customInstructionsDraft,
+              isCustomInstructionsDirty,
+              updateCustomInstructionsDraft,
+              saveCustomInstructions,
+              nicknameDraft,
+              occupationDraft,
+              moreAboutUserDraft,
+              isNicknameDirty,
+              isOccupationDirty,
+              isMoreAboutUserDirty,
+              updateNicknameDraft,
+              updateOccupationDraft,
+              updateMoreAboutUserDraft,
+              saveNickname,
+              saveOccupation,
+              saveMoreAboutUser,
               icon,
             })
           )

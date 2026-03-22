@@ -1,10 +1,10 @@
+import { getDefaultPersonalizationSettings, normalizePersonalizationSettings } from "./personalization.js";
 import { dbQuery } from "./db.js";
 
-export async function initializeStateDefaults({ uiMode, assistantMode, profileId }) {
+export async function initializeStateDefaults({ uiMode, assistantMode }) {
   const defaults = [
     ["ui_mode", { value: uiMode }],
     ["assistant_mode", { value: assistantMode }],
-    ["profile_id", { value: profileId }],
   ];
 
   for (const [key, value] of defaults) {
@@ -38,14 +38,13 @@ export async function initializeRuntimeConfigDefaults({ historyMessages, maxSimi
 export async function getSelectionState(fallbacks) {
   const result = await dbQuery(
     "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
-    [["ui_mode", "assistant_mode", "profile_id"]]
+    [["ui_mode", "assistant_mode"]]
   );
 
   const map = new Map(result.rows.map((row) => [row.setting_key, row.setting_value?.value]));
   return {
     uiMode: map.get("ui_mode") || fallbacks.uiMode,
     assistantMode: map.get("assistant_mode") || fallbacks.assistantMode,
-    profileId: map.get("profile_id") || fallbacks.profileId,
   };
 }
 
@@ -77,6 +76,28 @@ export async function getSessionSetting({ sessionId, settingName, fallbackValue 
 export async function updateSessionSetting({ sessionId, settingName, value }) {
   const settingKey = buildSessionSettingKey(sessionId, settingName);
   await updateSetting(settingKey, value);
+}
+
+export async function getSessionPersonalizationSettings(sessionId) {
+  const rawSettings = await getSessionSetting({
+    sessionId,
+    settingName: "personalization_settings",
+    fallbackValue: getDefaultPersonalizationSettings(),
+  });
+  return normalizePersonalizationSettings(rawSettings);
+}
+
+export async function updateSessionPersonalizationSettings(sessionId, nextSettings) {
+  const mergedSettings = normalizePersonalizationSettings({
+    ...(await getSessionPersonalizationSettings(sessionId)),
+    ...(nextSettings && typeof nextSettings === "object" ? nextSettings : {}),
+  });
+  await updateSessionSetting({
+    sessionId,
+    settingName: "personalization_settings",
+    value: mergedSettings,
+  });
+  return mergedSettings;
 }
 
 export async function getRuntimeConfigState(fallbacks) {
