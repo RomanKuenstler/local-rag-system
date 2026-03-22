@@ -4,7 +4,6 @@ export function renderPanelContent({
   panelData,
   parsedInfoGroups,
   parsedAssistantPanel,
-  parsedProfilePanel,
   parsedHelpPanel,
   editableConfigRows,
   restartConfigRows,
@@ -192,57 +191,97 @@ export function renderPanelContent({
     );
   }
 
-  if (panelData.command === "/profile" && parsedProfilePanel) {
-    return React.createElement(
-      "div",
-      { className: "assistant-mode-grid" },
-      parsedProfilePanel.currentProfile
-        ? React.createElement("div", { className: "assistant-current" }, `Current profile: ${parsedProfilePanel.currentProfile}`)
-        : null,
-      ...parsedProfilePanel.profiles.map((profile) => renderSelectableModeCard({
-        key: profile.id,
-        id: profile.id,
-        description: profile.description,
-        isActive: profile.id === parsedProfilePanel.currentProfile,
-        onSelect: (id) => applyPersonalizationChange("profile", id),
-      }))
-    );
-  }
-
-  if (panelData.command === "/personalization" && panelData.content) {
+  if (panelData.command === "/general" && panelData.content) {
     const uiModes = panelData.content.ui?.modes || [];
     const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
     const currentAssistantMode = panelData.content.assistant?.currentMode || null;
+    const chevron = "▾";
+    const check = "✓";
+
+    const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
+      "div",
+      { className: "general-setting-row", key: `general-setting-${label}` },
+      React.createElement("span", { className: "general-setting-label" }, label),
+      React.createElement(
+        "details",
+        { className: "general-dropdown" },
+        React.createElement(
+          "summary",
+          { className: "general-dropdown-trigger" },
+          React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
+          React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
+        ),
+        React.createElement(
+          "div",
+          { className: "general-dropdown-menu", role: "menu" },
+          ...options.map((option) => {
+            const optionId = String(option.id || "").trim().toLowerCase();
+            const active = optionId === String(currentId || "").trim().toLowerCase();
+            const optionDisabled = Boolean(isOptionDisabled?.(optionId));
+
+            return React.createElement(
+              "button",
+              {
+                key: `${kind}-${optionId}`,
+                type: "button",
+                className: `general-dropdown-option${active ? " active" : ""}`,
+                role: "menuitemradio",
+                "aria-checked": active ? "true" : "false",
+                disabled: interactionDisabled || optionDisabled,
+                onClick: (event) => {
+                  event.preventDefault();
+                  applyPersonalizationChange(kind, optionId);
+                },
+              },
+              React.createElement(
+                "span",
+                { className: "general-dropdown-option-copy" },
+                React.createElement("strong", null, optionId),
+                React.createElement("small", null, option.shortDescription || option.description || "")
+              ),
+              active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
+            );
+          })
+        )
+      )
+    );
 
     return React.createElement(
       "div",
-      { className: "info-groups" },
+      { className: "info-groups general-settings-grid" },
       React.createElement(
         "section",
-        { className: "info-group-card" },
-        React.createElement("h4", null, "UI mode"),
-        ...uiModes.map((mode) => renderSelectableModeCard({
-          key: `personalization-ui-${mode.id}`,
-          id: mode.id,
-          description: mode.description,
-          isActive: mode.id === currentUiMode,
-          onSelect: (id) => applyPersonalizationChange("ui", id),
-        }))
-      ),
-      React.createElement(
-        "section",
-        { className: "info-group-card" },
-        React.createElement("h4", null, "Assistant mode"),
-        ...assistantModes.map((mode) => renderSelectableModeCard({
-          key: `personalization-mode-${mode.id}`,
-          id: mode.id,
-          description: mode.description,
-          isActive: mode.id === currentAssistantMode,
-          isDisabled: disabledAssistantModeSet.has(String(mode.id || "").trim().toLowerCase()),
-          onSelect: (id) => applyPersonalizationChange("assistant", id),
-        }))
+        { className: "info-group-card general-settings-card" },
+        renderModeDropdown({
+          label: "UI-Mode",
+          currentId: currentUiMode,
+          options: uiModes,
+          kind: "ui",
+          isOptionDisabled: null,
+        }),
+        renderModeDropdown({
+          label: "Assistant mode",
+          currentId: currentAssistantMode,
+          options: assistantModes,
+          kind: "assistant",
+          isOptionDisabled: (optionId) => disabledAssistantModeSet.has(optionId),
+        })
       )
+    );
+  }
+
+  if (panelData.command === "/personalization" && panelData.content) {
+    const sections = Array.isArray(panelData.content.sections) ? panelData.content.sections : [];
+    return React.createElement(
+      "div",
+      { className: "info-groups" },
+      ...sections.map((section) => React.createElement(
+        "section",
+        { key: section.id, className: "info-group-card personalization-section-card" },
+        React.createElement("h4", null, section.title),
+        React.createElement("p", { className: "config-help" }, section.description || "")
+      ))
     );
   }
 

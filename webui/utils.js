@@ -1,13 +1,12 @@
 export const API_BASE_URL = window.__API_BASE_URL__ || "";
 
-export const PANEL_COMMANDS = new Set(["/info", "/config", "/lib", "/assistant", "/profile", "/help", "?"]);
+export const PANEL_COMMANDS = new Set(["/info", "/config", "/lib", "/assistant", "/help", "?"]);
 
 const PANEL_TITLE_BY_COMMAND = {
   "/info": "Info / Status",
   "/config": "Settings",
   "/lib": "Library Overview",
   "/assistant": "Assistant Modes",
-  "/profile": "Profiles",
   "/personalization": "Personalization",
   "/help": "Help",
   "?": "Help",
@@ -76,11 +75,6 @@ export function parseAssistantModeContent(text) {
   return { modes: items, currentMode: current };
 }
 
-export function parseProfileContent(text) {
-  const { items, current } = parseListWithCurrent(text, "current profile:");
-  return { profiles: items, currentProfile: current };
-}
-
 export function parseSystemInfoContent(text) {
   const lines = String(text || "")
     .split("\n")
@@ -101,7 +95,7 @@ export function parseSystemInfoContent(text) {
   const groups = [
     {
       title: "App",
-      keys: ["app", "ui mode", "assistant mode", "profile"],
+      keys: ["app", "ui mode", "assistant mode"],
     },
     {
       title: "Models",
