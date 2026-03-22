@@ -298,7 +298,7 @@ export function renderPanelContent({
               React.createElement("textarea", {
                 className: "personalization-custom-instructions-input",
                 value: customInstructionsValue,
-                placeholder: "Enter custom instructions…",
+                placeholder: "Additional behavior, style, and tone preferences",
                 rows: 1,
                 onChange: (event) => {
                   autoResizeTextarea(event.currentTarget);
