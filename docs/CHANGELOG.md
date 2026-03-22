@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-03-22 (service-boundary cleanup)
+
+### Refactor
+- Moved backend-only managed library helpers from `shared/src/library-service.js` to `apps/backend/library-service.js`.
+- Moved retriever CLI-only terminal UI helpers from `shared/src/ui.js` to `apps/retriever/ui.js`.
+- Updated service imports so backend/retriever no longer depend on non-shared helpers from `shared/src`.
+
+### Documentation refresh
+- Updated `README.md`, `docs/DEVELOPERS.md`, `docs/DOCUMENTATION.md`, `docs/PROMPTBUILDING.md`, and `docs/NEXTSTEPS.md` to reflect the current `apps/` + `shared/` structure and current file paths.
+
 ## 2026-03-22
 
 ### Refactor

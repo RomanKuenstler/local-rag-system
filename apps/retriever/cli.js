@@ -28,7 +28,7 @@ import {
   QDRANT_URL,
   validateRetrievalConfig,
 } from "../../shared/config/index.js";
-import { createUi } from "../../shared/src/ui.js";
+import { createUi } from "./ui.js";
 import { createChatModel } from "../../shared/src/model-clients.js";
 import { buildSystemPromptLayers, loadGuardrails } from "../../shared/src/guardrails.js";
 import {

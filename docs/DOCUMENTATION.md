@@ -79,27 +79,33 @@ Your personal files become the **knowledge base** of the system.
 
 ## Project Structure
 
-```
+```text
 .
-├── compose.yml        # Docker Compose configuration (containers, models, configs)
-├── Dockerfile         # Build instructions for retriever/embedder containers
-├── index.js           # Retriever application (chat + retrieval)
-├── embedder.js        # Embedder service (background indexing loop)
-├── package.json       # Node.js dependencies
+├── compose.yml                    # Docker Compose configuration (containers, models, configs)
+├── Dockerfile                     # Shared Node image for backend/retriever/embedder
+├── package.json                   # Node.js dependencies + scripts
 │
-├── data/              # Knowledge base (files to embed into the vector DB)
-├── upload/            # One-time prompt uploads consumed via /upload
+├── apps/
+│   ├── backend/api.js             # Frontend-facing API gateway
+│   ├── backend/library-service.js # Backend-only managed-library helpers
+│   ├── retriever/api.js           # Retriever API (prompt orchestration)
+│   ├── retriever/cli.js           # Terminal retriever mode
+│   ├── retriever/ui.js            # CLI-only UI helpers
+│   ├── embedder/worker.js         # Embedder service loop
+│   └── webui/                     # Browser client assets + nginx config
 │
-├── README.md          # Project documentation
-├── NEXTSTEPS.md       # Ideas and roadmap for improving the system
-├── PROMPTS.md         # Notes about prompts and prompt engineering
-├── PROMPTBUILDING.md  # Implementation-level prompt assembly and mode behavior guide
+├── shared/
+│   ├── src/                       # Shared business logic used by multiple services
+│   ├── config/index.js            # Runtime/env config constants
+│   ├── db/index.js                # Postgres readiness + migration helpers
+│   └── prompts/guardrails.md      # System guardrails markdown
+│
+├── data/                          # Knowledge base files indexed into Qdrant
+├── upload/                        # One-time prompt uploads consumed via API
+└── docs/                          # Project documentation set
 ```
 
-> **Note:** this high-level structure block is intentionally simplified for beginners.
-> For a maintainer-grade, current file/folder map (including `src/`, `webui/`, API
-> boundaries, and where to implement specific features), see **`DEVELOPERS.md`**.
-
+> For a maintainer-grade service and module responsibility map, see **`docs/DEVELOPERS.md`**.
 ---
 
 # System Architecture

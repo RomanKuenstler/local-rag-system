@@ -1,13 +1,13 @@
 import fs from "fs/promises";
 import path from "path";
-import { CONTENT_PATH, EMBEDDABLE_EXTENSIONS } from "../config/index.js";
+import { CONTENT_PATH, EMBEDDABLE_EXTENSIONS } from "../../shared/config/index.js";
 import {
   getManagedLibraryFile,
   listManagedLibraryFilesWithStatus,
   markManagedLibraryFileDeleted,
   setManagedLibraryFileStatus,
   upsertManagedLibraryFile,
-} from "./state-store.js";
+} from "../../shared/src/state-store.js";
 
 const LIBRARY_UPLOAD_SUBDIR = (process.env.LIBRARY_UPLOAD_SUBDIR || "_library").trim();
 const MAX_LIBRARY_UPLOAD_BYTES = Number.parseInt(process.env.MAX_LIBRARY_UPLOAD_BYTES || String(15 * 1024 * 1024), 10);
