@@ -160,10 +160,16 @@ function extractAssistantTextContent(response) {
   return "";
 }
 
-function finalizeAssistantAnswer(response) {
-  const extracted = extractAssistantTextContent(response);
+function finalizeAssistantAnswer(response, { fallbackText = "" } = {}) {
+  const extracted = extractAssistantTextContent(response)
+    || String(response?.additional_kwargs?.output_text || "").trim()
+    || String(response?.additional_kwargs?.text || "").trim()
+    || String(response?.text || "").trim();
   if (extracted) {
     return extracted;
+  }
+  if (fallbackText) {
+    return String(fallbackText).trim();
   }
   return "I’m sorry—I couldn’t generate a complete answer this time. Please try again.";
 }
@@ -955,7 +961,9 @@ async function handlePrompt(req, res) {
         }),
       ]);
 
-      answer = finalizeAssistantAnswer(refinedResponse);
+      answer = finalizeAssistantAnswer(refinedResponse, {
+        fallbackText: draftAnswer,
+      });
       markAssistantChainCompleted(sessionId, currentAssistantMode);
     } else {
       setAssistantChainProgress(sessionId, {
