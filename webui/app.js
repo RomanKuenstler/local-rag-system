@@ -277,13 +277,28 @@ function App() {
   }, [isSending, currentAssistantMode, activeChainStage]);
 
   useEffect(() => {
-    const persistedBaseStyleTone = String(statusData?.assistant?.personalization?.baseStyleTone || "").trim().toLowerCase();
-    if (!persistedBaseStyleTone) return;
+    const persistedSettings = statusData?.assistant?.personalization || {};
+    const persistedBaseStyleTone = String(persistedSettings.baseStyleTone || "").trim().toLowerCase();
+    const persistedWarm = String(persistedSettings.warm || "").trim().toLowerCase();
+    const persistedEnthusiastic = String(persistedSettings.enthusiastic || "").trim().toLowerCase();
+    const persistedHeadersAndLists = String(persistedSettings.headersAndLists || "").trim().toLowerCase();
+    if (!persistedBaseStyleTone && !persistedWarm && !persistedEnthusiastic && !persistedHeadersAndLists) return;
     setPersonalizationPreferences((previous) => {
-      if (previous.baseStyleTone === persistedBaseStyleTone) return previous;
-      return {
+      const nextPreferences = {
         ...previous,
-        baseStyleTone: persistedBaseStyleTone,
+        ...(persistedBaseStyleTone ? { baseStyleTone: persistedBaseStyleTone } : {}),
+        ...(persistedWarm ? { warm: persistedWarm } : {}),
+        ...(persistedEnthusiastic ? { enthusiastic: persistedEnthusiastic } : {}),
+        ...(persistedHeadersAndLists ? { headersAndLists: persistedHeadersAndLists } : {}),
+      };
+      if (
+        previous.baseStyleTone === nextPreferences.baseStyleTone
+        && previous.warm === nextPreferences.warm
+        && previous.enthusiastic === nextPreferences.enthusiastic
+        && previous.headersAndLists === nextPreferences.headersAndLists
+      ) return previous;
+      return {
+        ...nextPreferences,
       };
     });
   }, [statusData]);
@@ -1138,32 +1153,30 @@ function App() {
         });
       }
 
-      if (settingKey === "baseStyleTone") {
-        setIsSending(true);
-        try {
-          const response = await fetch(`${API_BASE_URL}/api/personalization`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              sessionId: sessionIdRef.current,
-              baseStyleTone: selectedId,
-            }),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(payload?.error || "Failed to save personalization setting");
-          }
-          await refreshStatus();
-        } catch (error) {
-          setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-            evidenceSeverity: "error",
-            isVolatile: true,
-          })));
-        } finally {
-          setIsSending(false);
+      setIsSending(true);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sessionId: sessionIdRef.current,
+            [settingKey]: selectedId,
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to save personalization setting");
         }
+        await refreshStatus();
+      } catch (error) {
+        setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+          evidenceSeverity: "error",
+          isVolatile: true,
+        })));
+      } finally {
+        setIsSending(false);
       }
       return;
     }

@@ -1336,8 +1336,14 @@ async function handlePersonalization(req, res) {
     const body = await readJsonBody(req);
     const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
     const baseStyleTone = String(body.baseStyleTone || "").trim().toLowerCase();
+    const warm = String(body.warm || "").trim().toLowerCase();
+    const enthusiastic = String(body.enthusiastic || "").trim().toLowerCase();
+    const headersAndLists = String(body.headersAndLists || "").trim().toLowerCase();
     const settings = await updateSessionPersonalizationSettings(sessionId, {
       ...(baseStyleTone ? { baseStyleTone } : {}),
+      ...(warm ? { warm } : {}),
+      ...(enthusiastic ? { enthusiastic } : {}),
+      ...(headersAndLists ? { headersAndLists } : {}),
     });
     json(res, 200, {
       sessionId,
