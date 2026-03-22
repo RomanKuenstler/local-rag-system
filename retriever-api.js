@@ -685,22 +685,46 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
 
 async function searchKnowledgeBase(prompt) {
   const userQuestionEmbedding = await embeddingsModel.embedQuery(prompt);
-  const results = await qdrant.search(COLLECTION_NAME, {
+  let totalCollectionPoints = runtimeConfig.maxSimilarities;
+  try {
+    const collectionInfo = await qdrant.getCollection(COLLECTION_NAME);
+    const directPointsCount = Number.parseInt(String(collectionInfo?.points_count ?? ""), 10);
+    const indexedVectorsCount = Number.parseInt(
+      String(collectionInfo?.indexed_vectors_count ?? ""),
+      10
+    );
+    const collectionPointsCount = Number.isFinite(directPointsCount) && directPointsCount > 0
+      ? directPointsCount
+      : indexedVectorsCount;
+
+    if (Number.isFinite(collectionPointsCount) && collectionPointsCount > 0) {
+      totalCollectionPoints = Math.max(collectionPointsCount, runtimeConfig.maxSimilarities);
+    }
+  } catch (error) {
+    console.warn(
+      `Unable to read collection size before retrieval; falling back to max similarities (${runtimeConfig.maxSimilarities}). ${error.message}`
+    );
+  }
+
+  const allCandidateResults = await qdrant.search(COLLECTION_NAME, {
     vector: userQuestionEmbedding,
-    limit: runtimeConfig.maxSimilarities,
+    limit: totalCollectionPoints,
     with_payload: true,
   });
 
-  const filteredResults = results.filter((result) => result.score >= runtimeConfig.cosineLimit);
-  const hasSufficientEvidence = filteredResults.length >= runtimeConfig.minSimilarities;
-  const evidenceQuality = getEvidenceQuality(filteredResults, runtimeConfig.minSimilarities);
+  const filteredResults = allCandidateResults
+    .filter((result) => result.score >= runtimeConfig.cosineLimit)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const selectedResults = filteredResults.slice(0, runtimeConfig.maxSimilarities);
+  const hasSufficientEvidence = selectedResults.length >= runtimeConfig.minSimilarities;
+  const evidenceQuality = getEvidenceQuality(selectedResults, runtimeConfig.minSimilarities);
 
   return {
-    results: filteredResults,
+    results: selectedResults,
     evidenceQuality,
     hasSufficientEvidence,
     ragContextPackage: buildRagContextPackage({
-      results: filteredResults,
+      results: selectedResults,
       userMessage: prompt,
       evidenceQuality,
     }),
