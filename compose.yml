@@ -65,10 +65,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
+      - ./shared/prompts:/app/prompts:ro
       - rag_state:/app/state
-    configs:
-      - source: guardrails.md
-        target: /app/guardrails.md
     models:
       chat-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
@@ -171,6 +169,3 @@ models:
   embedding-model:
     model: ai/embeddinggemma:latest
 
-configs:
-  guardrails.md:
-    file: ./shared/prompts/guardrails.md

@@ -1,8 +1,8 @@
-import fs from "fs";
 import { buildAssistantModeSystemLayer } from "./assistant-modes.js";
+import { loadPromptFile } from "./prompt-files.js";
 import { buildPersonalizationSystemLayer } from "./personalization.js";
 
-export const GUARDRAILS_PATH = "/app/guardrails.md";
+export const GUARDRAILS_PATH = "/app/prompts/guardrails.md";
 
 const DEFAULT_GUARDRAILS = [
   "# Global AI Guardrails",
@@ -32,12 +32,11 @@ function normalizeGuardrails(rawGuardrails) {
 }
 
 export function loadGuardrails(filePath = GUARDRAILS_PATH) {
-  try {
-    return normalizeGuardrails(fs.readFileSync(filePath, "utf8"));
-  } catch (error) {
-    console.warn(`Guardrails file not found at ${filePath}. Falling back to built-in guardrails.`);
-    return DEFAULT_GUARDRAILS;
-  }
+  return normalizeGuardrails(loadPromptFile({
+    filePath,
+    fallback: DEFAULT_GUARDRAILS,
+    label: "Guardrails",
+  }));
 }
 
 export function buildSystemPromptLayers({
