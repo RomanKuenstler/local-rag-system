@@ -1,5 +1,15 @@
 import { getDefaultPersonalizationSettings, normalizePersonalizationSettings } from "./personalization.js";
 import { dbQuery } from "../db/index.js";
+import { DEFAULT_FILE_TAG } from "../config/index.js";
+
+function normalizeFileTags(tags) {
+  const input = Array.isArray(tags) ? tags : [];
+  const normalized = input
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .filter(Boolean)
+    .filter((tag) => /^[a-z0-9][a-z0-9_\-:.]{0,63}$/.test(tag));
+  return [...new Set(normalized)];
+}
 
 export async function initializeStateDefaults({ uiMode, assistantMode }) {
   const defaults = [
@@ -450,20 +460,121 @@ export async function upsertFileMetadata(files, indexState, chunkCounts = {}) {
       ]
     );
   }
+
+  await ensureDefaultFileTags(files.map((file) => file.relativePath));
 }
 
 export async function removeDeletedMetadata(paths) {
   if (!paths.length) return;
+  await dbQuery("DELETE FROM file_tags WHERE file_path = ANY($1)", [paths]);
   await dbQuery("DELETE FROM file_metadata WHERE file_path = ANY($1)", [paths]);
 }
 
 export async function listFileMetadata() {
   const result = await dbQuery(
-    `SELECT file_path, extension, size_bytes, last_modified, file_hash, chunk_count, embedded
-     FROM file_metadata
+    `SELECT
+       m.file_path,
+       m.extension,
+       m.size_bytes,
+       m.last_modified,
+       m.file_hash,
+       m.chunk_count,
+       m.embedded,
+       COALESCE(
+         ARRAY_AGG(t.tag ORDER BY t.tag) FILTER (WHERE t.tag IS NOT NULL),
+         ARRAY[$1::text]
+       ) AS tags
+     FROM file_metadata m
+     LEFT JOIN file_tags t ON t.file_path = m.file_path
+     GROUP BY m.file_path, m.extension, m.size_bytes, m.last_modified, m.file_hash, m.chunk_count, m.embedded
      ORDER BY file_path ASC`
+    ,
+    [DEFAULT_FILE_TAG]
   );
   return result.rows;
+}
+
+export async function listTagsForFilePathMap(filePaths) {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    return new Map();
+  }
+
+  const result = await dbQuery(
+    `SELECT file_path, ARRAY_AGG(tag ORDER BY tag) AS tags
+     FROM file_tags
+     WHERE file_path = ANY($1)
+     GROUP BY file_path`,
+    [filePaths]
+  );
+
+  const tagMap = new Map();
+  for (const row of result.rows) {
+    const normalized = normalizeFileTags(row.tags);
+    tagMap.set(row.file_path, normalized.length > 0 ? normalized : [DEFAULT_FILE_TAG]);
+  }
+
+  for (const filePath of filePaths) {
+    if (!tagMap.has(filePath)) {
+      tagMap.set(filePath, [DEFAULT_FILE_TAG]);
+    }
+  }
+
+  return tagMap;
+}
+
+export async function updateFileTags(filePath, tags) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const normalizedTags = normalizeFileTags(tags);
+  const nextTags = normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG];
+
+  const existing = await dbQuery(
+    "SELECT 1 FROM file_metadata WHERE file_path = $1",
+    [normalizedPath]
+  );
+  if (!existing.rowCount) {
+    return null;
+  }
+
+  await dbQuery("DELETE FROM file_tags WHERE file_path = $1", [normalizedPath]);
+  for (const tag of nextTags) {
+    await dbQuery(
+      `INSERT INTO file_tags (file_path, tag, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (file_path, tag) DO UPDATE SET updated_at = NOW()`,
+      [normalizedPath, tag]
+    );
+  }
+
+  return {
+    filePath: normalizedPath,
+    tags: nextTags,
+  };
+}
+
+export async function ensureDefaultFileTags(filePaths) {
+  const normalizedPaths = [...new Set(
+    (Array.isArray(filePaths) ? filePaths : [])
+      .map((filePath) => String(filePath || "").trim())
+      .filter(Boolean)
+  )];
+  if (normalizedPaths.length === 0) {
+    return;
+  }
+
+  await dbQuery(
+    `INSERT INTO file_tags (file_path, tag, updated_at)
+     SELECT m.file_path, $2, NOW()
+     FROM file_metadata m
+     WHERE m.file_path = ANY($1)
+       AND NOT EXISTS (
+         SELECT 1 FROM file_tags t WHERE t.file_path = m.file_path
+       )`,
+    [normalizedPaths, DEFAULT_FILE_TAG]
+  );
 }
 
 export async function upsertManagedLibraryFile({

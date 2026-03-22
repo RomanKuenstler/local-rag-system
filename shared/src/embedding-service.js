@@ -5,6 +5,7 @@ import {
   CHUNK_SIZE,
   COLLECTION_NAME,
   CONTENT_PATH,
+  DEFAULT_FILE_TAG,
   EMBEDDABLE_EXTENSIONS,
   QDRANT_API_KEY,
   QDRANT_URL,
@@ -19,6 +20,7 @@ import { readTextFilesRecursively } from "./document-processing.js";
 import { ensureDatabaseReady } from "../db/index.js";
 import {
   clearManagedLibraryFileErrors,
+  listTagsForFilePathMap,
   getEmbeddingStatus,
   getIndexStateMap,
   listManagedLibraryFilesWithStatus,
@@ -66,7 +68,7 @@ async function ensureCollection(qdrant, vectorSize) {
       },
     });
 
-    for (const field of ["source", "filename", "extension", "documentHash"]) {
+    for (const field of ["source", "filename", "extension", "documentHash", "tags"]) {
       await qdrant.createPayloadIndex(COLLECTION_NAME, {
         field_name: field,
         field_schema: "keyword",
@@ -94,7 +96,7 @@ async function ensureCollection(qdrant, vectorSize) {
     },
   });
 
-  for (const field of ["source", "filename", "extension", "documentHash"]) {
+  for (const field of ["source", "filename", "extension", "documentHash", "tags"]) {
     await qdrant.createPayloadIndex(COLLECTION_NAME, {
       field_name: field,
       field_schema: "keyword",
@@ -164,7 +166,11 @@ export function fileToChunks(file) {
 }
 
 export async function readEmbeddableFiles() {
-  return readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+  const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+  return files.filter((file) => {
+    const normalizedPath = String(file.relativePath || "").replace(/\\/g, "/");
+    return normalizedPath !== "_library" && !normalizedPath.startsWith("_library/");
+  });
 }
 
 export async function indexChangedDocuments({ logger = console.log } = {}) {
@@ -190,6 +196,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
     );
     const activeFiles = files.filter((file) => !disabledPaths.has(file.relativePath));
     const activeFilePathSet = new Set(activeFiles.map((file) => file.relativePath));
+    const fileTagsMap = await listTagsForFilePathMap(activeFiles.map((file) => file.relativePath));
 
     const indexState = await getIndexStateMap();
 
@@ -314,6 +321,7 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
             sectionIndex: chunk.sectionIndex,
             subchunkIndex: chunk.subchunkIndex,
             documentHash: chunk.documentHash,
+            tags: fileTagsMap.get(file.relativePath) || [DEFAULT_FILE_TAG],
           },
         }));
 

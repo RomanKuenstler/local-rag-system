@@ -19,6 +19,7 @@ import {
   MAX_EMBEDDING_CHARS,
   MIN_SIMILARITIES,
   EMBEDDING_STATUS_FILE,
+  DEFAULT_FILE_TAG,
   PDF_MIN_EXTRACTED_CHARS,
   POSTGRES_DB,
   POSTGRES_HOST,
@@ -71,6 +72,8 @@ import {
   listChatMessages,
   listRecentPromptHistory,
   listFileMetadata,
+  listTagsForFilePathMap,
+  updateFileTags,
   resolveSessionChatId,
   setSessionActiveChat,
   updateChatName,
@@ -728,15 +731,38 @@ async function searchKnowledgeBase(prompt) {
     .filter((result) => result.score >= runtimeConfig.cosineLimit)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const selectedResults = filteredResults.slice(0, runtimeConfig.maxSimilarities);
-  const hasSufficientEvidence = selectedResults.length >= runtimeConfig.minSimilarities;
-  const evidenceQuality = getEvidenceQuality(selectedResults, runtimeConfig.minSimilarities);
+  const resultSourcePaths = [...new Set(
+    selectedResults
+      .map((result) => String(result?.payload?.source || "").trim())
+      .filter(Boolean)
+  )];
+  const tagsByPath = await listTagsForFilePathMap(resultSourcePaths);
+  const selectedResultsWithTags = selectedResults.map((result) => {
+    const payload = result?.payload && typeof result.payload === "object" ? result.payload : {};
+    const sourcePath = String(payload.source || "").trim();
+    const payloadTags = Array.isArray(payload.tags)
+      ? payload.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
+      : [];
+    const resolvedTags = payloadTags.length > 0
+      ? payloadTags
+      : tagsByPath.get(sourcePath) || [DEFAULT_FILE_TAG];
+    return {
+      ...result,
+      payload: {
+        ...payload,
+        tags: resolvedTags,
+      },
+    };
+  });
+
+  const evidenceQuality = getEvidenceQuality(selectedResultsWithTags, runtimeConfig.minSimilarities);
 
   return {
-    results: selectedResults,
+    results: selectedResultsWithTags,
     evidenceQuality,
-    hasSufficientEvidence,
+    hasSufficientEvidence: selectedResultsWithTags.length >= runtimeConfig.minSimilarities,
     ragContextPackage: buildRagContextPackage({
-      results: selectedResults,
+      results: selectedResultsWithTags,
       userMessage: prompt,
       evidenceQuality,
     }),
@@ -1423,6 +1449,7 @@ async function handleFiles(_req, res) {
     hash: row.file_hash,
     chunkCount: row.chunk_count,
     embedded: row.embedded,
+    tags: Array.isArray(row.tags) ? row.tags : [],
   }));
 
   json(res, 200, {
@@ -1430,6 +1457,35 @@ async function handleFiles(_req, res) {
     files: payload,
     totalFiles: payload.length,
     embeddedFiles: payload.filter((file) => file.embedded).length,
+  });
+}
+
+async function handleFileTags(req, res) {
+  const body = await readJsonBody(req);
+  const filePath = String(body.path || "").trim();
+  if (!filePath) {
+    json(res, 400, { ok: false, error: "Missing 'path' in request body." });
+    return;
+  }
+
+  const tags = Array.isArray(body.tags)
+    ? body.tags
+    : typeof body.tag === "string"
+      ? [body.tag]
+      : [];
+
+  const updated = await updateFileTags(filePath, tags);
+  if (!updated) {
+    json(res, 404, { ok: false, error: "File not found in metadata." });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    file: {
+      path: updated.filePath,
+      tags: updated.tags,
+    },
   });
 }
 
@@ -1449,6 +1505,7 @@ const server = http.createServer(async (req, res) => {
 
     const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
     const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
+    const isFileTagsRoute = ["/api/files/tags", "/internal/retriever/files/tags"].includes(url.pathname);
     const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
     const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
@@ -1463,6 +1520,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && isFilesRoute) {
       await handleFiles(req, res);
+      return;
+    }
+
+    if (req.method === "PATCH" && isFileTagsRoute) {
+      await handleFileTags(req, res);
       return;
     }
 
@@ -1556,6 +1618,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, PATCH /internal/retriever/files/tags, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
   );
 });

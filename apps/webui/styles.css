@@ -432,7 +432,7 @@ body {
 .library-table-head,
 .library-table-row {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) 1.1fr 0.9fr 0.65fr 0.7fr 1fr 1.4fr 0.5fr;
+  grid-template-columns: minmax(170px, 2fr) 1fr minmax(120px, 1.2fr) 0.75fr 0.6fr 0.65fr 0.9fr 1.2fr 0.5fr;
   gap: 0.7rem;
   align-items: center;
   padding: 0.55rem 0.7rem;
@@ -473,6 +473,20 @@ body {
 .library-status-cell {
   display: grid;
   gap: 0.2rem;
+}
+.library-tags-cell {
+  display: grid;
+  gap: 0.15rem;
+  align-items: start;
+}
+.library-tag-line {
+  display: block;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+}
+.library-tag-line.muted {
+  color: #94a3b8;
 }
 .library-row-error {
   color: #991b1b;
@@ -1237,6 +1251,17 @@ body {
   margin-bottom: 0.22rem;
 }
 .assistant-evidence-meta strong { color: #0f172a; }
+.assistant-evidence-tags {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0 0 0.2rem;
+}
+.assistant-evidence-tag-line {
+  font-size: 0.74rem;
+  color: #334155;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
 .assistant-evidence-score.high { color: #166534; }
 .assistant-evidence-score.medium { color: #9a3412; }
 .assistant-evidence-score.low,

@@ -241,6 +241,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "PATCH" && url.pathname === "/api/files/tags") {
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags" });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/library/files") {
       await handleLibraryList(res);
       return;
@@ -331,5 +336,5 @@ await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
