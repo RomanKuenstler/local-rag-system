@@ -45,9 +45,9 @@ const LIBRARY_UPLOAD_RULES = {
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 const MENU_DIALOG_TABS = [
-  { id: "settings", label: "Settings", command: "/config" },
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
+  { id: "settings", label: "Settings", command: "/config" },
   { id: "info", label: "Info", command: "/info" },
   { id: "archive", label: "Archive" },
   { id: "help", label: "Help", command: "/help" },
@@ -138,7 +138,7 @@ function App() {
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
-  const [activeDialogTab, setActiveDialogTab] = useState("settings");
+  const [activeDialogTab, setActiveDialogTab] = useState("general");
   const [dialogTabPanels, setDialogTabPanels] = useState({});
   const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
   const [dialogTabError, setDialogTabError] = useState("");
@@ -974,7 +974,7 @@ function App() {
   }
 
   async function openPersonalizationPanel() {
-    await openUnifiedDialog("general");
+    await openUnifiedDialog("personalization");
   }
 
   async function refreshCurrentPanel(activeCommand) {
@@ -1484,7 +1484,7 @@ function App() {
   }
 
   async function openSettingsDialog() {
-    await openUnifiedDialog("settings");
+    await openUnifiedDialog("general");
   }
 
   return React.createElement(
@@ -1580,7 +1580,18 @@ function App() {
           "button",
           {
             type: "button",
-            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && activeDialogTab === "settings") ? " active" : ""}`,
+            className: `side-nav-item${isUnifiedDialogOpen && activeDialogTab === "personalization" ? " active" : ""}`,
+            onClick: openPersonalizationPanel,
+            disabled: isSending || !isEmbeddingReady,
+          },
+          icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
+          React.createElement("span", null, "Personalization")
+        ),
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && (activeDialogTab === "general" || activeDialogTab === "settings")) ? " active" : ""}`,
             onClick: openSettingsDialog,
             disabled: isSending || !isEmbeddingReady,
           },
@@ -2105,7 +2116,7 @@ function App() {
           ),
           React.createElement(
             "button",
-            { type: "button", onClick: () => openUnifiedDialog("settings"), disabled: isSending || !isEmbeddingReady },
+            { type: "button", onClick: openSettingsDialog, disabled: isSending || !isEmbeddingReady },
             icon("M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5"),
             "Settings"
           ),
