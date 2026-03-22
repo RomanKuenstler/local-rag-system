@@ -49,6 +49,10 @@ export async function getSelectionState(fallbacks) {
   };
 }
 
+function buildSessionSettingKey(sessionId, settingName) {
+  return `session:${sessionId}:${settingName}`;
+}
+
 export async function updateSetting(key, value) {
   await dbQuery(
     `INSERT INTO app_settings (setting_key, setting_value, updated_at)
@@ -58,6 +62,21 @@ export async function updateSetting(key, value) {
            updated_at = NOW()`,
     [key, JSON.stringify({ value })]
   );
+}
+
+export async function getSessionSetting({ sessionId, settingName, fallbackValue }) {
+  const settingKey = buildSessionSettingKey(sessionId, settingName);
+  const result = await dbQuery(
+    "SELECT setting_value FROM app_settings WHERE setting_key = $1",
+    [settingKey]
+  );
+  const value = result.rows[0]?.setting_value?.value;
+  return value ?? fallbackValue;
+}
+
+export async function updateSessionSetting({ sessionId, settingName, value }) {
+  const settingKey = buildSessionSettingKey(sessionId, settingName);
+  await updateSetting(settingKey, value);
 }
 
 export async function getRuntimeConfigState(fallbacks) {
