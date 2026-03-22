@@ -1251,6 +1251,17 @@ body {
   margin-bottom: 0.22rem;
 }
 .assistant-evidence-meta strong { color: #0f172a; }
+.assistant-evidence-tags {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0 0 0.2rem;
+}
+.assistant-evidence-tag-line {
+  font-size: 0.74rem;
+  color: #334155;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
 .assistant-evidence-score.high { color: #166534; }
 .assistant-evidence-score.medium { color: #9a3412; }
 .assistant-evidence-score.low,

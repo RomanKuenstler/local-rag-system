@@ -2436,6 +2436,17 @@ function App() {
                                 ),
                                 React.createElement("span", null, match.source || "unknown source")
                               ),
+                              Array.isArray(match.tags) && match.tags.length > 0
+                                ? React.createElement(
+                                  "div",
+                                  { className: "assistant-evidence-tags" },
+                                  ...match.tags.map((tag) => React.createElement(
+                                    "span",
+                                    { key: `${message.id}-${match.rank}-${tag}`, className: "assistant-evidence-tag-line" },
+                                    tag
+                                  ))
+                                )
+                                : null,
                               match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
                               match.preview ? React.createElement("p", null, match.preview) : null
                             ))
