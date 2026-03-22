@@ -175,8 +175,20 @@ function setAssistantChainProgress(sessionId, progress) {
     clearTimeout(existingTimer);
     assistantChainProgressClearTimers.delete(sessionId);
   }
+  const previousProgress = assistantChainProgressBySession.get(sessionId);
+  const normalizedStage = String(progress?.stage || "").trim().toLowerCase();
+  const previousTrail = Array.isArray(previousProgress?.trail) ? previousProgress.trail : [];
+  const shouldResetTrail = normalizedStage === "searching"
+    || previousProgress?.active !== true
+    || previousProgress?.mode !== progress?.mode;
+  const nextTrail = shouldResetTrail ? [] : [...previousTrail];
+  if (normalizedStage && nextTrail[nextTrail.length - 1] !== normalizedStage) {
+    nextTrail.push(normalizedStage);
+  }
+
   assistantChainProgressBySession.set(sessionId, {
     ...progress,
+    trail: nextTrail,
     updatedAt: new Date().toISOString(),
   });
 }

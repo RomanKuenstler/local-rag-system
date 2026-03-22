@@ -1160,6 +1160,23 @@ body {
   border-left: 3px solid #cbd5e1;
   color: #475569;
 }
+.assistant-pending-trail {
+  display: grid;
+  gap: 0.32rem;
+}
+.assistant-pending-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  line-height: 1.45;
+  color: #334155;
+}
+.assistant-pending-step.done {
+  color: #94a3b8;
+}
+.assistant-pending-step-check {
+  font-weight: 600;
+}
 .assistant-rag-layout { display: grid; gap: 0.6rem; }
 .assistant-answer-block,
 .assistant-evidence-block {
