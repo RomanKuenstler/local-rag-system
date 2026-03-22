@@ -40,18 +40,28 @@ Endpoints:
 
 ## Prompt + assistant behavior docs
 
-- `PROMPTS.md` – high-level prompting principles.
-- `PROMPTBUILDING.md` – implementation-level prompt assembly pipeline, guardrails layering, assistant mode differences, personalization behavior, and file-level change map.
+- `docs/PROMPTS.md` – high-level prompting principles.
+- `docs/PROMPTBUILDING.md` – implementation-level prompt assembly pipeline, guardrails layering, assistant mode differences, personalization behavior, and file-level change map.
 
 ## Documentation map
 
-- `DOCUMENTATION.md` – conceptual and architecture overview.
-- `DEVELOPERS.md` – contributor map, where to change what, and refactor notes.
-- `CHANGELOG.md` – release and change history.
+- `docs/DOCUMENTATION.md` – conceptual and architecture overview.
+- `docs/DEVELOPERS.md` – contributor map, where to change what, and refactor notes.
+- `docs/CHANGELOG.md` – release and change history.
 
 ## Notes
 
 - The retriever and embedder now share explicit state file paths via compose:
   - `INDEX_STATE_FILE=/app/state/index-state.json`
   - `EMBEDDING_STATUS_FILE=/app/state/embedding-status.json`
-- The base app container uses `APP_ROLE` to select startup command; retriever role now boots `retriever-api.js` by default.
+- The base app container uses `APP_ROLE` to select startup command; retriever role now boots `apps/retriever/api.js` by default.
+
+
+## Repository layout
+
+- `apps/` – deployable service entrypoints and UI (`backend`, `retriever`, `embedder`, `webui`).
+- `shared/` – reusable modules and cross-service assets (`src`, `config`, `db`, `prompts`).
+- Service-local helpers now live with each app (for example `apps/backend/library-service.js` and `apps/retriever/ui.js`) to avoid unnecessary cross-service coupling.
+- `docs/` – architecture, changelog, and contributor notes.
+- `scripts/` – helper scripts for content download/prep.
+- `data/`, `migrations/`, `upload/`, `downloaded-html/` – runtime/content assets.
