@@ -32,6 +32,8 @@ import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
 import { createChatModel } from "./src/model-clients.js";
 import {
   DEFAULT_ASSISTANT_MODE,
+  buildRefineFinalPassMessages,
+  getRefineChainSystemPrompt,
   isAssistantModeSupported,
   listAssistantModes,
   normalizeAssistantMode,
@@ -889,12 +891,7 @@ async function handlePrompt(req, res) {
         }),
         [
           "system",
-          [
-            "[CHAIN STEP: DRAFT]",
-            "Produce an initial draft answer using retrieved evidence as primary support.",
-            "The draft should be clear but does not need to be final polish.",
-            "Do not mention this chain step to the user.",
-          ].join("\n"),
+          getRefineChainSystemPrompt("drafting"),
         ],
         ...chatHistory,
         ["human", promptForAssistant],
@@ -916,27 +913,13 @@ async function handlePrompt(req, res) {
         }),
         [
           "system",
-          [
-            "[CHAIN STEP: REFINE]",
-            "You are refining an existing draft into the final response.",
-            "Improve clarity, accuracy, and structure while preserving evidence-grounded claims.",
-            "Remove redundancy, tighten wording, and keep uncertainties explicit where evidence is incomplete.",
-            "Do not mention the draft/refine process to the user.",
-          ].join("\n"),
+          getRefineChainSystemPrompt("refining"),
         ],
         ...chatHistory,
-        [
-          "human",
-          [
-            "Original user prompt:",
-            promptForAssistant,
-            "",
-            "Draft answer to refine:",
-            draftAnswer || "(empty draft)",
-            "",
-            "Return only the final refined answer.",
-          ].join("\n"),
-        ],
+        ...buildRefineFinalPassMessages({
+          originalPrompt: promptForAssistant,
+          draftAnswer,
+        }),
       ]);
 
       answer = String(refinedResponse.content || "").trim();

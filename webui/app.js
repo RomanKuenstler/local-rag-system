@@ -97,6 +97,18 @@ function getAssistantModeMeta(modeId) {
   return ASSISTANT_MODE_OPTIONS.find((mode) => mode.id === normalized) || ASSISTANT_MODE_OPTIONS[0];
 }
 
+function getPendingAssistantMessage(modeId, chainStage) {
+  const normalizedMode = String(modeId || "").trim().toLowerCase();
+  const normalizedStage = String(chainStage || "").trim().toLowerCase();
+  if (normalizedMode === "refine") {
+    if (normalizedStage === "refining") {
+      return "Assistant is refining the answer…";
+    }
+    return "Assistant is drafting an answer…";
+  }
+  return "Assistant is thinking…";
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -158,6 +170,25 @@ function App() {
     ? [volatileChat].concat(chatList.filter((chat) => chat.id !== volatileChat.id))
     : chatList;
   const activeChainStage = String(statusData?.assistant?.chainProgress?.stage || "").toLowerCase();
+
+  useEffect(() => {
+    if (!isSending) {
+      return;
+    }
+    const nextPendingText = getPendingAssistantMessage(currentAssistantMode, activeChainStage);
+    setMessages((previous) => previous.map((message) => {
+      if (!message.isPending || message.role !== "assistant") {
+        return message;
+      }
+      if (message.text === nextPendingText) {
+        return message;
+      }
+      return {
+        ...message,
+        text: nextPendingText,
+      };
+    }));
+  }, [isSending, currentAssistantMode, activeChainStage]);
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -681,10 +712,14 @@ function App() {
       refreshStatus().catch(() => {});
     }, 900);
     const pendingMessageId = crypto.randomUUID();
-    setMessages((prev) => prev.concat(createMessage("assistant", "Assistant is thinking…", {
+    setMessages((prev) => prev.concat(createMessage(
+      "assistant",
+      getPendingAssistantMessage(currentAssistantMode, activeChainStage),
+      {
       id: pendingMessageId,
       isPending: true,
-    })));
+      }
+    )));
 
     try {
       if (isPanelCommand && hasPromptFiles) {

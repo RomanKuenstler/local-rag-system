@@ -68,6 +68,22 @@ const ASSISTANT_MODE_DEFINITIONS = {
   },
 };
 
+const REFINE_CHAIN_PROMPTS = {
+  drafting: [
+    "[CHAIN STEP: DRAFT]",
+    "Produce an initial draft answer using retrieved evidence as primary support.",
+    "The draft should be clear but does not need to be final polish.",
+    "Do not mention this chain step to the user.",
+  ].join("\n"),
+  refining: [
+    "[CHAIN STEP: REFINE]",
+    "You are refining an existing draft into the final response.",
+    "Improve clarity, accuracy, and structure while preserving evidence-grounded claims.",
+    "Remove redundancy, tighten wording, and keep uncertainties explicit where evidence is incomplete.",
+    "Do not mention the draft/refine process to the user.",
+  ].join("\n"),
+};
+
 export const DEFAULT_ASSISTANT_MODE = "simple";
 
 export function listAssistantModes() {
@@ -103,5 +119,34 @@ export function buildAssistantModeSystemLayer(modeId) {
       `Mode name: ${mode.label}`,
       mode.promptInstructions,
     ].join("\n\n"),
+  ];
+}
+
+export function getRefineChainSystemPrompt(step) {
+  const normalizedStep = String(step || "").trim().toLowerCase();
+  if (normalizedStep === "drafting") {
+    return REFINE_CHAIN_PROMPTS.drafting;
+  }
+  return REFINE_CHAIN_PROMPTS.refining;
+}
+
+export function buildRefineFinalPassMessages({ originalPrompt, draftAnswer }) {
+  return [
+    [
+      "human",
+      [
+        "Original user prompt:",
+        String(originalPrompt || "").trim(),
+      ].join("\n"),
+    ],
+    ["assistant", String(draftAnswer || "(empty draft)").trim() || "(empty draft)"],
+    [
+      "human",
+      [
+        "Refine the draft answer above into the final response.",
+        "Preserve evidence-grounded claims and improve clarity and structure.",
+        "Return only the final refined answer.",
+      ].join("\n"),
+    ],
   ];
 }
