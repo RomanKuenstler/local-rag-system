@@ -93,6 +93,7 @@ Your personal files become the **knowledge base** of the system.
 ├── README.md          # Project documentation
 ├── NEXTSTEPS.md       # Ideas and roadmap for improving the system
 ├── PROMPTS.md         # Notes about prompts and prompt engineering
+├── PROMPTBUILDING.md  # Implementation-level prompt assembly and mode behavior guide
 ```
 
 > **Note:** this high-level structure block is intentionally simplified for beginners.

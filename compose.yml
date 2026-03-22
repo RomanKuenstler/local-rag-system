@@ -28,7 +28,6 @@ services:
       - ./data:/app/data
     ports:
       - "3100:3100"
-    command: ["npm", "run", "start:backend:api"]
     depends_on:
       retriever:
         condition: service_started
@@ -60,6 +59,8 @@ services:
       OPTION_PRESENCE_PENALTY: 2.2
       CONTENT_PATH: /app/data
       CHAT_HISTORY_DIR: /app/state/chat-history
+      INDEX_STATE_FILE: /app/state/index-state.json
+      EMBEDDING_STATUS_FILE: /app/state/embedding-status.json
       RETRIEVER_API_PORT: 3000
     volumes:
       - ./data:/app/data
@@ -75,7 +76,6 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
-    command: ["npm", "run", "start:retriever:api"]
     depends_on:
       qdrant:
         condition: service_started
@@ -95,6 +95,8 @@ services:
       CHUNK_OVERLAP: 100
       MAX_EMBEDDING_CHARS: 400
       PDF_MIN_EXTRACTED_CHARS: 100
+      INDEX_STATE_FILE: /app/state/index-state.json
+      EMBEDDING_STATUS_FILE: /app/state/embedding-status.json
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: rag
