@@ -134,6 +134,65 @@ function getAssistantModeMeta(modeId) {
   return ASSISTANT_MODE_OPTIONS.find((mode) => mode.id === normalized) || ASSISTANT_MODE_OPTIONS[0];
 }
 
+function isKnownAssistantMode(modeId) {
+  const normalized = String(modeId || "").trim().toLowerCase();
+  return ASSISTANT_MODE_OPTIONS.some((mode) => mode.id === normalized);
+}
+
+function mergeAssistantModes(parsedAssistantModes = [], availableModes = []) {
+  const normalizedById = new Map();
+  for (const mode of ASSISTANT_MODE_OPTIONS) {
+    normalizedById.set(mode.id, {
+      id: mode.id,
+      label: mode.label,
+      description: mode.description,
+      shortDescription: mode.shortDescription,
+    });
+  }
+  for (const mode of Array.isArray(parsedAssistantModes) ? parsedAssistantModes : []) {
+    const id = String(mode?.id || "").trim().toLowerCase();
+    if (!id) continue;
+    const fallback = normalizedById.get(id) || { id, label: id, shortDescription: "", description: "" };
+    normalizedById.set(id, {
+      id,
+      label: fallback.label,
+      shortDescription: fallback.shortDescription,
+      description: String(mode?.description || "").trim() || fallback.description,
+    });
+  }
+  for (const mode of Array.isArray(availableModes) ? availableModes : []) {
+    const id = String(mode?.id || "").trim().toLowerCase();
+    if (!id) continue;
+    const fallback = normalizedById.get(id) || { id, label: id, shortDescription: "", description: "" };
+    normalizedById.set(id, {
+      id,
+      label: String(mode?.label || "").trim() || fallback.label,
+      shortDescription: fallback.shortDescription,
+      description: fallback.description,
+    });
+  }
+  return Array.from(normalizedById.values());
+}
+
+function buildGeneralAssistantPanelContent(assistantAnswer, statusData, currentAssistantMode) {
+  const parsedAssistant = parseAssistantModeContent(assistantAnswer || "");
+  const assistantModes = mergeAssistantModes(parsedAssistant.modes, statusData?.assistant?.availableModes);
+  const parsedCurrentMode = String(parsedAssistant.currentMode || "").trim().toLowerCase();
+  const statusCurrentMode = String(statusData?.assistant?.mode || "").trim().toLowerCase();
+  const localCurrentMode = String(currentAssistantMode || "").trim().toLowerCase();
+  const resolvedCurrentMode = isKnownAssistantMode(parsedCurrentMode)
+    ? parsedCurrentMode
+    : isKnownAssistantMode(statusCurrentMode)
+      ? statusCurrentMode
+      : isKnownAssistantMode(localCurrentMode)
+        ? localCurrentMode
+        : ASSISTANT_MODE_OPTIONS[0].id;
+  return {
+    currentMode: resolvedCurrentMode,
+    modes: assistantModes,
+  };
+}
+
 function isAssistantModeTemporarilyDisabled(modeId) {
   const normalized = String(modeId || "").trim().toLowerCase();
   return TEMPORARILY_DISABLED_ASSISTANT_MODES.has(normalized);
@@ -411,8 +470,8 @@ function App() {
       if (statusRes.ok) {
         const newStatus = await statusRes.json();
         const nextAssistantMode = String(newStatus?.assistant?.mode || "").trim().toLowerCase();
-        if (nextAssistantMode) {
-          setCurrentAssistantMode(getAssistantModeMeta(nextAssistantMode).id);
+        if (isKnownAssistantMode(nextAssistantMode)) {
+          setCurrentAssistantMode(nextAssistantMode);
         }
         setStatusData((previous) => {
           const previousReady = previous?.embedding?.readiness?.ready === true;
@@ -1107,7 +1166,7 @@ function App() {
               currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
               modes: UI_MODE_OPTIONS,
             },
-            assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+            assistant: buildGeneralAssistantPanelContent(assistantPayload.answer || "", statusData, currentAssistantMode),
           },
           severity: null,
           responseType: null,
@@ -1211,7 +1270,7 @@ function App() {
             currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
             modes: UI_MODE_OPTIONS,
           },
-          assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+          assistant: buildGeneralAssistantPanelContent(assistantPayload.answer || "", statusData, currentAssistantMode),
         },
         severity: null,
         responseType: null,

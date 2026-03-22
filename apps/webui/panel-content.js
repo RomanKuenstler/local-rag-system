@@ -13,6 +13,9 @@ function GeneralDropdown({
 }) {
   const [isOpen, setIsOpen] = React.useState(false);
   const rootRef = React.useRef(null);
+  const normalizedCurrentId = String(currentId || "").trim().toLowerCase();
+  const activeOption = options.find((option) => String(option.id || "").trim().toLowerCase() === normalizedCurrentId) || null;
+  const triggerLabel = activeOption?.label || activeOption?.id || normalizedCurrentId || "unknown";
 
   React.useEffect(() => {
     if (!isOpen) return undefined;
@@ -58,7 +61,7 @@ function GeneralDropdown({
             setIsOpen((prev) => !prev);
           },
         },
-        React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
+        React.createElement("span", { className: "general-dropdown-value" }, triggerLabel),
         React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
       ),
       React.createElement(
