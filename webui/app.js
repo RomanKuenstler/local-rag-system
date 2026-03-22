@@ -14,7 +14,6 @@ import {
   parseAssistantModeContent,
   parseHelpContent,
   parsePanelText,
-  parseProfileContent,
   parseSystemInfoContent,
   resizeComposerInput,
 } from "./utils.js";
@@ -47,6 +46,7 @@ const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 const MENU_DIALOG_TABS = [
   { id: "settings", label: "Settings", command: "/config" },
+  { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
   { id: "info", label: "Info", command: "/info" },
   { id: "archive", label: "Archive" },
@@ -871,21 +871,49 @@ function App() {
 
     try {
       let nextPanel = null;
-      if (selectedTab.command === "/personalization") {
+      if (selectedTab.id === "general") {
         const [assistantPayload, infoPayload] = await Promise.all([
           fetchPanelCommand("/assistant"),
           fetchPanelCommand("/info"),
         ]);
         nextPanel = {
           id: crypto.randomUUID(),
-          command: "/personalization",
-          title: "Personalization",
+          command: "/general",
+          title: "General",
           content: {
             ui: {
               currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
               modes: UI_MODE_OPTIONS,
             },
             assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+          },
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else if (selectedTab.id === "personalization") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/personalization",
+          title: "Personalization",
+          content: {
+            sections: [
+              {
+                id: "personalization",
+                title: "Personalization",
+                description: "Session-level tone and behavior controls will be configured here.",
+              },
+              {
+                id: "custom-instructions",
+                title: "Custom Instructions",
+                description: "Define custom response instructions that will be merged into your session profile prompt.",
+              },
+              {
+                id: "about-you",
+                title: "About You",
+                description: "Store user context and background details for this session profile.",
+              },
+            ],
           },
           severity: null,
           responseType: null,
@@ -946,7 +974,7 @@ function App() {
   }
 
   async function openPersonalizationPanel() {
-    await openUnifiedDialog("personalization");
+    await openUnifiedDialog("general");
   }
 
   async function refreshCurrentPanel(activeCommand) {
@@ -964,21 +992,7 @@ function App() {
       return;
     }
 
-    if (activeCommand === "/profile") {
-      const profilePayload = await fetchPanelCommand("/profile");
-      setPanelData({
-        id: crypto.randomUUID(),
-        command: "/profile",
-        title: profilePayload.responseType || "/profile",
-        content: parsePanelText(profilePayload.answer || ""),
-        severity: profilePayload.evidenceSeverity || null,
-        responseType: profilePayload.responseType || null,
-        configView: profilePayload.configView || profilePayload.webConfigView || null,
-      });
-      return;
-    }
-
-    if (activeCommand === "/personalization") {
+    if (activeCommand === "/general") {
       const [assistantPayload, infoPayload] = await Promise.all([
         fetchPanelCommand("/assistant"),
         fetchPanelCommand("/info"),
@@ -986,14 +1000,45 @@ function App() {
 
       setPanelData({
         id: crypto.randomUUID(),
-        command: "/personalization",
-        title: "Personalization",
+        command: "/general",
+        title: "General",
         content: {
           ui: {
             currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
             modes: UI_MODE_OPTIONS,
           },
           assistant: parseAssistantModeContent(assistantPayload.answer || ""),
+        },
+        severity: null,
+        responseType: null,
+        configView: null,
+      });
+      return;
+    }
+
+    if (activeCommand === "/personalization") {
+      setPanelData({
+        id: crypto.randomUUID(),
+        command: "/personalization",
+        title: "Personalization",
+        content: {
+          sections: [
+            {
+              id: "personalization",
+              title: "Personalization",
+              description: "Session-level tone and behavior controls will be configured here.",
+            },
+            {
+              id: "custom-instructions",
+              title: "Custom Instructions",
+              description: "Define custom response instructions that will be merged into your session profile prompt.",
+            },
+            {
+              id: "about-you",
+              title: "About You",
+              description: "Store user context and background details for this session profile.",
+            },
+          ],
         },
         severity: null,
         responseType: null,
@@ -1008,9 +1053,7 @@ function App() {
 
     const command = kind === "assistant"
       ? `/assistant ${selectedId}`
-      : kind === "profile"
-        ? `/profile ${selectedId}`
-        : `/mode ${selectedId}`;
+      : `/mode ${selectedId}`;
 
     setIsSending(true);
     try {
@@ -1022,6 +1065,7 @@ function App() {
       if (isUnifiedDialogOpen) {
         setDialogTabPanels((previous) => {
           const nextPanels = { ...previous };
+          delete nextPanels.general;
           delete nextPanels.personalization;
           delete nextPanels.info;
           return nextPanels;
@@ -1105,9 +1149,6 @@ function App() {
 
   const parsedAssistantPanel = activeModalPanel?.command === "/assistant"
     ? parseAssistantModeContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
-    : null;
-  const parsedProfilePanel = activeModalPanel?.command === "/profile"
-    ? parseProfileContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : null;
   const parsedInfoGroups = activeModalPanel?.command === "/info"
     ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
@@ -2394,7 +2435,6 @@ function App() {
                       panelData: activeModalPanel,
                       parsedInfoGroups,
                       parsedAssistantPanel,
-                      parsedProfilePanel,
                       parsedHelpPanel,
                       editableConfigRows,
                       restartConfigRows,
@@ -2462,7 +2502,6 @@ function App() {
               panelData,
               parsedInfoGroups,
               parsedAssistantPanel,
-              parsedProfilePanel,
               parsedHelpPanel,
               editableConfigRows,
               restartConfigRows,

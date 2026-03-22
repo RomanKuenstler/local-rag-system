@@ -4,7 +4,6 @@ export function renderPanelContent({
   panelData,
   parsedInfoGroups,
   parsedAssistantPanel,
-  parsedProfilePanel,
   parsedHelpPanel,
   editableConfigRows,
   restartConfigRows,
@@ -192,24 +191,7 @@ export function renderPanelContent({
     );
   }
 
-  if (panelData.command === "/profile" && parsedProfilePanel) {
-    return React.createElement(
-      "div",
-      { className: "assistant-mode-grid" },
-      parsedProfilePanel.currentProfile
-        ? React.createElement("div", { className: "assistant-current" }, `Current profile: ${parsedProfilePanel.currentProfile}`)
-        : null,
-      ...parsedProfilePanel.profiles.map((profile) => renderSelectableModeCard({
-        key: profile.id,
-        id: profile.id,
-        description: profile.description,
-        isActive: profile.id === parsedProfilePanel.currentProfile,
-        onSelect: (id) => applyPersonalizationChange("profile", id),
-      }))
-    );
-  }
-
-  if (panelData.command === "/personalization" && panelData.content) {
+  if (panelData.command === "/general" && panelData.content) {
     const uiModes = panelData.content.ui?.modes || [];
     const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
@@ -243,6 +225,20 @@ export function renderPanelContent({
           onSelect: (id) => applyPersonalizationChange("assistant", id),
         }))
       )
+    );
+  }
+
+  if (panelData.command === "/personalization" && panelData.content) {
+    const sections = Array.isArray(panelData.content.sections) ? panelData.content.sections : [];
+    return React.createElement(
+      "div",
+      { className: "info-groups" },
+      ...sections.map((section) => React.createElement(
+        "section",
+        { key: section.id, className: "info-group-card personalization-section-card" },
+        React.createElement("h4", null, section.title),
+        React.createElement("p", { className: "config-help" }, section.description || "")
+      ))
     );
   }
 

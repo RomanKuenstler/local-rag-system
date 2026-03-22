@@ -847,6 +847,8 @@ body {
   text-align: left;
   cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease;
+  padding: 0.5rem 0.65rem;
+  min-height: 56px;
 }
 .mode-select-button:hover:not(:disabled) {
   border-color: #94a3b8;
@@ -855,6 +857,13 @@ body {
 .mode-select-button:disabled {
   cursor: not-allowed;
   opacity: 0.75;
+}
+.mode-select-button p { font-size: 0.8rem; }
+
+.personalization-section-card p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.4;
 }
 
 .info-row {

@@ -39,12 +39,6 @@ import {
   normalizeAssistantMode,
 } from "./src/assistant-modes.js";
 import {
-  DEFAULT_PROFILE,
-  isProfileSupported,
-  listProfiles,
-  normalizeProfile,
-} from "./src/profiles.js";
-import {
   buildActiveConfigMessage,
   buildHelpMessage,
   buildSystemInfoMessage,
@@ -70,6 +64,7 @@ import {
   getIndexStateMap,
   initializeRuntimeConfigDefaults,
   getSelectionState,
+  getSessionPersonalizationSettings,
   getSessionSetting,
   initializeStateDefaults,
   listSessionChats,
@@ -94,13 +89,11 @@ validateRetrievalConfig();
 const PORT = parseInt(process.env.RETRIEVER_API_PORT || "3000", 10);
 const HOST = process.env.RETRIEVER_API_HOST || "0.0.0.0";
 const initialAssistantMode = normalizeAssistantMode(process.env.ASSISTANT_MODE || DEFAULT_ASSISTANT_MODE);
-const initialProfileId = normalizeProfile(process.env.ASSISTANT_PROFILE || DEFAULT_PROFILE);
 const SUPPORTED_UI_MODES = new Set(["clean", "rag"]);
 const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "").trim().toLowerCase())
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
 
-let profileId = initialProfileId;
 let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
 
@@ -454,6 +447,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }));
+    const personalizationSettings = await getSessionPersonalizationSettings(sessionId);
     return {
       statusCode: 200,
       payload: {
@@ -463,7 +457,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
           appVersion: APP_VERSION,
           uiMode,
           assistantMode: currentAssistantMode,
-          profileId,
+          personalizationSettings,
           chatModelName: chatModel.model,
           embeddingModelName: embeddingsModel.model,
           qdrantUrl: QDRANT_URL,
@@ -480,6 +474,23 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         }),
         evidenceSeverity: null,
         responseType: "system_info",
+      },
+    };
+  }
+
+  if (normalizedPrompt === "/personalization") {
+    const personalizationSettings = await getSessionPersonalizationSettings(sessionId);
+    return {
+      statusCode: 200,
+      payload: {
+        sessionId,
+        answer: JSON.stringify({
+          sessionId,
+          note: "Profile switching was removed. Personalization is now session-scoped.",
+          settings: personalizationSettings,
+        }, null, 2),
+        evidenceSeverity: null,
+        responseType: "personalization",
       },
     };
   }
@@ -593,52 +604,6 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         answer: `Assistant mode changed to: ${nextAssistantMode}` ,
         evidenceSeverity: "ok",
         responseType: "assistant_mode",
-      },
-    };
-  }
-
-  if (normalizedPrompt === "/profile") {
-    const profiles = listProfiles();
-    return {
-      statusCode: 200,
-      payload: {
-        sessionId,
-        answer: [
-          "Profiles:",
-          ...profiles.map((profile) => `- ${profile.id}: ${profile.description}`),
-          `Current profile: ${profileId}`
-        ].join("\n"),
-        evidenceSeverity: null,
-        responseType: "profile",
-      },
-    };
-  }
-
-  if (normalizedPrompt.startsWith("/profile ")) {
-    const requestedProfile = prompt.slice("/profile ".length).trim().toLowerCase();
-
-    if (!isProfileSupported(requestedProfile)) {
-      return {
-        statusCode: 400,
-        payload: {
-          sessionId,
-          error: `Unsupported profile: ${requestedProfile}`,
-          answer: `Unsupported profile: ${requestedProfile}. Use /profile to list available profiles.`,
-          evidenceSeverity: "warn",
-        },
-      };
-    }
-
-    profileId = normalizeProfile(requestedProfile);
-    await updateSetting("profile_id", profileId);
-
-    return {
-      statusCode: 200,
-      payload: {
-        sessionId,
-        answer: `Profile changed to: ${profileId}` ,
-        evidenceSeverity: "ok",
-        responseType: "profile",
       },
     };
   }
@@ -905,6 +870,7 @@ async function handlePrompt(req, res) {
   const searchResult = await searchKnowledgeBase(promptForRetrieval);
   const historyEntryLimit = runtimeConfig.historyMessages * 2;
   const chatHistory = await listRecentPromptHistory({ sessionId, chatId, limit: historyEntryLimit });
+  const personalizationSettings = await getSessionPersonalizationSettings(sessionId);
   const retrievalDetails = createSimilarityDetails(searchResult.results, {
     maxSimilarities: runtimeConfig.maxSimilarities,
     cosineLimit: runtimeConfig.cosineLimit,
@@ -924,7 +890,8 @@ async function handlePrompt(req, res) {
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
-          profileId,
+          sessionId,
+          personalizationSettings,
           includeAssistantModeLayer: false,
         }),
         [
@@ -947,7 +914,8 @@ async function handlePrompt(req, res) {
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
-          profileId,
+          sessionId,
+          personalizationSettings,
           includeAssistantModeLayer: false,
         }),
         [
@@ -976,7 +944,8 @@ async function handlePrompt(req, res) {
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
           assistantMode: currentAssistantMode,
-          profileId,
+          sessionId,
+          personalizationSettings,
         }),
         ...chatHistory,
         ["human", promptForAssistant],
@@ -1316,6 +1285,9 @@ async function handleStatus(_req, res) {
       fallbackValue: initialAssistantMode,
     }))
     : initialAssistantMode;
+  const personalizationSettings = sessionId
+    ? await getSessionPersonalizationSettings(sessionId)
+    : null;
   const readiness = await getEmbeddingReadiness();
   const embeddingStatus = await readEmbeddingStatus();
 
@@ -1328,10 +1300,9 @@ async function handleStatus(_req, res) {
     },
     assistant: {
       mode: currentAssistantMode,
-      profile: profileId,
+      personalization: personalizationSettings,
       chainProgress: sessionId ? (assistantChainProgressBySession.get(sessionId) || null) : null,
       availableModes: listAssistantModes().map((mode) => ({ id: mode.id, label: mode.label })),
-      availableProfiles: listProfiles().map((profile) => ({ id: profile.id, label: profile.label })),
     },
     retrieval: {
       collection: COLLECTION_NAME,
@@ -1463,16 +1434,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 await ensureDatabaseReady();
-await initializeStateDefaults({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+await initializeStateDefaults({ uiMode: initialUiMode, assistantMode: initialAssistantMode });
 await initializeRuntimeConfigDefaults({
   historyMessages: HISTORY_MESSAGES,
   maxSimilarities: MAX_SIMILARITIES,
   minSimilarities: MIN_SIMILARITIES,
   cosineLimit: COSINE_LIMIT,
 });
-const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode, profileId: initialProfileId });
+const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode });
 uiMode = persistedSelections.uiMode;
-profileId = normalizeProfile(persistedSelections.profileId);
 const persistedRuntimeConfig = await getRuntimeConfigState({
   historyMessages: runtimeConfig.historyMessages,
   maxSimilarities: runtimeConfig.maxSimilarities,
