@@ -871,6 +871,17 @@ body {
   color: #475569;
   line-height: 1.4;
 }
+.personalization-settings-card {
+  gap: 0;
+}
+.personalization-subheadline {
+  margin: 0.4rem 0 0.1rem;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
 
 .general-settings-grid { gap: 0.4rem; }
 .general-settings-card {

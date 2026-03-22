@@ -33,6 +33,38 @@ const ASSISTANT_MODE_OPTIONS = [
   { id: "refine", label: "Refine", description: "For getting refined answers", shortDescription: "Draft then improve" },
   { id: "thinking", label: "Thinking", description: "For complex questions", shortDescription: "Deeper reasoning mode" },
 ];
+const PERSONALIZATION_OPTIONS = {
+  baseStyleTone: [
+    { id: "default", description: "Default response style." },
+    { id: "professional", description: "Polished and precise." },
+    { id: "friendly", description: "Warm and chatty." },
+    { id: "direct", description: "Direct and encouraging." },
+    { id: "quirky", description: "Playful and imaginative." },
+    { id: "efficient", description: "Concise and plain." },
+    { id: "sceptical", description: "Sceptical and critical." },
+  ],
+  warm: [
+    { id: "more", description: "Friendlier and personable." },
+    { id: "default", description: "Balanced warmth." },
+    { id: "less", description: "More professional and factual." },
+  ],
+  enthusiastic: [
+    { id: "more", description: "More energy and excitement." },
+    { id: "default", description: "Balanced enthusiasm." },
+    { id: "less", description: "Calmer and more neutral." },
+  ],
+  headersAndLists: [
+    { id: "more", description: "Use clear formatting and lists." },
+    { id: "default", description: "Balanced formatting and paragraphs." },
+    { id: "less", description: "More paragraphs instead of lists." },
+  ],
+};
+const DEFAULT_PERSONALIZATION_PREFERENCES = {
+  baseStyleTone: "default",
+  warm: "default",
+  enthusiastic: "default",
+  headersAndLists: "default",
+};
 const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
@@ -115,6 +147,49 @@ function getPendingAssistantMessage(modeId, chainStage) {
   return "Assistant is thinking…";
 }
 
+function buildPersonalizationContent(preferences) {
+  return {
+    sections: [
+      {
+        id: "personalization",
+        title: "Personalization",
+        settings: {
+          baseStyleTone: {
+            label: "Base style and tone",
+            currentId: preferences.baseStyleTone,
+            options: PERSONALIZATION_OPTIONS.baseStyleTone,
+          },
+          warm: {
+            label: "Warm",
+            currentId: preferences.warm,
+            options: PERSONALIZATION_OPTIONS.warm,
+          },
+          enthusiastic: {
+            label: "Enthusiastic",
+            currentId: preferences.enthusiastic,
+            options: PERSONALIZATION_OPTIONS.enthusiastic,
+          },
+          headersAndLists: {
+            label: "Headers and Lists",
+            currentId: preferences.headersAndLists,
+            options: PERSONALIZATION_OPTIONS.headersAndLists,
+          },
+        },
+      },
+      {
+        id: "custom-instructions",
+        title: "Custom Instructions",
+        description: "Define custom response instructions that will be merged into your session profile prompt.",
+      },
+      {
+        id: "about-you",
+        title: "About You",
+        description: "Store user context and background details for this session profile.",
+      },
+    ],
+  };
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -156,6 +231,7 @@ function App() {
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
+  const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -199,6 +275,18 @@ function App() {
       };
     }));
   }, [isSending, currentAssistantMode, activeChainStage]);
+
+  useEffect(() => {
+    const persistedBaseStyleTone = String(statusData?.assistant?.personalization?.baseStyleTone || "").trim().toLowerCase();
+    if (!persistedBaseStyleTone) return;
+    setPersonalizationPreferences((previous) => {
+      if (previous.baseStyleTone === persistedBaseStyleTone) return previous;
+      return {
+        ...previous,
+        baseStyleTone: persistedBaseStyleTone,
+      };
+    });
+  }, [statusData]);
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -896,25 +984,7 @@ function App() {
           id: crypto.randomUUID(),
           command: "/personalization",
           title: "Personalization",
-          content: {
-            sections: [
-              {
-                id: "personalization",
-                title: "Personalization",
-                description: "Session-level tone and behavior controls will be configured here.",
-              },
-              {
-                id: "custom-instructions",
-                title: "Custom Instructions",
-                description: "Define custom response instructions that will be merged into your session profile prompt.",
-              },
-              {
-                id: "about-you",
-                title: "About You",
-                description: "Store user context and background details for this session profile.",
-              },
-            ],
-          },
+          content: buildPersonalizationContent(personalizationPreferences),
           severity: null,
           responseType: null,
           configView: null,
@@ -1021,25 +1091,7 @@ function App() {
         id: crypto.randomUUID(),
         command: "/personalization",
         title: "Personalization",
-        content: {
-          sections: [
-            {
-              id: "personalization",
-              title: "Personalization",
-              description: "Session-level tone and behavior controls will be configured here.",
-            },
-            {
-              id: "custom-instructions",
-              title: "Custom Instructions",
-              description: "Define custom response instructions that will be merged into your session profile prompt.",
-            },
-            {
-              id: "about-you",
-              title: "About You",
-              description: "Store user context and background details for this session profile.",
-            },
-          ],
-        },
+        content: buildPersonalizationContent(personalizationPreferences),
         severity: null,
         responseType: null,
         configView: null,
@@ -1050,6 +1102,71 @@ function App() {
   async function applyPersonalizationChange(kind, selectedId) {
     if (isSending || !isEmbeddingReady) return;
     if (kind === "assistant" && isAssistantModeTemporarilyDisabled(selectedId)) return;
+    if (kind.startsWith("personalization:")) {
+      const settingKey = kind.replace("personalization:", "");
+      if (!Object.prototype.hasOwnProperty.call(DEFAULT_PERSONALIZATION_PREFERENCES, settingKey)) return;
+      let nextPreferences = null;
+      setPersonalizationPreferences((previous) => {
+        nextPreferences = {
+          ...previous,
+          [settingKey]: selectedId,
+        };
+        return nextPreferences;
+      });
+      const effectivePreferences = nextPreferences || {
+        ...personalizationPreferences,
+        [settingKey]: selectedId,
+      };
+      setDialogTabPanels((previousPanels) => {
+        const personalizationPanel = previousPanels.personalization;
+        if (!personalizationPanel) return previousPanels;
+        return {
+          ...previousPanels,
+          personalization: {
+            ...personalizationPanel,
+            content: buildPersonalizationContent(effectivePreferences),
+          },
+        };
+      });
+      if (panelData?.command === "/personalization") {
+        setPanelData((previousPanel) => {
+          if (!previousPanel) return previousPanel;
+          return {
+            ...previousPanel,
+            content: buildPersonalizationContent(effectivePreferences),
+          };
+        });
+      }
+
+      if (settingKey === "baseStyleTone") {
+        setIsSending(true);
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              sessionId: sessionIdRef.current,
+              baseStyleTone: selectedId,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || "Failed to save personalization setting");
+          }
+          await refreshStatus();
+        } catch (error) {
+          setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+            evidenceSeverity: "error",
+            isVolatile: true,
+          })));
+        } finally {
+          setIsSending(false);
+        }
+      }
+      return;
+    }
 
     const command = kind === "assistant"
       ? `/assistant ${selectedId}`

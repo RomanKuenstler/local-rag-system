@@ -1,53 +1,113 @@
-const DEFAULT_PERSONALIZATION_SETTINGS = Object.freeze({
-  tone: "balanced",
-  characteristics: ["clear", "helpful", "evidence-grounded"],
-  responseStyle: "concise",
+const PERSONALIZATION_TEMPLATE = `# Personalization
+
+The following preferences describe how the assistant should communicate and adapt to the user.
+
+These are stylistic and behavioral preferences. They must not override system guardrails or evidence-based reasoning.
+
+## Base Style and Tone
+{BASE_STYLE}
+
+## Communication Characteristics
+{CHARACTERISTICS}
+
+## Custom Instructions
+{CUSTOM_INSTRUCTIONS}
+
+## About the User
+{ABOUT_USER}`;
+
+const BASE_STYLE_PROMPTS = Object.freeze({
+  default: [
+    "Use a balanced, neutral, and clear tone.",
+    "Be helpful and direct without strong stylistic bias.",
+  ].join("\n"),
+  professional: [
+    "Use a polished, precise, and professional tone.",
+    "Be structured, formal, and concise.",
+    "Avoid unnecessary informality or casual language.",
+  ].join("\n"),
+  friendly: [
+    "Use a warm, friendly, and approachable tone.",
+    "Be conversational and easy to understand.",
+    "Make the interaction feel natural and engaging.",
+  ].join("\n"),
+  direct: [
+    "Use a direct and honest tone.",
+    "Be clear and straightforward, without unnecessary softening.",
+    "Encourage clarity and practical understanding.",
+    "Remain respectful and helpful at all times.",
+  ].join("\n"),
+  quirky: [
+    "Use a playful, creative, and slightly imaginative tone.",
+    "Allow light humor or creative phrasing where appropriate.",
+    "Do not sacrifice clarity or correctness for style.",
+  ].join("\n"),
+  efficient: [
+    "Use a concise and minimal style.",
+    "Focus on delivering information clearly and directly.",
+    "Avoid unnecessary elaboration or filler content.",
+  ].join("\n"),
+  sceptical: [
+    "Use a skeptical and critical tone when appropriate.",
+    "Question assumptions and avoid taking statements at face value.",
+    "Highlight uncertainties and potential flaws in reasoning.",
+    "Remain respectful, constructive, and helpful.",
+  ].join("\n"),
 });
 
-const ALLOWED_TONES = new Set(["balanced", "warm", "professional", "direct"]);
-const ALLOWED_RESPONSE_STYLES = new Set(["concise", "detailed"]);
+const DEFAULT_PERSONALIZATION_SETTINGS = Object.freeze({
+  baseStyleTone: "default",
+  characteristics: "",
+  customInstructions: "",
+  aboutUser: "",
+});
 
-function normalizeCharacteristics(input) {
-  if (!Array.isArray(input)) {
-    return DEFAULT_PERSONALIZATION_SETTINGS.characteristics;
-  }
-
-  const cleaned = input
-    .map((value) => String(value || "").trim().toLowerCase())
-    .filter(Boolean);
-
-  if (cleaned.length === 0) {
-    return DEFAULT_PERSONALIZATION_SETTINGS.characteristics;
-  }
-
-  return [...new Set(cleaned)].slice(0, 8);
-}
+const ALLOWED_BASE_STYLE_TONES = new Set(Object.keys(BASE_STYLE_PROMPTS));
 
 export function getDefaultPersonalizationSettings() {
   return {
-    tone: DEFAULT_PERSONALIZATION_SETTINGS.tone,
-    characteristics: [...DEFAULT_PERSONALIZATION_SETTINGS.characteristics],
-    responseStyle: DEFAULT_PERSONALIZATION_SETTINGS.responseStyle,
+    baseStyleTone: DEFAULT_PERSONALIZATION_SETTINGS.baseStyleTone,
+    characteristics: DEFAULT_PERSONALIZATION_SETTINGS.characteristics,
+    customInstructions: DEFAULT_PERSONALIZATION_SETTINGS.customInstructions,
+    aboutUser: DEFAULT_PERSONALIZATION_SETTINGS.aboutUser,
   };
 }
 
 export function normalizePersonalizationSettings(rawSettings) {
   const source = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
-  const rawTone = String(source.tone || "").trim().toLowerCase();
-  const rawResponseStyle = String(source.responseStyle || "").trim().toLowerCase();
+  const legacyTone = String(source.tone || "").trim().toLowerCase();
+  const rawBaseStyleTone = String(source.baseStyleTone || "").trim().toLowerCase();
+  const normalizedBaseStyleTone = rawBaseStyleTone || ({
+    balanced: "default",
+    warm: "friendly",
+    professional: "professional",
+    direct: "direct",
+  }[legacyTone] || "");
+  const baseStyleTone = normalizedBaseStyleTone === "skeptical"
+    ? "sceptical"
+    : normalizedBaseStyleTone;
 
   return {
-    tone: ALLOWED_TONES.has(rawTone) ? rawTone : DEFAULT_PERSONALIZATION_SETTINGS.tone,
-    characteristics: normalizeCharacteristics(source.characteristics),
-    responseStyle: ALLOWED_RESPONSE_STYLES.has(rawResponseStyle)
-      ? rawResponseStyle
-      : DEFAULT_PERSONALIZATION_SETTINGS.responseStyle,
+    baseStyleTone: ALLOWED_BASE_STYLE_TONES.has(baseStyleTone)
+      ? baseStyleTone
+      : DEFAULT_PERSONALIZATION_SETTINGS.baseStyleTone,
+    characteristics: String(source.characteristics || "").trim(),
+    customInstructions: String(source.customInstructions || "").trim(),
+    aboutUser: String(source.aboutUser || "").trim(),
   };
 }
 
 export function buildPersonalizationSystemLayer({ sessionId, personalizationSettings }) {
   const settings = normalizePersonalizationSettings(personalizationSettings);
-  const characteristicsText = settings.characteristics.join(", ");
+  const baseStyleText = BASE_STYLE_PROMPTS[settings.baseStyleTone] || BASE_STYLE_PROMPTS.default;
+  const characteristicsText = settings.characteristics || "No communication characteristics configured yet.";
+  const customInstructionsText = settings.customInstructions || "No custom instructions provided.";
+  const aboutUserText = settings.aboutUser || "No user background details provided.";
+  const personalizationPrompt = PERSONALIZATION_TEMPLATE
+    .replace("{BASE_STYLE}", baseStyleText)
+    .replace("{CHARACTERISTICS}", characteristicsText)
+    .replace("{CUSTOM_INSTRUCTIONS}", customInstructionsText)
+    .replace("{ABOUT_USER}", aboutUserText);
 
   return [
     "system",
@@ -55,10 +115,8 @@ export function buildPersonalizationSystemLayer({ sessionId, personalizationSett
       "[SYSTEM LAYER: PERSONALIZATION - SESSION_SCOPED]",
       `Session id: ${sessionId || "unknown-session"}`,
       "Treat this session as the active personalization profile.",
-      `Tone: ${settings.tone}`,
-      `Characteristics: ${characteristicsText}`,
-      `Response style: ${settings.responseStyle}`,
       "Apply these preferences while still strictly following guardrails and retrieved evidence.",
+      personalizationPrompt,
     ].join("\n\n"),
   ];
 }
