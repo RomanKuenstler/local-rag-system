@@ -9,7 +9,7 @@ import {
   CHUNK_SIZE,
   INDEX_SCHEMA_VERSION,
   PDF_MIN_EXTRACTED_CHARS,
-} from "./config.js";
+} from "../config/index.js";
 
 function sha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");

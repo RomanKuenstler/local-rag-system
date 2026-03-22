@@ -27,17 +27,17 @@ import {
   POSTGRES_USER,
   QDRANT_URL,
   validateRetrievalConfig,
-} from "./src/config.js";
-import { createUi } from "./src/ui.js";
-import { createChatModel } from "./src/model-clients.js";
-import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
+} from "../../shared/config/index.js";
+import { createUi } from "../../shared/src/ui.js";
+import { createChatModel } from "../../shared/src/model-clients.js";
+import { buildSystemPromptLayers, loadGuardrails } from "../../shared/src/guardrails.js";
 import {
   DEFAULT_ASSISTANT_MODE,
   listAssistantModes,
   normalizeAssistantMode,
-} from "./src/assistant-modes.js";
-import { getDefaultPersonalizationSettings } from "./src/personalization.js";
-import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
+} from "../../shared/src/assistant-modes.js";
+import { getDefaultPersonalizationSettings } from "../../shared/src/personalization.js";
+import { createRuntimeConfigManager, parseConfigSetCommand } from "../../shared/src/runtime-config.js";
 import {
   buildActiveConfigMessage,
   buildHelpMessage,
@@ -46,15 +46,15 @@ import {
   createSimilarityDetails,
   formatBytes,
   getEvidenceQuality,
-} from "./src/messages.js";
+} from "../../shared/src/messages.js";
 import {
   createEmbeddingsModel,
   createQdrantClient,
   fileToChunks,
   readEmbeddableFiles,
   readEmbeddingStatus,
-} from "./src/embedding-service.js";
-import { normalizeIndexableFileByExtension } from "./src/document-processing.js";
+} from "../../shared/src/embedding-service.js";
+import { normalizeIndexableFileByExtension } from "../../shared/src/document-processing.js";
 
 function colorEvidenceQuality(q) {
   if (q === "strong") return chalk.green(q);

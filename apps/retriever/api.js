@@ -27,9 +27,9 @@ import {
   QDRANT_URL,
   CHAT_HISTORY_DIR,
   validateRetrievalConfig,
-} from "./src/config.js";
-import { buildSystemPromptLayers, loadGuardrails } from "./src/guardrails.js";
-import { createChatModel } from "./src/model-clients.js";
+} from "../../shared/config/index.js";
+import { buildSystemPromptLayers, loadGuardrails } from "../../shared/src/guardrails.js";
+import { createChatModel } from "../../shared/src/model-clients.js";
 import {
   DEFAULT_ASSISTANT_MODE,
   buildRefineFinalPassMessages,
@@ -37,7 +37,7 @@ import {
   isAssistantModeSupported,
   listAssistantModes,
   normalizeAssistantMode,
-} from "./src/assistant-modes.js";
+} from "../../shared/src/assistant-modes.js";
 import {
   buildActiveConfigMessage,
   buildHelpMessage,
@@ -46,15 +46,15 @@ import {
   createSimilarityDetails,
   formatBytes,
   getEvidenceQuality,
-} from "./src/messages.js";
+} from "../../shared/src/messages.js";
 import {
   createEmbeddingsModel,
   createQdrantClient,
   fileToChunks,
   readEmbeddableFiles,
   readEmbeddingStatus,
-} from "./src/embedding-service.js";
-import { ensureDatabaseReady } from "./src/db.js";
+} from "../../shared/src/embedding-service.js";
+import { ensureDatabaseReady } from "../../shared/db/index.js";
 import {
   addChatMessage,
   createChat,
@@ -78,12 +78,12 @@ import {
   updateSessionPersonalizationSettings,
   updateSessionSetting,
   updateChatStatus,
-} from "./src/state-store.js";
+} from "../../shared/src/state-store.js";
 import {
   normalizeIndexableFileByExtension,
   normalizeIndexableTextByExtension,
-} from "./src/document-processing.js";
-import { createRuntimeConfigManager, parseConfigSetCommand } from "./src/runtime-config.js";
+} from "../../shared/src/document-processing.js";
+import { createRuntimeConfigManager, parseConfigSetCommand } from "../../shared/src/runtime-config.js";
 
 validateRetrievalConfig();
 

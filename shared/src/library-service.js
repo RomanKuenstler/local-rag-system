@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { CONTENT_PATH, EMBEDDABLE_EXTENSIONS } from "./config.js";
+import { CONTENT_PATH, EMBEDDABLE_EXTENSIONS } from "../config/index.js";
 import {
   getManagedLibraryFile,
   listManagedLibraryFilesWithStatus,

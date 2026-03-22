@@ -1,11 +1,11 @@
-import { ensureDatabaseReady, pingDatabase } from "./src/db.js";
+import { ensureDatabaseReady, pingDatabase } from "../../shared/db/index.js";
 import http from "http";
 import {
   deleteManagedLibraryFile,
   listManagedLibraryFiles,
   saveManagedLibraryFile,
   toggleManagedLibraryFile,
-} from "./src/library-service.js";
+} from "../../shared/src/library-service.js";
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
