@@ -1,5 +1,103 @@
 import React from "https://esm.sh/react@18";
 
+function GeneralDropdown({
+  label,
+  currentId,
+  options,
+  kind,
+  interactionDisabled,
+  isOptionDisabled,
+  applyPersonalizationChange,
+  chevron,
+  check,
+}) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
+
+  return React.createElement(
+    "div",
+    { className: "general-setting-row", key: `setting-${kind}-${label}` },
+    React.createElement("span", { className: "general-setting-label" }, label),
+    React.createElement(
+      "details",
+      {
+        className: "general-dropdown",
+        open: isOpen,
+        ref: rootRef,
+      },
+      React.createElement(
+        "summary",
+        {
+          className: "general-dropdown-trigger",
+          onClick: (event) => {
+            event.preventDefault();
+            setIsOpen((prev) => !prev);
+          },
+        },
+        React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
+        React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
+      ),
+      React.createElement(
+        "div",
+        { className: "general-dropdown-menu", role: "menu" },
+        ...options.map((option) => {
+          const optionId = String(option.id || "").trim().toLowerCase();
+          const active = optionId === String(currentId || "").trim().toLowerCase();
+          const optionDisabled = Boolean(isOptionDisabled?.(optionId));
+
+          return React.createElement(
+            "button",
+            {
+              key: `${kind}-${optionId}`,
+              type: "button",
+              className: `general-dropdown-option${active ? " active" : ""}`,
+              role: "menuitemradio",
+              "aria-checked": active ? "true" : "false",
+              disabled: interactionDisabled || optionDisabled,
+              onClick: (event) => {
+                event.preventDefault();
+                applyPersonalizationChange(kind, optionId);
+                setIsOpen(false);
+              },
+            },
+            React.createElement(
+              "span",
+              { className: "general-dropdown-option-copy" },
+              React.createElement("strong", null, optionId),
+              React.createElement("small", null, option.shortDescription || option.description || "")
+            ),
+            active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
+          );
+        })
+      )
+    )
+  );
+}
+
 export function renderPanelContent({
   panelData,
   parsedInfoGroups,
@@ -51,51 +149,18 @@ export function renderPanelContent({
     element.style.height = `${Math.max(element.scrollHeight, 24)}px`;
   };
   const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
-    "div",
-    { className: "general-setting-row", key: `setting-${kind}-${label}` },
-    React.createElement("span", { className: "general-setting-label" }, label),
-    React.createElement(
-      "details",
-      { className: "general-dropdown" },
-      React.createElement(
-        "summary",
-        { className: "general-dropdown-trigger" },
-        React.createElement("span", { className: "general-dropdown-value" }, String(currentId || "unknown")),
-        React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
-      ),
-      React.createElement(
-        "div",
-        { className: "general-dropdown-menu", role: "menu" },
-        ...options.map((option) => {
-          const optionId = String(option.id || "").trim().toLowerCase();
-          const active = optionId === String(currentId || "").trim().toLowerCase();
-          const optionDisabled = Boolean(isOptionDisabled?.(optionId));
-
-          return React.createElement(
-            "button",
-            {
-              key: `${kind}-${optionId}`,
-              type: "button",
-              className: `general-dropdown-option${active ? " active" : ""}`,
-              role: "menuitemradio",
-              "aria-checked": active ? "true" : "false",
-              disabled: interactionDisabled || optionDisabled,
-              onClick: (event) => {
-                event.preventDefault();
-                applyPersonalizationChange(kind, optionId);
-              },
-            },
-            React.createElement(
-              "span",
-              { className: "general-dropdown-option-copy" },
-              React.createElement("strong", null, optionId),
-              React.createElement("small", null, option.shortDescription || option.description || "")
-            ),
-            active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
-          );
-        })
-      )
-    )
+    GeneralDropdown,
+    {
+      label,
+      currentId,
+      options,
+      kind,
+      interactionDisabled,
+      isOptionDisabled,
+      applyPersonalizationChange,
+      chevron,
+      check,
+    }
   );
 
   if (panelData.command === "/config" && panelData.configView) {
