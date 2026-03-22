@@ -1,7 +1,7 @@
 import http from "http";
-import { buildEmbedSummaryMessage } from "./src/messages.js";
-import { indexChangedDocuments, readEmbeddingStatus } from "./src/embedding-service.js";
-import { validateRetrievalConfig } from "./src/config.js";
+import { buildEmbedSummaryMessage } from "../../shared/src/messages.js";
+import { indexChangedDocuments, readEmbeddingStatus } from "../../shared/src/embedding-service.js";
+import { validateRetrievalConfig } from "../../shared/config/index.js";
 
 const EMBED_INTERVAL_SECONDS = parseInt(process.env.EMBED_INTERVAL_SECONDS || "15", 10);
 const EMBEDDER_HEALTH_PORT = parseInt(process.env.EMBEDDER_HEALTH_PORT || "3200", 10);

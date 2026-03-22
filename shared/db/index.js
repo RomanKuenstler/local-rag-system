@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import pg from "pg";
-import { POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER } from "./config.js";
+import { POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER } from "../config/index.js";
 
 const { Pool } = pg;
 

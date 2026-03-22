@@ -1,5 +1,5 @@
 import { getDefaultPersonalizationSettings, normalizePersonalizationSettings } from "./personalization.js";
-import { dbQuery } from "./db.js";
+import { dbQuery } from "../db/index.js";
 
 export async function initializeStateDefaults({ uiMode, assistantMode }) {
   const defaults = [

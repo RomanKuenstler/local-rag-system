@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { CHUNK_OVERLAP, CHUNK_SIZE, MAX_EMBEDDING_CHARS } from "./config.js";
+import { CHUNK_OVERLAP, CHUNK_SIZE, MAX_EMBEDDING_CHARS } from "../config/index.js";
 
 export function splitMarkdownBySectionsWithMetadata(markdown) {
   if (!markdown || markdown === "") {

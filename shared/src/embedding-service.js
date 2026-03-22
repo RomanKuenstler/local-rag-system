@@ -8,7 +8,7 @@ import {
   EMBEDDABLE_EXTENSIONS,
   QDRANT_API_KEY,
   QDRANT_URL,
-} from "./config.js";
+} from "../config/index.js";
 import { createEmbeddingsModel } from "./model-clients.js";
 import {
   enforceEmbeddingSizeLimit,
@@ -16,7 +16,7 @@ import {
   splitTextIntoOverlappingChunks,
 } from "./chunking.js";
 import { readTextFilesRecursively } from "./document-processing.js";
-import { ensureDatabaseReady } from "./db.js";
+import { ensureDatabaseReady } from "../db/index.js";
 import {
   clearManagedLibraryFileErrors,
   getEmbeddingStatus,

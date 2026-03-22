@@ -117,7 +117,7 @@ services:
 
   webui:
     build:
-      context: ./webui
+      context: ./apps/webui
       dockerfile: Dockerfile
     environment:
       UPSTREAM_API_URL: http://backend:3100
@@ -126,7 +126,7 @@ services:
     develop:
       watch:
         - action: sync
-          path: ./webui
+          path: ./apps/webui
           target: /usr/share/nginx/html
           initial_sync: true
           ignore:
