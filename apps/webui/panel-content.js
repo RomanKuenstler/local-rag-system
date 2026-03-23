@@ -133,6 +133,8 @@ export function renderPanelContent({
   saveMoreAboutUser,
   tagFilterRows = [],
   tagFilterEnabledByTag = {},
+  globalTagFilterEnabledByTag = tagFilterEnabledByTag,
+  filterScope = "global",
   toggleTagFilter,
   isTagFilterSaving = false,
   icon,
@@ -562,9 +564,18 @@ export function renderPanelContent({
 
   if (panelData.command === "/filter") {
     const rows = Array.isArray(tagFilterRows) ? tagFilterRows : [];
+    const normalizedScope = String(filterScope || "global").trim().toLowerCase();
+    const isChatScopedFilter = normalizedScope === "chat";
     return React.createElement(
       "section",
       { className: "filter-table-wrapper" },
+      React.createElement(
+        "p",
+        { className: "filter-scope-note" },
+        isChatScopedFilter
+          ? "Note: Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
+          : "Note: Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
+      ),
       React.createElement(
         "div",
         { className: "filter-table", role: "table", "aria-label": "Tag filters" },
@@ -578,7 +589,11 @@ export function renderPanelContent({
         rows.length === 0
           ? React.createElement("p", { className: "archive-empty" }, "No tags available yet.")
           : rows.map((row) => {
-            const enabled = tagFilterEnabledByTag[row.tag] ?? true;
+            const globallyEnabled = globalTagFilterEnabledByTag[row.tag] ?? true;
+            const enabled = isChatScopedFilter
+              ? (globallyEnabled ? (tagFilterEnabledByTag[row.tag] ?? true) : false)
+              : (tagFilterEnabledByTag[row.tag] ?? true);
+            const isLockedByGlobalFilter = isChatScopedFilter && !globallyEnabled;
             return React.createElement(
               "div",
               { key: row.tag, className: "filter-table-row", role: "row" },
@@ -586,11 +601,11 @@ export function renderPanelContent({
               React.createElement("span", { className: "filter-tag-count" }, String(row.fileCount || 0)),
               React.createElement(
                 "label",
-                { className: "filter-switch", title: enabled ? "Disable tag" : "Enable tag" },
+                { className: "filter-switch", title: isLockedByGlobalFilter ? "Disabled globally in Preferences → Filter" : enabled ? "Disable tag" : "Enable tag" },
                 React.createElement("input", {
                   type: "checkbox",
                   checked: enabled,
-                  disabled: isTagFilterSaving || interactionDisabled,
+                  disabled: isTagFilterSaving || interactionDisabled || isLockedByGlobalFilter,
                   onChange: () => toggleTagFilter?.(row.tag),
                 }),
                 React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })

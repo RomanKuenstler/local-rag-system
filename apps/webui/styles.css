@@ -705,6 +705,16 @@ body {
   gap: 0.6rem;
   align-content: start;
 }
+.filter-scope-note {
+  margin: 0;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  color: #1e3a8a;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
 .filter-table {
   display: block;
   border: 1px solid #e5e7eb;

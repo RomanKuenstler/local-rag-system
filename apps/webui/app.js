@@ -1931,7 +1931,7 @@ function App() {
       }
       return {
         ...previous,
-        [chat.id]: { ...tagFilterEnabledByTag },
+        [chat.id]: {},
       };
     });
   }
@@ -1941,8 +1941,8 @@ function App() {
     const normalizedTag = String(tag || "").trim().toLowerCase();
     if (!normalizedChatId || !normalizedTag) return;
     setChatTagFilterEnabledByChatId((previous) => {
-      const currentByTag = previous[normalizedChatId] || tagFilterEnabledByTag;
-      const currentlyEnabled = currentByTag?.[normalizedTag] ?? true;
+      const currentByTag = previous[normalizedChatId] || {};
+      const currentlyEnabled = currentByTag?.[normalizedTag] ?? (tagFilterEnabledByTag[normalizedTag] ?? true);
       return {
         ...previous,
         [normalizedChatId]: {
@@ -3119,6 +3119,8 @@ function App() {
               saveMoreAboutUser,
               tagFilterRows,
               tagFilterEnabledByTag: chatTagFilterEnabledByChatId[chatFilterDialogChat.id] || tagFilterEnabledByTag,
+              globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+              filterScope: "chat",
               toggleTagFilter: (tag) => toggleChatTagFilter(chatFilterDialogChat.id, tag),
               isTagFilterSaving: false,
               icon,
@@ -3293,6 +3295,8 @@ function App() {
                       saveMoreAboutUser,
                       tagFilterRows,
                       tagFilterEnabledByTag,
+                      globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                      filterScope: "global",
                       toggleTagFilter,
                       isTagFilterSaving,
                       icon,
@@ -3380,6 +3384,8 @@ function App() {
               saveMoreAboutUser,
               tagFilterRows,
               tagFilterEnabledByTag,
+              globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+              filterScope: "global",
               toggleTagFilter,
               isTagFilterSaving,
               icon,
