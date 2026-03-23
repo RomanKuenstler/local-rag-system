@@ -20,6 +20,10 @@ function normalizeSessionTagFilterState(input) {
     disabledTags: normalizeFileTags(disabledTags),
   };
 }
+
+function normalizeChatTagFilterState(input) {
+  return normalizeSessionTagFilterState(input);
+}
 async function replaceFileTags(filePath, tags) {
   const normalizedPath = String(filePath || "").trim();
   if (!normalizedPath) {
@@ -240,7 +244,7 @@ export async function createChat({ sessionId, chatId, chatName }) {
   );
 
   const result = await dbQuery(
-    `SELECT id, session_id, name, status, created_at, updated_at, archived_at
+    `SELECT id, session_id, name, status, created_at, updated_at, archived_at, tag_filter_state
      FROM chats
      WHERE id = $1`,
     [chatId]
@@ -257,7 +261,7 @@ export async function listSessionChats({ sessionId, includeArchived = false }) {
   const activeChatId = sessionResult.rows[0]?.active_chat_id || null;
 
   const chatResult = await dbQuery(
-    `SELECT id, name, status, created_at, updated_at, archived_at
+    `SELECT id, name, status, created_at, updated_at, archived_at, tag_filter_state
      FROM chats
      WHERE session_id = $1
        AND ($2::boolean OR status = 'active')
@@ -303,7 +307,7 @@ export async function updateChatStatus({ sessionId, chatId, status }) {
          archived_at = CASE WHEN $3 = 'archived' THEN NOW() ELSE NULL END,
          updated_at = NOW()
      WHERE session_id = $1 AND id = $2
-     RETURNING id, name, status, created_at, updated_at, archived_at`,
+     RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
     [sessionId, chatId, status]
   );
   const chat = result.rows[0];
@@ -350,10 +354,39 @@ export async function updateChatName({ sessionId, chatId, name }) {
      SET name = $3,
          updated_at = NOW()
      WHERE session_id = $1 AND id = $2
-     RETURNING id, name, status, created_at, updated_at, archived_at`,
+     RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
     [sessionId, chatId, nextName]
   );
   return result.rows[0] || null;
+}
+
+export async function getChatTagFilterState({ sessionId, chatId }) {
+  const result = await dbQuery(
+    `SELECT tag_filter_state
+     FROM chats
+     WHERE session_id = $1 AND id = $2`,
+    [sessionId, chatId]
+  );
+  const rawState = result.rows[0]?.tag_filter_state || { disabledTags: [] };
+  return normalizeChatTagFilterState(rawState);
+}
+
+export async function updateChatTagFilterState({ sessionId, chatId, nextState }) {
+  const normalized = normalizeChatTagFilterState(nextState);
+  const result = await dbQuery(
+    `UPDATE chats
+     SET tag_filter_state = $3::jsonb,
+         updated_at = NOW()
+     WHERE session_id = $1 AND id = $2
+     RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
+    [sessionId, chatId, JSON.stringify(normalized)]
+  );
+  const row = result.rows[0] || null;
+  if (!row) return null;
+  return {
+    ...row,
+    tag_filter_state: normalizeChatTagFilterState(row.tag_filter_state),
+  };
 }
 
 export async function deleteChat({ sessionId, chatId }) {

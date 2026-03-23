@@ -286,6 +286,16 @@ marked.setOptions({
 
 function App() {
   const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
+  const buildEnabledTagMapFromDisabledTags = (disabledTags) => {
+    const next = {};
+    const disabled = Array.isArray(disabledTags) ? disabledTags : [];
+    for (const tag of disabled) {
+      const normalizedTag = String(tag || "").trim().toLowerCase();
+      if (!normalizedTag) continue;
+      next[normalizedTag] = false;
+    }
+    return next;
+  };
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [attachedPromptFiles, setAttachedPromptFiles] = useState([]);
@@ -318,6 +328,9 @@ function App() {
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [renameDialogChat, setRenameDialogChat] = useState(null);
   const [renameInputValue, setRenameInputValue] = useState("");
+  const [chatFilterDialogChat, setChatFilterDialogChat] = useState(null);
+  const [chatTagFilterEnabledByChatId, setChatTagFilterEnabledByChatId] = useState({});
+  const [isChatFilterSaving, setIsChatFilterSaving] = useState(false);
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
@@ -561,6 +574,9 @@ function App() {
           id: chat.id,
           name: chat.name || buildChatNameFromId(chat.id),
           status: chat.status || "active",
+          tagFilters: chat.tagFilters && typeof chat.tagFilters === "object"
+            ? chat.tagFilters
+            : { disabledTags: [] },
         }))
         : [];
 
@@ -1652,6 +1668,7 @@ function App() {
   const downloadIconPath = "M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4 2.3 2.3V4a1 1 0 0 1 1-1M4 17h16v4H4z";
   const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
+  const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
@@ -1916,6 +1933,70 @@ function App() {
     setOpenChatMenuId(null);
     setRenameDialogChat(chat);
     setRenameInputValue(String(chat?.name || ""));
+  }
+
+  function openChatFilterDialog(chat) {
+    if (!chat?.id) return;
+    setOpenChatMenuId(null);
+    setChatFilterDialogChat(chat);
+    setChatTagFilterEnabledByChatId((previous) => ({
+      ...previous,
+      [chat.id]: buildEnabledTagMapFromDisabledTags(chat?.tagFilters?.disabledTags),
+    }));
+  }
+
+  async function toggleChatTagFilter(chatId, tag) {
+    const normalizedChatId = String(chatId || "").trim();
+    const normalizedTag = String(tag || "").trim().toLowerCase();
+    if (!normalizedChatId || !normalizedTag) return;
+    if (isChatFilterSaving) return;
+
+    const currentByTag = chatTagFilterEnabledByChatId[normalizedChatId] || {};
+    const currentlyEnabled = currentByTag?.[normalizedTag] ?? (tagFilterEnabledByTag[normalizedTag] ?? true);
+    const nextEnabled = !currentlyEnabled;
+
+    try {
+      setIsChatFilterSaving(true);
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(normalizedChatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "set_tag_filter",
+          tag: normalizedTag,
+          enabled: nextEnabled,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save chat filter");
+      }
+      const persistedDisabledTags = Array.isArray(payload?.chat?.tagFilters?.disabledTags)
+        ? payload.chat.tagFilters.disabledTags
+        : [];
+      const nextEnabledByTag = buildEnabledTagMapFromDisabledTags(persistedDisabledTags);
+      setChatTagFilterEnabledByChatId((previous) => ({
+        ...previous,
+        [normalizedChatId]: nextEnabledByTag,
+      }));
+      setChatList((previous) => previous.map((chat) => (
+        chat.id === normalizedChatId
+          ? { ...chat, tagFilters: { disabledTags: persistedDisabledTags } }
+          : chat
+      )));
+      setChatFilterDialogChat((previous) => (
+        previous && previous.id === normalizedChatId
+          ? { ...previous, tagFilters: { disabledTags: persistedDisabledTags } }
+          : previous
+      ));
+    } catch (error) {
+      setMessages((previous) => previous.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatFilterSaving(false);
+    }
   }
 
   async function confirmRenameChat() {
@@ -2246,6 +2327,22 @@ function App() {
                       },
                       icon(renameIconPath),
                       React.createElement("span", null, "Rename")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        disabled: isNavigationLocked,
+                        onClick: () => openChatFilterDialog(chat),
+                      },
+                      icon(filterIconPath),
+                      React.createElement("span", null, "Filter")
                     )
                   ),
                   React.createElement(
@@ -2998,6 +3095,86 @@ function App() {
         )
       )
       : null,
+    chatFilterDialogChat
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop panel-modal-backdrop-elevated",
+          onClick: () => setChatFilterDialogChat(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "panel-modal chat-filter-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": `${chatFilterDialogChat.name} Filter`,
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement(
+            "div",
+            { className: "panel-modal-head" },
+            React.createElement("strong", null, `${chatFilterDialogChat.name} Filter`),
+            React.createElement(
+              "div",
+              { className: "panel-modal-head-actions" },
+              React.createElement(
+                "button",
+                {
+                  className: "panel-close",
+                  type: "button",
+                  onClick: () => setChatFilterDialogChat(null),
+                  "aria-label": `Close ${chatFilterDialogChat.name} filter`,
+                },
+                "×"
+              )
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "panel-modal-content" },
+            renderPanelContent({
+              panelData: { command: "/filter" },
+              parsedInfoGroups: [],
+              parsedAssistantPanel: null,
+              parsedHelpPanel: null,
+              editableConfigRows: [],
+              restartConfigRows: [],
+              retrieverStatus,
+              embedderStatus,
+              isSending,
+              isEmbeddingReady,
+              disabledAssistantModes: disabledAssistantModesList,
+              submitConfigChange,
+              applyPersonalizationChange,
+              customInstructionsDraft,
+              isCustomInstructionsDirty,
+              updateCustomInstructionsDraft,
+              saveCustomInstructions,
+              nicknameDraft,
+              occupationDraft,
+              moreAboutUserDraft,
+              isNicknameDirty,
+              isOccupationDirty,
+              isMoreAboutUserDirty,
+              updateNicknameDraft,
+              updateOccupationDraft,
+              updateMoreAboutUserDraft,
+              saveNickname,
+              saveOccupation,
+              saveMoreAboutUser,
+              tagFilterRows,
+              tagFilterEnabledByTag: chatTagFilterEnabledByChatId[chatFilterDialogChat.id] || tagFilterEnabledByTag,
+              globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+              filterScope: "chat",
+              toggleTagFilter: (tag) => toggleChatTagFilter(chatFilterDialogChat.id, tag),
+              isTagFilterSaving: isChatFilterSaving,
+              icon,
+            })
+          )
+        )
+      )
+      : null,
     isUnifiedDialogOpen
       ? React.createElement(
         "div",
@@ -3164,6 +3341,8 @@ function App() {
                       saveMoreAboutUser,
                       tagFilterRows,
                       tagFilterEnabledByTag,
+                      globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                      filterScope: "global",
                       toggleTagFilter,
                       isTagFilterSaving,
                       icon,
@@ -3251,6 +3430,8 @@ function App() {
               saveMoreAboutUser,
               tagFilterRows,
               tagFilterEnabledByTag,
+              globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+              filterScope: "global",
               toggleTagFilter,
               isTagFilterSaving,
               icon,
