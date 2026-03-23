@@ -538,6 +538,103 @@ body {
   font-size: 0.92rem;
   line-height: 1.45;
 }
+.library-upload-modal {
+  width: min(94vw, 680px);
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.8rem;
+}
+.library-upload-modal h4 {
+  margin: 0;
+  color: #111827;
+}
+.library-upload-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+}
+.library-upload-add {
+  border: 1px dashed #94a3b8;
+  background: #f8fafc;
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 0.5rem 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.library-upload-add .icon {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+.library-upload-list {
+  display: grid;
+  gap: 0.55rem;
+  max-height: 340px;
+  overflow: auto;
+  padding: 0.15rem 0;
+}
+.library-upload-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.8fr);
+  gap: 0.6rem;
+  align-items: center;
+}
+.library-upload-name {
+  color: #111827;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+.library-upload-tags-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.84rem;
+  color: #111827;
+}
+.library-upload-tags-input:focus {
+  outline: none;
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
+}
+.library-upload-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.library-upload-cancel,
+.library-upload-confirm {
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  padding: 0.42rem 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.library-upload-cancel {
+  background: #fff;
+  color: #0f172a;
+}
+.library-upload-confirm {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+.library-upload-confirm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.library-upload-confirm .icon {
+  width: 0.86rem;
+  height: 0.86rem;
+}
 .library-delete-filename {
   display: block;
   margin: 0.2rem 0 0;
@@ -1252,11 +1349,7 @@ body {
 }
 .assistant-evidence-meta strong { color: #0f172a; }
 .assistant-evidence-tags {
-  display: grid;
-  gap: 0.1rem;
   margin: 0 0 0.2rem;
-}
-.assistant-evidence-tag-line {
   font-size: 0.74rem;
   color: #334155;
   line-height: 1.25;

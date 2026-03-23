@@ -1,4 +1,6 @@
 import { randomUUID } from "crypto";
+import fs from "fs/promises";
+import path from "path";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import {
   CHUNK_OVERLAP,
@@ -29,6 +31,7 @@ import {
   recordIndexingJobFile,
   markIndexingStarted,
   removeDeletedMetadata,
+  updateFileTags,
   upsertFileMetadata,
 } from "./state-store.js";
 
@@ -166,11 +169,79 @@ export function fileToChunks(file) {
 }
 
 export async function readEmbeddableFiles() {
-  const files = await readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
-  return files.filter((file) => {
-    const normalizedPath = String(file.relativePath || "").replace(/\\/g, "/");
-    return normalizedPath !== "_library" && !normalizedPath.startsWith("_library/");
-  });
+  return readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+}
+
+const TAGS_FILE_NAME = "tags.json";
+const TAG_PATTERN = /^[a-z0-9][a-z0-9_\-:.]{0,63}$/;
+
+function normalizeTags(tags) {
+  const input = Array.isArray(tags) ? tags : [];
+  const normalized = input
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .filter(Boolean)
+    .filter((tag) => TAG_PATTERN.test(tag));
+  return [...new Set(normalized)];
+}
+
+function normalizeTagsForFile(tags) {
+  const normalized = normalizeTags(tags);
+  return normalized.length > 0 ? normalized : [DEFAULT_FILE_TAG];
+}
+
+function areTagSetsEqual(first, second) {
+  const left = normalizeTagsForFile(first);
+  const right = normalizeTagsForFile(second);
+  return left.length === right.length && left.every((tag, index) => tag === right[index]);
+}
+
+async function syncDataRootTagsManifest({ logger = console.log } = {}) {
+  const absoluteContentPath = path.resolve(CONTENT_PATH);
+  const tagsFilePath = path.join(absoluteContentPath, TAGS_FILE_NAME);
+
+  let directFiles = [];
+  try {
+    const rootEntries = await fs.readdir(absoluteContentPath, { withFileTypes: true });
+    directFiles = rootEntries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => name !== TAGS_FILE_NAME)
+      .sort((left, right) => left.localeCompare(right));
+  } catch (error) {
+    logger(`Skipping ${TAGS_FILE_NAME} sync: ${error.message}`);
+    return new Map();
+  }
+
+  let existingManifest = {};
+  try {
+    const raw = await fs.readFile(tagsFilePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      existingManifest = parsed;
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      logger(`Ignoring invalid ${TAGS_FILE_NAME}: ${error.message}`);
+    }
+  }
+
+  const normalizedManifest = {};
+  for (const filename of directFiles) {
+    normalizedManifest[filename] = normalizeTagsForFile(existingManifest[filename]);
+  }
+
+  const shouldWrite = JSON.stringify(existingManifest) !== JSON.stringify(normalizedManifest);
+  if (shouldWrite) {
+    await fs.writeFile(tagsFilePath, `${JSON.stringify(normalizedManifest, null, 2)}\n`, "utf8");
+    logger(`Updated ${path.relative(process.cwd(), tagsFilePath)}`);
+  }
+
+  return new Map(
+    Object.entries(normalizedManifest).map(([filename, tags]) => [
+      filename,
+      normalizeTagsForFile(tags),
+    ])
+  );
 }
 
 export async function indexChangedDocuments({ logger = console.log } = {}) {
@@ -197,6 +268,27 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
     const activeFiles = files.filter((file) => !disabledPaths.has(file.relativePath));
     const activeFilePathSet = new Set(activeFiles.map((file) => file.relativePath));
     const fileTagsMap = await listTagsForFilePathMap(activeFiles.map((file) => file.relativePath));
+    const dataRootManifestTagsMap = await syncDataRootTagsManifest({ logger });
+    const manifestTagChangedPaths = new Set();
+
+    for (const file of activeFiles) {
+      const isDataRootFile = !String(file.relativePath || "").includes("/");
+      if (!isDataRootFile) {
+        continue;
+      }
+
+      const manifestTags = dataRootManifestTagsMap.get(file.relativePath);
+      if (!manifestTags) {
+        continue;
+      }
+
+      const existingTags = fileTagsMap.get(file.relativePath);
+      if (!areTagSetsEqual(existingTags, manifestTags)) {
+        manifestTagChangedPaths.add(file.relativePath);
+      }
+
+      fileTagsMap.set(file.relativePath, manifestTags);
+    }
 
     const indexState = await getIndexStateMap();
 
@@ -217,7 +309,10 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
       return summary;
     }
 
-    const changedFiles = activeFiles.filter((file) => indexState[file.relativePath] !== file.hash);
+    const changedFiles = activeFiles.filter(
+      (file) =>
+        indexState[file.relativePath] !== file.hash || manifestTagChangedPaths.has(file.relativePath)
+    );
     const removedFiles = Object.keys(indexState).filter(
       (relativePath) => !activeFilePathSet.has(relativePath)
     );
@@ -352,6 +447,9 @@ export async function indexChangedDocuments({ logger = console.log } = {}) {
 
     await removeDeletedMetadata(removedFiles);
     await upsertFileMetadata(files, indexState, chunkCounts);
+    for (const [relativePath, tags] of dataRootManifestTagsMap.entries()) {
+      await updateFileTags(relativePath, tags);
+    }
     logger("Index state saved to Postgres");
     logger("_______________________________________________________");
 
