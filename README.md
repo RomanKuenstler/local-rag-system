@@ -40,8 +40,9 @@ OCR scanner endpoints:
 Embedder behavior:
 
 - The embedder indexes files normally.
-- For text-poor PDFs in `data/` (including `data/_library`), embedder falls back to `ocr-scanner` and uses returned OCR text for chunking/embedding.
-- For prompt-attached PDFs, retriever sends `prompt_pdf` OCR requests and uses returned text to build prompt upload context.
+- For PDFs in `data/` (including `data/_library`), embedder delegates text extraction to `ocr-scanner`.
+- For prompt-attached PDFs, retriever delegates extraction to `ocr-scanner` via `prompt_pdf` requests and uses returned text to build prompt upload context.
+- If OCR fails for an uploaded prompt PDF, retriever reports a file-level skip/error without crashing the whole prompt request.
 
 ## Core API endpoints
 

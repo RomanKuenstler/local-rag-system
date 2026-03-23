@@ -215,6 +215,7 @@ async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtrac
 export async function readEmbeddableFiles() {
   return readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS, "utf8", {
     minimumExtractedChars: PDF_MIN_EXTRACTED_CHARS,
+    pdfExtractionMode: "ocr_only",
     pdfOcrHandler: requestLibraryPdfOcr,
   });
 }

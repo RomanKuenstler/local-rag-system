@@ -706,6 +706,19 @@ export async function normalizeIndexableFileByExtension(filePath, extension, enc
   const normalizedExtension = extension.toLowerCase();
 
   if (normalizedExtension === ".pdf") {
+    if (typeof options.pdfOcrHandler === "function" && options.pdfExtractionMode === "ocr_only") {
+      const ocrText = await options.pdfOcrHandler({
+        filePath,
+        extractedText: "",
+        minimumExtractedChars: Number.parseInt(
+          options.minimumExtractedChars ?? PDF_MIN_EXTRACTED_CHARS,
+          10
+        ),
+        relativePath: options.relativePath,
+      });
+      return normalizeTextForIndexing(typeof ocrText === "string" ? ocrText : "");
+    }
+
     const extractedText = normalizeTextForIndexing(await extractTextFromPdf(filePath));
     const minimumExtractedChars = Number.parseInt(
       options.minimumExtractedChars ?? PDF_MIN_EXTRACTED_CHARS,

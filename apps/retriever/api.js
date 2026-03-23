@@ -1,6 +1,4 @@
-import fs from "fs";
 import http from "http";
-import os from "os";
 import path from "path";
 import crypto from "crypto";
 import {
@@ -87,7 +85,6 @@ import {
   updateChatStatus,
 } from "../../shared/src/state-store.js";
 import {
-  normalizeIndexableFileByExtension,
   normalizeIndexableTextByExtension,
 } from "../../shared/src/document-processing.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "../../shared/src/runtime-config.js";
@@ -252,26 +249,14 @@ async function normalizeUploadedPromptFile(file) {
 
   let content = "";
   if (extension === ".pdf") {
-    content = await requestPromptPdfOcr({
+    const ocrResult = await requestPromptPdfOcr({
       name,
       contentBase64: buffer.toString("base64"),
     });
-
-    if (!content) {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-rag-upload-"));
-      const tempPath = path.join(tempDir, name);
-
-      try {
-        fs.writeFileSync(tempPath, buffer);
-        content = await normalizeIndexableFileByExtension(tempPath, extension);
-      } finally {
-        try {
-          fs.rmSync(tempDir, { recursive: true, force: true });
-        } catch {
-          // Best-effort cleanup.
-        }
-      }
+    if (!ocrResult.ok) {
+      return { ok: false, reason: "ocr_failed", name, detail: ocrResult.error };
     }
+    content = ocrResult.text;
   } else {
     content = normalizeIndexableTextByExtension(buffer.toString("utf8"), extension);
   }
@@ -291,7 +276,7 @@ async function normalizeUploadedPromptFile(file) {
 
 async function requestPromptPdfOcr({ name, contentBase64 }) {
   if (!contentBase64) {
-    return "";
+    return { ok: false, text: "", error: "missing_pdf_content" };
   }
 
   try {
@@ -310,19 +295,19 @@ async function requestPromptPdfOcr({ name, contentBase64 }) {
       console.warn(
         `[retriever] OCR request failed for prompt attachment ${name}: HTTP ${response.status} ${rawError.slice(0, 240)}`
       );
-      return "";
+      return { ok: false, text: "", error: `ocr_http_${response.status}` };
     }
 
     const payload = await response.json();
     const text = typeof payload?.text === "string" ? payload.text : "";
     if (!text.trim()) {
-      return "";
+      return { ok: false, text: "", error: "ocr_empty_text" };
     }
     console.log(`[retriever] OCR text extracted for prompt attachment ${name} (${text.length} chars)`);
-    return text;
+    return { ok: true, text, error: null };
   } catch (error) {
     console.warn(`[retriever] OCR request error for prompt attachment ${name}: ${error.message}`);
-    return "";
+    return { ok: false, text: "", error: "ocr_request_error" };
   }
 }
 
@@ -333,7 +318,13 @@ async function buildUploadedPromptContext(uploadedFiles) {
   for (const file of uploadedFiles) {
     const normalized = await normalizeUploadedPromptFile(file);
     if (!normalized.ok) {
-      skippedFiles.push(normalized.name || "unnamed-file");
+      const skippedName = normalized.name || "unnamed-file";
+      const skippedReason = normalized.reason || "invalid_file";
+      if (skippedReason === "ocr_failed" && normalized.detail) {
+        skippedFiles.push(`${skippedName} (ocr_failed:${normalized.detail})`);
+      } else {
+        skippedFiles.push(skippedName);
+      }
       continue;
     }
     normalizedUploadedFiles.push(normalized.file);
