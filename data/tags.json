@@ -1,0 +1,30 @@
+{
+  "AI_Firewall_OPNsense.md": [
+    "default",
+    "global"
+  ],
+  "AI_IPS_real.md": [
+    "default",
+    "global"
+  ],
+  "AI_IPS.md": [
+    "default",
+    "global"
+  ],
+  "AI_Router_MikroTik.md": [
+    "default",
+    "global"
+  ],
+  "Docker-AI-Docs.html": [
+    "default",
+    "global"
+  ],
+  "example.md": [
+    "default",
+    "global"
+  ],
+  "ids-ips.pdf": [
+    "default",
+    "global"
+  ]
+}

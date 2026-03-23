@@ -49,6 +49,7 @@ export function createSimilarityDetails(results, runtimeConfig) {
         source: payload.source || "unknown",
         title: payload.title || "",
         preview,
+        tags: Array.isArray(payload.tags) ? payload.tags : [],
       };
     }),
   };

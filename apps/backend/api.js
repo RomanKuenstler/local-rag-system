@@ -7,6 +7,8 @@ import {
   toggleManagedLibraryFile,
 } from "./library-service.js";
 
+const MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST = 5;
+
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
 const RETRIEVER_BASE_URL = process.env.RETRIEVER_BASE_URL || "http://retriever:3000";
@@ -144,12 +146,54 @@ async function handleLibraryUpload(req, res) {
   }
 
   try {
-    const file = await saveManagedLibraryFile({
-      fileName: body.name,
-      contentBase64: body.contentBase64,
-      overwrite: Boolean(body.overwrite),
+    const rawFiles = Array.isArray(body.files)
+      ? body.files
+      : (body.name || body.contentBase64)
+        ? [{
+          name: body.name,
+          contentBase64: body.contentBase64,
+          overwrite: body.overwrite,
+          tags: body.tags,
+        }]
+        : [];
+
+    if (rawFiles.length === 0) {
+      json(res, 400, { ok: false, error: "No files provided." });
+      return;
+    }
+
+    if (rawFiles.length > MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST) {
+      json(res, 400, {
+        ok: false,
+        error: `Please upload up to ${MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST} files per request.`,
+      });
+      return;
+    }
+
+    const uploadResults = await Promise.all(rawFiles.map(async (entry) => {
+      try {
+        const file = await saveManagedLibraryFile({
+          fileName: entry?.name,
+          contentBase64: entry?.contentBase64,
+          overwrite: Boolean(entry?.overwrite),
+          tags: entry?.tags,
+        });
+        return { ok: true, fileName: entry?.name, file };
+      } catch (error) {
+        return { ok: false, fileName: entry?.name, error: error.message };
+      }
+    }));
+
+    const statusCode = uploadResults.every((result) => result.ok)
+      ? 201
+      : uploadResults.some((result) => result.ok)
+        ? 207
+        : 400;
+
+    json(res, statusCode, {
+      ok: uploadResults.every((result) => result.ok),
+      files: uploadResults,
     });
-    json(res, 201, { ok: true, file });
   } catch (error) {
     if (error.message === "Payload too large") {
       json(res, 413, { ok: false, error: error.message });
@@ -237,7 +281,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/files") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files" });
+      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files") });
+      return;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/files/tags") {
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags" });
+      return;
+    }
+
+
+    if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/files/tag-filters") {
+      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters") });
       return;
     }
 
@@ -331,5 +386,5 @@ await ensureDatabaseReady();
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });

@@ -1,5 +1,53 @@
 import { getDefaultPersonalizationSettings, normalizePersonalizationSettings } from "./personalization.js";
 import { dbQuery } from "../db/index.js";
+import { DEFAULT_FILE_TAG } from "../config/index.js";
+
+function normalizeFileTags(tags) {
+  const input = Array.isArray(tags) ? tags : [];
+  const normalized = input
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .filter(Boolean)
+    .filter((tag) => /^[a-z0-9][a-z0-9_\-:.]{0,63}$/.test(tag));
+  return [...new Set(normalized)];
+}
+
+
+function normalizeSessionTagFilterState(input) {
+  const disabledTags = Array.isArray(input?.disabledTags)
+    ? input.disabledTags
+    : [];
+  return {
+    disabledTags: normalizeFileTags(disabledTags),
+  };
+}
+
+function normalizeChatTagFilterState(input) {
+  return normalizeSessionTagFilterState(input);
+}
+async function replaceFileTags(filePath, tags) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const normalizedTags = normalizeFileTags(tags);
+  const nextTags = normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG];
+
+  await dbQuery("DELETE FROM file_tags WHERE file_path = $1", [normalizedPath]);
+  for (const tag of nextTags) {
+    await dbQuery(
+      `INSERT INTO file_tags (file_path, tag, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (file_path, tag) DO UPDATE SET updated_at = NOW()`,
+      [normalizedPath, tag]
+    );
+  }
+
+  return {
+    filePath: normalizedPath,
+    tags: nextTags,
+  };
+}
 
 export async function initializeStateDefaults({ uiMode, assistantMode }) {
   const defaults = [
@@ -100,6 +148,25 @@ export async function updateSessionPersonalizationSettings(sessionId, nextSettin
   return mergedSettings;
 }
 
+export async function getSessionTagFilterState(sessionId) {
+  const rawState = await getSessionSetting({
+    sessionId,
+    settingName: "tag_filter_state",
+    fallbackValue: { disabledTags: [] },
+  });
+  return normalizeSessionTagFilterState(rawState);
+}
+
+export async function updateSessionTagFilterState(sessionId, nextState) {
+  const normalized = normalizeSessionTagFilterState(nextState);
+  await updateSessionSetting({
+    sessionId,
+    settingName: "tag_filter_state",
+    value: normalized,
+  });
+  return normalized;
+}
+
 export async function getRuntimeConfigState(fallbacks) {
   const result = await dbQuery(
     "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
@@ -177,7 +244,7 @@ export async function createChat({ sessionId, chatId, chatName }) {
   );
 
   const result = await dbQuery(
-    `SELECT id, session_id, name, status, created_at, updated_at, archived_at
+    `SELECT id, session_id, name, status, created_at, updated_at, archived_at, tag_filter_state
      FROM chats
      WHERE id = $1`,
     [chatId]
@@ -194,7 +261,7 @@ export async function listSessionChats({ sessionId, includeArchived = false }) {
   const activeChatId = sessionResult.rows[0]?.active_chat_id || null;
 
   const chatResult = await dbQuery(
-    `SELECT id, name, status, created_at, updated_at, archived_at
+    `SELECT id, name, status, created_at, updated_at, archived_at, tag_filter_state
      FROM chats
      WHERE session_id = $1
        AND ($2::boolean OR status = 'active')
@@ -240,7 +307,7 @@ export async function updateChatStatus({ sessionId, chatId, status }) {
          archived_at = CASE WHEN $3 = 'archived' THEN NOW() ELSE NULL END,
          updated_at = NOW()
      WHERE session_id = $1 AND id = $2
-     RETURNING id, name, status, created_at, updated_at, archived_at`,
+     RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
     [sessionId, chatId, status]
   );
   const chat = result.rows[0];
@@ -287,10 +354,39 @@ export async function updateChatName({ sessionId, chatId, name }) {
      SET name = $3,
          updated_at = NOW()
      WHERE session_id = $1 AND id = $2
-     RETURNING id, name, status, created_at, updated_at, archived_at`,
+     RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
     [sessionId, chatId, nextName]
   );
   return result.rows[0] || null;
+}
+
+export async function getChatTagFilterState({ sessionId, chatId }) {
+  const result = await dbQuery(
+    `SELECT tag_filter_state
+     FROM chats
+     WHERE session_id = $1 AND id = $2`,
+    [sessionId, chatId]
+  );
+  const rawState = result.rows[0]?.tag_filter_state || { disabledTags: [] };
+  return normalizeChatTagFilterState(rawState);
+}
+
+export async function updateChatTagFilterState({ sessionId, chatId, nextState }) {
+  const normalized = normalizeChatTagFilterState(nextState);
+  const result = await dbQuery(
+    `UPDATE chats
+     SET tag_filter_state = $3::jsonb,
+         updated_at = NOW()
+     WHERE session_id = $1 AND id = $2
+     RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
+    [sessionId, chatId, JSON.stringify(normalized)]
+  );
+  const row = result.rows[0] || null;
+  if (!row) return null;
+  return {
+    ...row,
+    tag_filter_state: normalizeChatTagFilterState(row.tag_filter_state),
+  };
 }
 
 export async function deleteChat({ sessionId, chatId }) {
@@ -450,20 +546,109 @@ export async function upsertFileMetadata(files, indexState, chunkCounts = {}) {
       ]
     );
   }
+
+  await ensureDefaultFileTags(files.map((file) => file.relativePath));
 }
 
 export async function removeDeletedMetadata(paths) {
   if (!paths.length) return;
+  await dbQuery("DELETE FROM file_tags WHERE file_path = ANY($1)", [paths]);
   await dbQuery("DELETE FROM file_metadata WHERE file_path = ANY($1)", [paths]);
 }
 
 export async function listFileMetadata() {
   const result = await dbQuery(
-    `SELECT file_path, extension, size_bytes, last_modified, file_hash, chunk_count, embedded
-     FROM file_metadata
+    `SELECT
+       m.file_path,
+       m.extension,
+       m.size_bytes,
+       m.last_modified,
+       m.file_hash,
+       m.chunk_count,
+       m.embedded,
+       COALESCE(
+         ARRAY_AGG(t.tag ORDER BY t.tag) FILTER (WHERE t.tag IS NOT NULL),
+         ARRAY[$1::text]
+       ) AS tags
+     FROM file_metadata m
+     LEFT JOIN file_tags t ON t.file_path = m.file_path
+     GROUP BY m.file_path, m.extension, m.size_bytes, m.last_modified, m.file_hash, m.chunk_count, m.embedded
      ORDER BY file_path ASC`
+    ,
+    [DEFAULT_FILE_TAG]
   );
   return result.rows;
+}
+
+export async function listTagsForFilePathMap(filePaths) {
+  if (!Array.isArray(filePaths) || filePaths.length === 0) {
+    return new Map();
+  }
+
+  const result = await dbQuery(
+    `SELECT file_path, ARRAY_AGG(tag ORDER BY tag) AS tags
+     FROM file_tags
+     WHERE file_path = ANY($1)
+     GROUP BY file_path`,
+    [filePaths]
+  );
+
+  const tagMap = new Map();
+  for (const row of result.rows) {
+    const normalized = normalizeFileTags(row.tags);
+    tagMap.set(row.file_path, normalized.length > 0 ? normalized : [DEFAULT_FILE_TAG]);
+  }
+
+  for (const filePath of filePaths) {
+    if (!tagMap.has(filePath)) {
+      tagMap.set(filePath, [DEFAULT_FILE_TAG]);
+    }
+  }
+
+  return tagMap;
+}
+
+export async function updateFileTags(filePath, tags) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  const existing = await dbQuery(
+    "SELECT 1 FROM file_metadata WHERE file_path = $1",
+    [normalizedPath]
+  );
+  if (!existing.rowCount) {
+    return null;
+  }
+
+  return replaceFileTags(normalizedPath, tags);
+}
+
+export async function setFileTagsForPath(filePath, tags) {
+  return replaceFileTags(filePath, tags);
+}
+
+export async function ensureDefaultFileTags(filePaths) {
+  const normalizedPaths = [...new Set(
+    (Array.isArray(filePaths) ? filePaths : [])
+      .map((filePath) => String(filePath || "").trim())
+      .filter(Boolean)
+  )];
+  if (normalizedPaths.length === 0) {
+    return;
+  }
+
+  await dbQuery(
+    `INSERT INTO file_tags (file_path, tag, updated_at)
+     SELECT m.file_path, $2, NOW()
+     FROM file_metadata m
+     WHERE m.file_path = ANY($1)
+       AND NOT EXISTS (
+         SELECT 1 FROM file_tags t WHERE t.file_path = m.file_path
+       )`,
+    [normalizedPaths, DEFAULT_FILE_TAG]
+  );
 }
 
 export async function upsertManagedLibraryFile({

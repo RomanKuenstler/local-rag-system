@@ -19,6 +19,7 @@ import {
   MAX_EMBEDDING_CHARS,
   MIN_SIMILARITIES,
   EMBEDDING_STATUS_FILE,
+  DEFAULT_FILE_TAG,
   PDF_MIN_EXTRACTED_CHARS,
   POSTGRES_DB,
   POSTGRES_HOST,
@@ -62,21 +63,27 @@ import {
   ensureSessionExists,
   getRuntimeConfigState,
   getIndexStateMap,
+  getChatTagFilterState,
   initializeRuntimeConfigDefaults,
   getSelectionState,
   getSessionPersonalizationSettings,
   getSessionSetting,
+  getSessionTagFilterState,
   initializeStateDefaults,
   listSessionChats,
   listChatMessages,
   listRecentPromptHistory,
   listFileMetadata,
+  listTagsForFilePathMap,
+  updateFileTags,
   resolveSessionChatId,
   setSessionActiveChat,
   updateChatName,
+  updateChatTagFilterState,
   updateSetting,
   updateSessionPersonalizationSettings,
   updateSessionSetting,
+  updateSessionTagFilterState,
   updateChatStatus,
 } from "../../shared/src/state-store.js";
 import {
@@ -695,7 +702,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   return null;
 }
 
-async function searchKnowledgeBase(prompt) {
+async function searchKnowledgeBase(prompt, sessionId, chatId) {
   const userQuestionEmbedding = await embeddingsModel.embedQuery(prompt);
   let totalCollectionPoints = runtimeConfig.maxSimilarities;
   try {
@@ -727,16 +734,61 @@ async function searchKnowledgeBase(prompt) {
   const filteredResults = allCandidateResults
     .filter((result) => result.score >= runtimeConfig.cosineLimit)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const selectedResults = filteredResults.slice(0, runtimeConfig.maxSimilarities);
-  const hasSufficientEvidence = selectedResults.length >= runtimeConfig.minSimilarities;
-  const evidenceQuality = getEvidenceQuality(selectedResults, runtimeConfig.minSimilarities);
+  const resultSourcePaths = [...new Set(
+    filteredResults
+      .map((result) => String(result?.payload?.source || "").trim())
+      .filter(Boolean)
+  )];
+  const tagsByPath = await listTagsForFilePathMap(resultSourcePaths);
+  const selectedResultsWithTags = filteredResults.map((result) => {
+    const payload = result?.payload && typeof result.payload === "object" ? result.payload : {};
+    const sourcePath = String(payload.source || "").trim();
+    const payloadTags = Array.isArray(payload.tags)
+      ? payload.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
+      : [];
+    const resolvedTags = payloadTags.length > 0
+      ? payloadTags
+      : tagsByPath.get(sourcePath) || [DEFAULT_FILE_TAG];
+    return {
+      ...result,
+      payload: {
+        ...payload,
+        tags: resolvedTags,
+      },
+    };
+  });
+
+  const normalizedSessionId = String(sessionId || "default-session").trim() || "default-session";
+  const normalizedChatId = String(chatId || "").trim();
+  const tagFilterState = await getSessionTagFilterState(normalizedSessionId);
+  const chatTagFilterState = normalizedChatId
+    ? await getChatTagFilterState({ sessionId: normalizedSessionId, chatId: normalizedChatId })
+    : { disabledTags: [] };
+  const disabledTagSet = new Set([
+    (Array.isArray(tagFilterState.disabledTags) ? tagFilterState.disabledTags : [])
+      .map((tag) => String(tag || "").trim().toLowerCase())
+      .filter(Boolean),
+    (Array.isArray(chatTagFilterState.disabledTags) ? chatTagFilterState.disabledTags : [])
+      .map((tag) => String(tag || "").trim().toLowerCase())
+      .filter(Boolean),
+  ].flat());
+  const eligibleResults = disabledTagSet.size === 0
+    ? selectedResultsWithTags
+    : selectedResultsWithTags.filter((result) => {
+      const tags = Array.isArray(result?.payload?.tags) ? result.payload.tags : [DEFAULT_FILE_TAG];
+      const normalizedTags = tags.map((tag) => String(tag || "").trim().toLowerCase()).filter(Boolean);
+      return normalizedTags.every((tag) => !disabledTagSet.has(tag));
+    });
+  const selectedResultsByTag = eligibleResults.slice(0, runtimeConfig.maxSimilarities);
+
+  const evidenceQuality = getEvidenceQuality(selectedResultsByTag, runtimeConfig.minSimilarities);
 
   return {
-    results: selectedResults,
+    results: selectedResultsByTag,
     evidenceQuality,
-    hasSufficientEvidence,
+    hasSufficientEvidence: selectedResultsByTag.length >= runtimeConfig.minSimilarities,
     ragContextPackage: buildRagContextPackage({
-      results: selectedResults,
+      results: selectedResultsByTag,
       userMessage: prompt,
       evidenceQuality,
     }),
@@ -912,7 +964,7 @@ async function handlePrompt(req, res) {
 
   let searchResult;
   try {
-    searchResult = await searchKnowledgeBase(promptForRetrieval);
+    searchResult = await searchKnowledgeBase(promptForRetrieval, sessionId, chatId);
   } catch (error) {
     clearAssistantChainProgress(sessionId);
     throw error;
@@ -1139,6 +1191,7 @@ async function handleListChats(req, res) {
       createdAt: chat.created_at,
       updatedAt: chat.updated_at,
       archivedAt: chat.archived_at,
+      tagFilters: chat.tag_filter_state || { disabledTags: [] },
     })),
     totalChats: data.chats.length,
   });
@@ -1175,6 +1228,7 @@ async function handleCreateChat(req, res) {
       createdAt: created.created_at,
       updatedAt: created.updated_at,
       archivedAt: created.archived_at,
+      tagFilters: created.tag_filter_state || { disabledTags: [] },
     },
   });
 }
@@ -1224,6 +1278,7 @@ async function handlePatchChat(req, res, chatId) {
         createdAt: updated.created_at,
         updatedAt: updated.updated_at,
         archivedAt: updated.archived_at,
+        tagFilters: updated.tag_filter_state || { disabledTags: [] },
       },
     });
     return;
@@ -1249,13 +1304,60 @@ async function handlePatchChat(req, res, chatId) {
         createdAt: updated.created_at,
         updatedAt: updated.updated_at,
         archivedAt: updated.archived_at,
+        tagFilters: updated.tag_filter_state || { disabledTags: [] },
+      },
+    });
+    return;
+  }
+
+  if (action === "set_tag_filter") {
+    const tag = String(body.tag || "").trim().toLowerCase();
+    const enabled = body.enabled !== false;
+    if (!tag) {
+      json(res, 400, { error: "Tag is required for set_tag_filter action." });
+      return;
+    }
+
+    const current = await getChatTagFilterState({ sessionId, chatId });
+    const disabledSet = new Set(
+      (Array.isArray(current.disabledTags) ? current.disabledTags : [])
+        .map((item) => String(item || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (enabled) {
+      disabledSet.delete(tag);
+    } else {
+      disabledSet.add(tag);
+    }
+
+    const updated = await updateChatTagFilterState({
+      sessionId,
+      chatId,
+      nextState: { disabledTags: Array.from(disabledSet) },
+    });
+    if (!updated) {
+      json(res, 404, { error: "Chat not found.", sessionId, chatId });
+      return;
+    }
+
+    json(res, 200, {
+      ok: true,
+      sessionId,
+      chat: {
+        id: updated.id,
+        name: updated.name,
+        status: updated.status,
+        createdAt: updated.created_at,
+        updatedAt: updated.updated_at,
+        archivedAt: updated.archived_at,
+        tagFilters: updated.tag_filter_state || { disabledTags: [] },
       },
     });
     return;
   }
 
   json(res, 400, {
-    error: "Unsupported action. Use one of: switch, archive, activate, rename.",
+    error: "Unsupported action. Use one of: switch, archive, activate, rename, set_tag_filter.",
   });
 }
 
@@ -1297,6 +1399,7 @@ async function handleDownloadChat(req, res, chatId) {
       createdAt: selectedChat.created_at,
       updatedAt: selectedChat.updated_at,
       archivedAt: selectedChat.archived_at,
+      tagFilters: selectedChat.tag_filter_state || { disabledTags: [] },
     },
     messages: rows.map((row) => ({
       id: row.id,
@@ -1412,8 +1515,10 @@ async function handlePersonalization(req, res) {
   }
 }
 
-async function handleFiles(_req, res) {
+async function handleFiles(req, res, url) {
+  const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
   const rows = await listFileMetadata();
+  const tagFilterState = await getSessionTagFilterState(sessionId);
 
   const payload = rows.map((row) => ({
     path: row.file_path,
@@ -1423,13 +1528,93 @@ async function handleFiles(_req, res) {
     hash: row.file_hash,
     chunkCount: row.chunk_count,
     embedded: row.embedded,
+    tags: Array.isArray(row.tags) ? row.tags : [],
   }));
 
   json(res, 200, {
     contentPath: CONTENT_PATH,
+    defaultTag: DEFAULT_FILE_TAG,
+    tagFilters: tagFilterState,
     files: payload,
     totalFiles: payload.length,
     embeddedFiles: payload.filter((file) => file.embedded).length,
+  });
+}
+
+async function handleTagFilters(req, res, url) {
+  const requestSessionId = req.method === "GET"
+    ? String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session"
+    : null;
+
+  if (req.method === "GET") {
+    const tagFilters = await getSessionTagFilterState(requestSessionId);
+    json(res, 200, {
+      sessionId: requestSessionId,
+      tagFilters,
+    });
+    return;
+  }
+
+  if (req.method === "PATCH") {
+    const body = await readJsonBody(req);
+    const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+    const tag = String(body.tag || "").trim().toLowerCase();
+    const enabled = body.enabled !== false;
+
+    if (!tag) {
+      json(res, 400, { ok: false, error: "Missing 'tag' in request body." });
+      return;
+    }
+
+    const current = await getSessionTagFilterState(sessionId);
+    const disabledSet = new Set(Array.isArray(current.disabledTags) ? current.disabledTags : []);
+    if (enabled) {
+      disabledSet.delete(tag);
+    } else {
+      disabledSet.add(tag);
+    }
+
+    const nextState = await updateSessionTagFilterState(sessionId, {
+      disabledTags: Array.from(disabledSet),
+    });
+
+    json(res, 200, {
+      ok: true,
+      sessionId,
+      tagFilters: nextState,
+    });
+    return;
+  }
+
+  json(res, 405, { ok: false, error: "Method not allowed" });
+}
+
+async function handleFileTags(req, res) {
+  const body = await readJsonBody(req);
+  const filePath = String(body.path || "").trim();
+  if (!filePath) {
+    json(res, 400, { ok: false, error: "Missing 'path' in request body." });
+    return;
+  }
+
+  const tags = Array.isArray(body.tags)
+    ? body.tags
+    : typeof body.tag === "string"
+      ? [body.tag]
+      : [];
+
+  const updated = await updateFileTags(filePath, tags);
+  if (!updated) {
+    json(res, 404, { ok: false, error: "File not found in metadata." });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    file: {
+      path: updated.filePath,
+      tags: updated.tags,
+    },
   });
 }
 
@@ -1449,6 +1634,8 @@ const server = http.createServer(async (req, res) => {
 
     const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
     const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
+    const isFileTagsRoute = ["/api/files/tags", "/internal/retriever/files/tags"].includes(url.pathname);
+    const isTagFiltersRoute = ["/api/files/tag-filters", "/internal/retriever/files/tag-filters"].includes(url.pathname);
     const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
     const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
@@ -1462,7 +1649,17 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && isFilesRoute) {
-      await handleFiles(req, res);
+      await handleFiles(req, res, url);
+      return;
+    }
+
+    if (isTagFiltersRoute && (req.method === "GET" || req.method === "PATCH")) {
+      await handleTagFilters(req, res, url);
+      return;
+    }
+
+    if (req.method === "PATCH" && isFileTagsRoute) {
+      await handleFileTags(req, res);
       return;
     }
 
@@ -1556,6 +1753,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, PATCH /internal/retriever/files/tags, GET|PATCH /internal/retriever/files/tag-filters, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
   );
 });

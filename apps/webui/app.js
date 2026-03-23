@@ -75,7 +75,7 @@ const PROMPT_ATTACHMENT_RULES = {
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv"],
 };
 const LIBRARY_UPLOAD_RULES = {
-  maxFiles: 10,
+  maxFiles: 5,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
@@ -84,10 +84,12 @@ const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
   { id: "settings", label: "Settings", command: "/config" },
+  { id: "filter", label: "Filter" },
   { id: "info", label: "Info", command: "/info" },
   { id: "archive", label: "Archive" },
   { id: "help", label: "Help", command: "/help" },
 ];
+const DEFAULT_FILE_TAG_LABEL = "default";
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -284,6 +286,16 @@ marked.setOptions({
 
 function App() {
   const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
+  const buildEnabledTagMapFromDisabledTags = (disabledTags) => {
+    const next = {};
+    const disabled = Array.isArray(disabledTags) ? disabledTags : [];
+    for (const tag of disabled) {
+      const normalizedTag = String(tag || "").trim().toLowerCase();
+      if (!normalizedTag) continue;
+      next[normalizedTag] = false;
+    }
+    return next;
+  };
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [attachedPromptFiles, setAttachedPromptFiles] = useState([]);
@@ -296,6 +308,8 @@ function App() {
   const [libraryManagedData, setLibraryManagedData] = useState(null);
   const [libraryNotice, setLibraryNotice] = useState("");
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [libraryUploadDrafts, setLibraryUploadDrafts] = useState([]);
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -314,6 +328,9 @@ function App() {
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [renameDialogChat, setRenameDialogChat] = useState(null);
   const [renameInputValue, setRenameInputValue] = useState("");
+  const [chatFilterDialogChat, setChatFilterDialogChat] = useState(null);
+  const [chatTagFilterEnabledByChatId, setChatTagFilterEnabledByChatId] = useState({});
+  const [isChatFilterSaving, setIsChatFilterSaving] = useState(false);
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
@@ -327,13 +344,15 @@ function App() {
   const [isNicknameDirty, setIsNicknameDirty] = useState(false);
   const [isOccupationDirty, setIsOccupationDirty] = useState(false);
   const [isMoreAboutUserDirty, setIsMoreAboutUserDirty] = useState(false);
+  const [tagFilterEnabledByTag, setTagFilterEnabledByTag] = useState({});
+  const [isTagFilterSaving, setIsTagFilterSaving] = useState(false);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
   const promptFileInputRef = useRef(null);
-  const libraryFileInputRef = useRef(null);
+  const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
@@ -463,7 +482,7 @@ function App() {
     try {
       const [statusRes, filesRes, libraryRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/status?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
-        fetch(`${API_BASE_URL}/api/files`),
+        fetch(`${API_BASE_URL}/api/files?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
         fetch(`${API_BASE_URL}/api/library/files`),
       ]);
 
@@ -555,6 +574,9 @@ function App() {
           id: chat.id,
           name: chat.name || buildChatNameFromId(chat.id),
           status: chat.status || "active",
+          tagFilters: chat.tagFilters && typeof chat.tagFilters === "object"
+            ? chat.tagFilters
+            : { disabledTags: [] },
         }))
         : [];
 
@@ -778,36 +800,56 @@ function App() {
     };
   }
 
-  async function uploadLibraryFiles(files) {
-    const queued = files.map((file) => ({
+  function parseLibraryTagInput(input) {
+    const raw = String(input || "");
+    const normalized = raw
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean);
+    return [...new Set(normalized)];
+  }
+
+  async function uploadLibraryFiles(fileDrafts) {
+    const draftsWithTags = fileDrafts.map((draft) => ({
+      ...draft,
+      parsedTags: parseLibraryTagInput(draft.tagsInput),
+    }));
+    const queued = draftsWithTags.map((draft) => ({
       tempId: crypto.randomUUID(),
-      path: `_library/${file.name}`,
-      originalName: file.name,
+      path: `_library/${draft.file.name}`,
+      originalName: draft.file.name,
       uploadStatus: "uploading",
       embedded: false,
       chunkCount: null,
-      sizeBytes: file.size,
-      extension: getFileExtension(file.name),
+      sizeBytes: draft.file.size,
+      extension: getFileExtension(draft.file.name),
       isVolatile: true,
       lastError: null,
       canDelete: false,
+      tags: draft.parsedTags.length > 0 ? draft.parsedTags : ["default"],
       updatedAt: new Date().toISOString(),
     }));
     setPendingLibraryUploads((previous) => queued.concat(previous));
 
-    const uploadResults = await Promise.all(files.map(async (file) => {
-      const contentBase64 = await fileToBase64(file);
-      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: file.name,
-          contentBase64,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      return { ok: response.ok, payload, fileName: file.name };
-    }));
+    const requestFiles = await Promise.all(draftsWithTags.map(async (draft) => ({
+      name: draft.file.name,
+      contentBase64: await fileToBase64(draft.file),
+      tags: draft.parsedTags,
+    })));
+
+    const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files: requestFiles }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    const uploadResults = Array.isArray(payload.files)
+      ? payload.files
+      : fileDrafts.map((draft) => ({
+        ok: false,
+        fileName: draft.file.name,
+        error: payload?.error || "Upload failed",
+      }));
 
     setPendingLibraryUploads((previous) => previous.map((row) => {
       const result = uploadResults.find((item) => item.fileName === row.originalName);
@@ -816,14 +858,15 @@ function App() {
         return {
           ...row,
           uploadStatus: "error",
-          lastError: result.payload?.error || "Upload failed",
+          lastError: result.error || "Upload failed",
           canDelete: false,
           updatedAt: new Date().toISOString(),
         };
       }
       return {
         ...row,
-        path: result.payload?.file?.path || row.path,
+        path: result.file?.path || row.path,
+        tags: Array.isArray(result.file?.tags) ? result.file.tags : row.tags,
         uploadStatus: "embedding",
         canDelete: true,
         updatedAt: new Date().toISOString(),
@@ -840,7 +883,20 @@ function App() {
     await refreshStatus();
   }
 
-  async function handleLibraryFileSelection(event) {
+  function openLibraryUploadDialog() {
+    setLibraryUploadDrafts([]);
+    setIsUploadDialogOpen(true);
+  }
+
+  function closeLibraryUploadDialog() {
+    setIsUploadDialogOpen(false);
+    setLibraryUploadDrafts([]);
+    if (libraryUploadDialogInputRef.current) {
+      libraryUploadDialogInputRef.current.value = "";
+    }
+  }
+
+  function handleLibraryUploadDraftSelection(event) {
     const selectedFiles = Array.from(event.target.files || []);
     event.target.value = "";
 
@@ -849,8 +905,25 @@ function App() {
     if (validation.validFiles.length === 0) {
       return;
     }
+    setLibraryUploadDrafts(validation.validFiles.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      tagsInput: "",
+    })));
+  }
 
-    await uploadLibraryFiles(validation.validFiles);
+  function setLibraryDraftTags(draftId, nextInput) {
+    setLibraryUploadDrafts((previous) => previous.map((draft) => (
+      draft.id === draftId ? { ...draft, tagsInput: nextInput } : draft
+    )));
+  }
+
+  async function confirmLibraryUploadDialog() {
+    if (libraryUploadDrafts.length === 0) {
+      return;
+    }
+    await uploadLibraryFiles(libraryUploadDrafts);
+    closeLibraryUploadDialog();
   }
 
   async function confirmDeleteLibraryFile() {
@@ -1210,6 +1283,16 @@ function App() {
           responseType: null,
           configView: null,
         };
+      } else if (selectedTab.id === "filter") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/filter",
+          title: "Filter",
+          content: null,
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
       } else {
         const payload = await fetchPanelCommand(selectedTab.command);
         nextPanel = buildPanelDataFromCommand(selectedTab.command, payload);
@@ -1238,6 +1321,36 @@ function App() {
 
   async function openPersonalizationPanel() {
     await openUnifiedDialog("personalization");
+  }
+
+  async function toggleTagFilter(tag) {
+    const normalizedTag = String(tag || "").trim().toLowerCase();
+    if (!normalizedTag || isTagFilterSaving) return;
+    const currentlyEnabled = tagFilterEnabledByTag[normalizedTag] ?? true;
+    try {
+      setIsTagFilterSaving(true);
+      const response = await fetch(`${API_BASE_URL}/api/files/tag-filters`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          tag: normalizedTag,
+          enabled: !currentlyEnabled,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save tag filter");
+      }
+      await refreshStatus();
+    } catch (error) {
+      setMessages((previous) => previous.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsTagFilterSaving(false);
+    }
   }
 
   async function refreshCurrentPanel(activeCommand) {
@@ -1555,6 +1668,7 @@ function App() {
   const downloadIconPath = "M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4 2.3 2.3V4a1 1 0 0 1 1-1M4 17h16v4H4z";
   const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
+  const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
@@ -1614,6 +1728,41 @@ function App() {
   const retrieverStatus = normalizeStatusBadge(statusData?.services?.retriever?.role || statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
+  const defaultFileTag = String(filesData?.defaultTag || DEFAULT_FILE_TAG_LABEL).trim().toLowerCase() || DEFAULT_FILE_TAG_LABEL;
+  const tagFilterRows = useMemo(() => {
+    const usageByTag = new Map();
+    for (const file of libraryFiles) {
+      const fileTags = Array.isArray(file?.tags) ? file.tags : [];
+      const normalizedTags = new Set(fileTags
+        .map((tag) => String(tag || "").trim().toLowerCase())
+        .filter(Boolean));
+      if (normalizedTags.size === 0) {
+        normalizedTags.add(defaultFileTag);
+      }
+      for (const tag of normalizedTags) {
+        usageByTag.set(tag, (usageByTag.get(tag) || 0) + 1);
+      }
+    }
+    if (!usageByTag.has(defaultFileTag)) {
+      usageByTag.set(defaultFileTag, 0);
+    }
+    return Array.from(usageByTag.entries())
+      .map(([tag, fileCount]) => ({ tag, fileCount }))
+      .sort((left, right) => left.tag.localeCompare(right.tag));
+  }, [libraryFiles, defaultFileTag]);
+
+  useEffect(() => {
+    const disabledTagSet = new Set(
+      (Array.isArray(filesData?.tagFilters?.disabledTags) ? filesData.tagFilters.disabledTags : [])
+        .map((tag) => String(tag || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const next = {};
+    for (const row of tagFilterRows) {
+      next[row.tag] = !disabledTagSet.has(row.tag);
+    }
+    setTagFilterEnabledByTag(next);
+  }, [tagFilterRows, filesData]);
   const managedLibraryFiles = Array.isArray(libraryManagedData?.files) ? libraryManagedData.files : [];
   const managedByPath = new Map(managedLibraryFiles.map((file) => [file.path, file]));
   const retrieverRows = libraryFiles.map((file) => {
@@ -1629,6 +1778,7 @@ function App() {
       updatedAt: managed?.updatedAt || file.lastModified || null,
       canDelete: Boolean(managed),
       lastError: managed?.lastError || null,
+      tags: Array.isArray(file.tags) ? file.tags : [],
     };
   });
   const managedOnlyRows = managedLibraryFiles
@@ -1644,6 +1794,7 @@ function App() {
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
       canDelete: true,
       lastError: managed.lastError || null,
+      tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
   const dbRows = retrieverRows.concat(managedOnlyRows).sort((left, right) => {
     const a = Date.parse(String(left.updatedAt || 0));
@@ -1782,6 +1933,70 @@ function App() {
     setOpenChatMenuId(null);
     setRenameDialogChat(chat);
     setRenameInputValue(String(chat?.name || ""));
+  }
+
+  function openChatFilterDialog(chat) {
+    if (!chat?.id) return;
+    setOpenChatMenuId(null);
+    setChatFilterDialogChat(chat);
+    setChatTagFilterEnabledByChatId((previous) => ({
+      ...previous,
+      [chat.id]: buildEnabledTagMapFromDisabledTags(chat?.tagFilters?.disabledTags),
+    }));
+  }
+
+  async function toggleChatTagFilter(chatId, tag) {
+    const normalizedChatId = String(chatId || "").trim();
+    const normalizedTag = String(tag || "").trim().toLowerCase();
+    if (!normalizedChatId || !normalizedTag) return;
+    if (isChatFilterSaving) return;
+
+    const currentByTag = chatTagFilterEnabledByChatId[normalizedChatId] || {};
+    const currentlyEnabled = currentByTag?.[normalizedTag] ?? (tagFilterEnabledByTag[normalizedTag] ?? true);
+    const nextEnabled = !currentlyEnabled;
+
+    try {
+      setIsChatFilterSaving(true);
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(normalizedChatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "set_tag_filter",
+          tag: normalizedTag,
+          enabled: nextEnabled,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save chat filter");
+      }
+      const persistedDisabledTags = Array.isArray(payload?.chat?.tagFilters?.disabledTags)
+        ? payload.chat.tagFilters.disabledTags
+        : [];
+      const nextEnabledByTag = buildEnabledTagMapFromDisabledTags(persistedDisabledTags);
+      setChatTagFilterEnabledByChatId((previous) => ({
+        ...previous,
+        [normalizedChatId]: nextEnabledByTag,
+      }));
+      setChatList((previous) => previous.map((chat) => (
+        chat.id === normalizedChatId
+          ? { ...chat, tagFilters: { disabledTags: persistedDisabledTags } }
+          : chat
+      )));
+      setChatFilterDialogChat((previous) => (
+        previous && previous.id === normalizedChatId
+          ? { ...previous, tagFilters: { disabledTags: persistedDisabledTags } }
+          : previous
+      ));
+    } catch (error) {
+      setMessages((previous) => previous.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatFilterSaving(false);
+    }
   }
 
   async function confirmRenameChat() {
@@ -2124,6 +2339,22 @@ function App() {
                         className: "chat-item-actions-option",
                         role: "menuitem",
                         disabled: isNavigationLocked,
+                        onClick: () => openChatFilterDialog(chat),
+                      },
+                      icon(filterIconPath),
+                      React.createElement("span", null, "Filter")
+                    )
+                  ),
+                  React.createElement(
+                    "li",
+                    { role: "none" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "chat-item-actions-option",
+                        role: "menuitem",
+                        disabled: isNavigationLocked,
                         onClick: async () => {
                           setOpenChatMenuId(null);
                           try {
@@ -2225,18 +2456,18 @@ function App() {
                 {
                   type: "button",
                   className: "restart-button library-upload-button",
-                  onClick: () => libraryFileInputRef.current?.click(),
+                  onClick: openLibraryUploadDialog,
                 },
                 icon(fileUploadIconPath),
                 "Upload"
               ),
               React.createElement("input", {
-                ref: libraryFileInputRef,
+                ref: libraryUploadDialogInputRef,
                 type: "file",
                 className: "composer-file-input",
                 multiple: true,
                 accept: LIBRARY_UPLOAD_RULES.allowedExtensions.join(","),
-                onChange: handleLibraryFileSelection,
+                onChange: handleLibraryUploadDraftSelection,
                 "aria-hidden": "true",
                 tabIndex: -1,
               })
@@ -2250,6 +2481,7 @@ function App() {
                 { className: "library-table-head", role: "row" },
                 React.createElement("span", null, "File"),
                 React.createElement("span", null, "Status"),
+                React.createElement("span", null, "Tags"),
                 React.createElement("span", null, "Size"),
                 React.createElement("span", null, "Chunks"),
                 React.createElement("span", null, "Extension"),
@@ -2282,6 +2514,17 @@ function App() {
                     file.uploadStatus || "unknown"
                   ),
                   file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
+                ),
+                React.createElement(
+                  "span",
+                  { className: "library-tags-cell" },
+                  Array.isArray(file.tags) && file.tags.length > 0
+                    ? file.tags.map((tag) => React.createElement(
+                      "span",
+                      { key: `${file.path}-tag-${tag}`, className: "library-tag-line" },
+                      tag
+                    ))
+                    : React.createElement("span", { className: "library-tag-line muted" }, "—")
                 ),
                 React.createElement("span", null, formatBytes(file.sizeBytes)),
                 React.createElement("span", null, String(file.chunkCount ?? "0")),
@@ -2422,6 +2665,13 @@ function App() {
                                 ),
                                 React.createElement("span", null, match.source || "unknown source")
                               ),
+                              Array.isArray(match.tags) && match.tags.length > 0
+                                ? React.createElement(
+                                  "p",
+                                  { className: "assistant-evidence-tags" },
+                                  `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
+                                )
+                                : null,
                               match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
                               match.preview ? React.createElement("p", null, match.preview) : null
                             ))
@@ -2605,6 +2855,81 @@ function App() {
         )
       )
       : null,
+    isUploadDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: closeLibraryUploadDialog,
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-upload-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Upload files",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Upload files"),
+          libraryUploadDrafts.length === 0
+            ? React.createElement(
+              "div",
+              { className: "library-upload-empty" },
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "library-upload-add",
+                  onClick: () => libraryUploadDialogInputRef.current?.click(),
+                },
+                icon(fileUploadIconPath),
+                "Add files"
+              )
+            )
+            : React.createElement(
+              "div",
+              { className: "library-upload-list" },
+              ...libraryUploadDrafts.map((draft) => React.createElement(
+                "div",
+                { key: draft.id, className: "library-upload-row" },
+                React.createElement("span", { className: "library-upload-name" }, draft.file.name),
+                React.createElement("input", {
+                  type: "text",
+                  className: "library-upload-tags-input",
+                  placeholder: "tags, separated, by, commas",
+                  value: draft.tagsInput,
+                  onChange: (event) => setLibraryDraftTags(draft.id, event.target.value),
+                })
+              ))
+            ),
+          React.createElement(
+            "div",
+            { className: "library-upload-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-cancel",
+                onClick: closeLibraryUploadDialog,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-confirm",
+                onClick: confirmLibraryUploadDialog,
+                disabled: libraryUploadDrafts.length === 0,
+              },
+              icon(fileUploadIconPath),
+              "Upload"
+            )
+          )
+        )
+      )
+      : null,
     deleteConfirmFile
       ? React.createElement(
         "div",
@@ -2766,6 +3091,86 @@ function App() {
               icon(trashIconPath),
               "Delete"
             )
+          )
+        )
+      )
+      : null,
+    chatFilterDialogChat
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop panel-modal-backdrop-elevated",
+          onClick: () => setChatFilterDialogChat(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "panel-modal chat-filter-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": `${chatFilterDialogChat.name} Filter`,
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement(
+            "div",
+            { className: "panel-modal-head" },
+            React.createElement("strong", null, `${chatFilterDialogChat.name} Filter`),
+            React.createElement(
+              "div",
+              { className: "panel-modal-head-actions" },
+              React.createElement(
+                "button",
+                {
+                  className: "panel-close",
+                  type: "button",
+                  onClick: () => setChatFilterDialogChat(null),
+                  "aria-label": `Close ${chatFilterDialogChat.name} filter`,
+                },
+                "×"
+              )
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "panel-modal-content" },
+            renderPanelContent({
+              panelData: { command: "/filter" },
+              parsedInfoGroups: [],
+              parsedAssistantPanel: null,
+              parsedHelpPanel: null,
+              editableConfigRows: [],
+              restartConfigRows: [],
+              retrieverStatus,
+              embedderStatus,
+              isSending,
+              isEmbeddingReady,
+              disabledAssistantModes: disabledAssistantModesList,
+              submitConfigChange,
+              applyPersonalizationChange,
+              customInstructionsDraft,
+              isCustomInstructionsDirty,
+              updateCustomInstructionsDraft,
+              saveCustomInstructions,
+              nicknameDraft,
+              occupationDraft,
+              moreAboutUserDraft,
+              isNicknameDirty,
+              isOccupationDirty,
+              isMoreAboutUserDirty,
+              updateNicknameDraft,
+              updateOccupationDraft,
+              updateMoreAboutUserDraft,
+              saveNickname,
+              saveOccupation,
+              saveMoreAboutUser,
+              tagFilterRows,
+              tagFilterEnabledByTag: chatTagFilterEnabledByChatId[chatFilterDialogChat.id] || tagFilterEnabledByTag,
+              globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+              filterScope: "chat",
+              toggleTagFilter: (tag) => toggleChatTagFilter(chatFilterDialogChat.id, tag),
+              isTagFilterSaving: isChatFilterSaving,
+              icon,
+            })
           )
         )
       )
@@ -2934,6 +3339,12 @@ function App() {
                       saveNickname,
                       saveOccupation,
                       saveMoreAboutUser,
+                      tagFilterRows,
+                      tagFilterEnabledByTag,
+                      globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                      filterScope: "global",
+                      toggleTagFilter,
+                      isTagFilterSaving,
                       icon,
                     })
                     : React.createElement("p", null, "Select a section.")
@@ -3017,6 +3428,12 @@ function App() {
               saveNickname,
               saveOccupation,
               saveMoreAboutUser,
+              tagFilterRows,
+              tagFilterEnabledByTag,
+              globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+              filterScope: "global",
+              toggleTagFilter,
+              isTagFilterSaving,
               icon,
             })
           )
