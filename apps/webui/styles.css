@@ -696,6 +696,85 @@ body {
   font-size: 0.9rem;
   color: #64748b;
 }
+
+.filter-table-wrapper {
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+}
+.filter-table {
+  display: block;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.filter-table-head,
+.filter-table-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 2fr) 90px 120px;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.56rem 0.65rem;
+}
+.filter-table-head {
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #475569;
+}
+.filter-table-row {
+  border-top: 1px solid #f1f5f9;
+}
+.filter-tag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0f172a;
+}
+.filter-tag-count {
+  color: #475569;
+  font-size: 0.85rem;
+}
+.filter-switch {
+  justify-self: end;
+  position: relative;
+  display: inline-flex;
+  width: 38px;
+  height: 22px;
+  cursor: pointer;
+}
+.filter-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.filter-switch-slider {
+  position: absolute;
+  inset: 0;
+  background: #d1d5db;
+  border-radius: 999px;
+  transition: background-color 0.2s ease;
+}
+.filter-switch-slider::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+}
+.filter-switch input:checked + .filter-switch-slider {
+  background: #111827;
+}
+.filter-switch input:checked + .filter-switch-slider::before {
+  transform: translateX(16px);
+}
 .library-delete-actions {
   display: flex;
   justify-content: flex-end;
