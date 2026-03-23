@@ -9,6 +9,7 @@ import {
   CONTENT_PATH,
   DEFAULT_FILE_TAG,
   EMBEDDABLE_EXTENSIONS,
+  PDF_MIN_EXTRACTED_CHARS,
   QDRANT_API_KEY,
   QDRANT_URL,
 } from "../config/index.js";
@@ -168,8 +169,60 @@ export function fileToChunks(file) {
   return enforceEmbeddingSizeLimit(chunkRecords);
 }
 
+const OCR_SCANNER_BASE_URL =
+  String(process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300").trim() || "http://ocr-scanner:3300";
+const LIBRARY_SUBDIR = "_library/";
+
+async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtractedChars }) {
+  if (typeof relativePath !== "string" || !relativePath.startsWith(LIBRARY_SUBDIR)) {
+    return null;
+  }
+
+  const libraryRelativePath = relativePath.slice(LIBRARY_SUBDIR.length);
+  if (!libraryRelativePath) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${OCR_SCANNER_BASE_URL}/ocr/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_type: "library_pdf",
+        pdf_relative_path: libraryRelativePath,
+        minimum_extracted_chars: minimumExtractedChars,
+      }),
+    });
+
+    if (!response.ok) {
+      const rawError = await response.text();
+      console.warn(
+        `[embedder] OCR request failed for ${relativePath} with HTTP ${response.status}: ${rawError.slice(0, 240)}`
+      );
+      return null;
+    }
+
+    const payload = await response.json();
+    const ocrText = typeof payload?.text === "string" ? payload.text : "";
+    if (!ocrText.trim()) {
+      return null;
+    }
+
+    console.log(
+      `[embedder] OCR fallback used for ${relativePath} (original=${extractedText.length} chars, ocr=${ocrText.length} chars)`
+    );
+    return ocrText;
+  } catch (error) {
+    console.warn(`[embedder] OCR request error for ${relativePath}: ${error.message}`);
+    return null;
+  }
+}
+
 export async function readEmbeddableFiles() {
-  return readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS);
+  return readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS, "utf8", {
+    minimumExtractedChars: PDF_MIN_EXTRACTED_CHARS,
+    pdfOcrHandler: requestLibraryPdfOcr,
+  });
 }
 
 const TAGS_FILE_NAME = "tags.json";

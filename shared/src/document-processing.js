@@ -702,11 +702,32 @@ export function normalizeIndexableTextByExtension(rawContent, extension) {
   return normalizeTextForIndexing(extractIndexableTextByExtension(rawContent, extension));
 }
 
-export async function normalizeIndexableFileByExtension(filePath, extension, encoding = "utf8") {
+export async function normalizeIndexableFileByExtension(filePath, extension, encoding = "utf8", options = {}) {
   const normalizedExtension = extension.toLowerCase();
 
   if (normalizedExtension === ".pdf") {
-    return normalizeTextForIndexing(await extractTextFromPdf(filePath));
+    const extractedText = normalizeTextForIndexing(await extractTextFromPdf(filePath));
+    const minimumExtractedChars = Number.parseInt(
+      options.minimumExtractedChars ?? PDF_MIN_EXTRACTED_CHARS,
+      10
+    );
+
+    if (
+      typeof options.pdfOcrHandler === "function" &&
+      extractedText.length < minimumExtractedChars
+    ) {
+      const ocrText = await options.pdfOcrHandler({
+        filePath,
+        extractedText,
+        minimumExtractedChars,
+        relativePath: options.relativePath,
+      });
+      if (typeof ocrText === "string" && ocrText.trim().length > 0) {
+        return normalizeTextForIndexing(ocrText);
+      }
+    }
+
+    return extractedText;
   }
   if (normalizedExtension === ".epub") {
     return normalizeTextForIndexing(await extractTextFromEpub(filePath));
@@ -729,7 +750,12 @@ function buildIndexRelevantHash(content) {
   );
 }
 
-export async function readTextFilesRecursively(dirPath, allowedExtensions, encoding = "utf8") {
+export async function readTextFilesRecursively(
+  dirPath,
+  allowedExtensions,
+  encoding = "utf8",
+  options = {}
+) {
   dirPath = path.resolve(dirPath);
 
   if (!Array.isArray(allowedExtensions)) {
@@ -764,7 +790,11 @@ export async function readTextFilesRecursively(dirPath, allowedExtensions, encod
       }
 
       try {
-        const content = await normalizeIndexableFileByExtension(itemPath, ext, encoding);
+        const relativePath = path.relative(dirPath, itemPath);
+        const content = await normalizeIndexableFileByExtension(itemPath, ext, encoding, {
+          ...options,
+          relativePath,
+        });
 
         if (!content || content.length === 0) {
           console.log(`Skipping file with no indexable text: ${itemPath}`);
@@ -773,7 +803,7 @@ export async function readTextFilesRecursively(dirPath, allowedExtensions, encod
 
         files.push({
           path: itemPath,
-          relativePath: path.relative(dirPath, itemPath),
+          relativePath,
           filename: path.basename(itemPath),
           extension: ext,
           content,

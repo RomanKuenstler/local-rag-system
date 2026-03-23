@@ -100,6 +100,7 @@ services:
       POSTGRES_DB: rag
       POSTGRES_USER: rag
       POSTGRES_PASSWORD: rag
+      OCR_SCANNER_BASE_URL: http://ocr-scanner:3300
     volumes:
       - ./data:/app/data
       - rag_state:/app/state
@@ -109,6 +110,8 @@ services:
         model_var: MODEL_RUNNER_LLM_EMBEDDING
     depends_on:
       qdrant:
+        condition: service_started
+      ocr-scanner:
         condition: service_started
       postgres:
         condition: service_healthy

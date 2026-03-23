@@ -37,6 +37,11 @@ OCR scanner endpoints:
 - `library_pdf` → pass `pdf_relative_path` under `data/_library`.
 - `prompt_pdf` → pass either `prompt_pdf_relative_path` under `upload/` or `pdf_base64`.
 
+Embedder behavior:
+
+- The embedder indexes files normally.
+- For text-poor PDFs under `data/_library`, embedder falls back to `ocr-scanner` and uses returned OCR text for chunking/embedding.
+
 ## Core API endpoints
 
 - `GET /api/status`
