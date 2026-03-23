@@ -36,6 +36,7 @@ OCR scanner endpoints:
 
 - `library_pdf` → pass `pdf_relative_path` under `data/` (works for `_library/...` and direct PDFs in data root/subfolders).
 - `prompt_pdf` → pass either `prompt_pdf_relative_path` under `upload/` or `pdf_base64`.
+- OCR scanner performs layout-aware PDF extraction first (including block ordering / multi-column handling), evaluates extraction quality, and falls back to OCR when quality is weak.
 
 Embedder behavior:
 

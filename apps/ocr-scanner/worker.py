@@ -6,14 +6,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+import fitz
 import pypdfium2 as pdfium
 import pytesseract
 from flask import Flask, jsonify, request
-from pypdf import PdfReader
 
 SUPPORTED_EXTENSIONS = {".pdf"}
 DEFAULT_THRESHOLD = 150
@@ -36,12 +37,113 @@ def is_allowed_pdf(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_EXTENSIONS
 
 
-def extract_pdf_text(path: Path) -> tuple[str, int]:
-    reader = PdfReader(str(path))
-    page_texts = []
-    for page in reader.pages:
-        page_texts.append(page.extract_text() or "")
-    return "\n".join(page_texts).strip(), len(reader.pages)
+def detect_columns(blocks: list[dict[str, float]], page_width: float) -> int:
+    if len(blocks) < 3:
+        return 1
+    centers = sorted(((block["x0"] + block["x1"]) / 2 for block in blocks))
+    if len(centers) < 3:
+        return 1
+    largest_gap = 0.0
+    gap_index = 0
+    for index in range(len(centers) - 1):
+        gap = centers[index + 1] - centers[index]
+        if gap > largest_gap:
+            largest_gap = gap
+            gap_index = index
+    if largest_gap < (page_width * 0.18):
+        return 1
+    left_count = gap_index + 1
+    right_count = len(centers) - left_count
+    if left_count < 2 or right_count < 2:
+        return 1
+    return 2
+
+
+def order_blocks_for_reading(blocks: list[dict[str, float]], page_width: float) -> list[dict[str, float]]:
+    columns = detect_columns(blocks, page_width)
+    if columns == 1:
+        return sorted(blocks, key=lambda block: (block["y0"], block["x0"]))
+
+    mid_x = page_width / 2
+    left = [block for block in blocks if ((block["x0"] + block["x1"]) / 2) <= mid_x]
+    right = [block for block in blocks if ((block["x0"] + block["x1"]) / 2) > mid_x]
+    return sorted(left, key=lambda block: (block["y0"], block["x0"])) + sorted(
+        right, key=lambda block: (block["y0"], block["x0"])
+    )
+
+
+def extract_layout_text(path: Path) -> tuple[str, int, list[dict[str, object]]]:
+    doc = fitz.open(str(path))
+    page_texts: list[str] = []
+    page_layouts: list[dict[str, object]] = []
+    try:
+        for page_index, page in enumerate(doc):
+            page_width = float(page.rect.width or 1.0)
+            raw_blocks = page.get_text("blocks")
+            text_blocks: list[dict[str, float]] = []
+
+            for x0, y0, x1, y1, text, *_ in raw_blocks:
+                cleaned = str(text or "").strip()
+                if not cleaned:
+                    continue
+                text_blocks.append(
+                    {
+                        "x0": float(x0),
+                        "y0": float(y0),
+                        "x1": float(x1),
+                        "y1": float(y1),
+                        "text": cleaned,
+                    }
+                )
+
+            ordered_blocks = order_blocks_for_reading(text_blocks, page_width)
+            page_text = "\n\n".join(block["text"] for block in ordered_blocks).strip()
+            page_texts.append(page_text)
+            page_layouts.append(
+                {
+                    "page": page_index + 1,
+                    "detected_columns": detect_columns(text_blocks, page_width),
+                    "block_count": len(text_blocks),
+                }
+            )
+    finally:
+        doc.close()
+
+    return "\n\n".join(text for text in page_texts if text).strip(), len(page_texts), page_layouts
+
+
+def evaluate_text_quality(text: str, minimum_extracted_chars: int) -> dict[str, object]:
+    stripped = text.strip()
+    char_count = len(stripped)
+    non_whitespace = len(re.sub(r"\s+", "", stripped))
+    printable = len([char for char in stripped if char.isprintable() and not char.isspace()])
+    alpha_count = len([char for char in stripped if char.isalpha()])
+    words = re.findall(r"[A-Za-z0-9]+", stripped)
+    avg_word_length = (sum(len(word) for word in words) / len(words)) if words else 0.0
+
+    printable_ratio = (printable / non_whitespace) if non_whitespace > 0 else 0.0
+    alpha_ratio = (alpha_count / non_whitespace) if non_whitespace > 0 else 0.0
+
+    reasons: list[str] = []
+    if char_count < minimum_extracted_chars:
+        reasons.append("below_minimum_chars")
+    if printable_ratio < 0.9:
+        reasons.append("low_printable_ratio")
+    if alpha_ratio < 0.45:
+        reasons.append("low_alpha_ratio")
+    if words and (avg_word_length < 2.0 or avg_word_length > 15.0):
+        reasons.append("abnormal_average_word_length")
+
+    quality = "weak" if reasons else "good"
+    return {
+        "quality": quality,
+        "reasons": reasons,
+        "char_count": char_count,
+        "non_whitespace_chars": non_whitespace,
+        "printable_ratio": round(printable_ratio, 4),
+        "alpha_ratio": round(alpha_ratio, 4),
+        "avg_word_length": round(avg_word_length, 4),
+    }
 
 
 def ocr_pdf_text(path: Path, language: str) -> tuple[str, int]:
@@ -97,18 +199,31 @@ def run_pdf_scan(
     pdf_path: Path,
     language: str,
     minimum_extracted_chars: int,
-) -> tuple[str, bool, int]:
+) -> tuple[str, bool, int, dict[str, object]]:
     if not pdf_path.exists():
         raise FileNotFoundError("PDF file not found")
     if not is_allowed_pdf(pdf_path):
         raise ValueError("Only .pdf files are supported")
 
-    extracted_text, extracted_pages = extract_pdf_text(pdf_path)
-    if len(extracted_text) >= minimum_extracted_chars:
-        return extracted_text, False, extracted_pages
+    extracted_text, extracted_pages, page_layouts = extract_layout_text(pdf_path)
+    quality = evaluate_text_quality(extracted_text, minimum_extracted_chars)
+    extraction_details: dict[str, object] = {
+        "mode": "layout_extraction",
+        "layout": page_layouts,
+        "quality": quality,
+    }
+    if quality["quality"] == "good":
+        return extracted_text, False, extracted_pages, extraction_details
 
     ocr_text, ocr_pages = ocr_pdf_text(pdf_path, language)
-    return ocr_text, True, ocr_pages
+    ocr_quality = evaluate_text_quality(ocr_text, minimum_extracted_chars)
+    extraction_details = {
+        "mode": "ocr_fallback",
+        "layout": page_layouts,
+        "layout_quality": quality,
+        "ocr_quality": ocr_quality,
+    }
+    return ocr_text, True, ocr_pages, extraction_details
 
 
 @app.get("/healthz")
@@ -131,7 +246,9 @@ def scan_pdf():
     try:
         pdf_path, request_type, is_temp_file = resolve_pdf_path_for_request(payload)
         temp_file = pdf_path if is_temp_file else None
-        text, ocr_performed, page_count = run_pdf_scan(pdf_path, language, minimum_extracted_chars)
+        text, ocr_performed, page_count, extraction_details = run_pdf_scan(
+            pdf_path, language, minimum_extracted_chars
+        )
 
         response = {
             "request_type": request_type,
@@ -139,6 +256,7 @@ def scan_pdf():
             "page_count": page_count,
             "text_chars": len(text),
             "text": text,
+            "extraction_details": extraction_details,
         }
         log_event(
             "ocr.scan_completed",
