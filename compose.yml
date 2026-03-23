@@ -62,6 +62,7 @@ services:
       INDEX_STATE_FILE: /app/state/index-state.json
       EMBEDDING_STATUS_FILE: /app/state/embedding-status.json
       RETRIEVER_API_PORT: 3000
+      OCR_SCANNER_BASE_URL: http://ocr-scanner:3300
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
@@ -78,6 +79,8 @@ services:
       qdrant:
         condition: service_started
       embedder:
+        condition: service_started
+      ocr-scanner:
         condition: service_started
       postgres:
         condition: service_healthy
@@ -123,7 +126,7 @@ services:
     environment:
       OCR_API_HOST: 0.0.0.0
       OCR_API_PORT: 3300
-      OCR_LIBRARY_DIR: /app/data/_library
+      OCR_CONTENT_DIR: /app/data
       OCR_UPLOAD_DIR: /app/upload
       OCR_PDF_MIN_EXTRACTED_CHARS: 150
     volumes:

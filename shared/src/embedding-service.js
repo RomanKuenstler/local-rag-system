@@ -171,15 +171,9 @@ export function fileToChunks(file) {
 
 const OCR_SCANNER_BASE_URL =
   String(process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300").trim() || "http://ocr-scanner:3300";
-const LIBRARY_SUBDIR = "_library/";
 
 async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtractedChars }) {
-  if (typeof relativePath !== "string" || !relativePath.startsWith(LIBRARY_SUBDIR)) {
-    return null;
-  }
-
-  const libraryRelativePath = relativePath.slice(LIBRARY_SUBDIR.length);
-  if (!libraryRelativePath) {
+  if (typeof relativePath !== "string" || !relativePath.toLowerCase().endsWith(".pdf")) {
     return null;
   }
 
@@ -189,7 +183,7 @@ async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtrac
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         request_type: "library_pdf",
-        pdf_relative_path: libraryRelativePath,
+        pdf_relative_path: relativePath,
         minimum_extracted_chars: minimumExtractedChars,
       }),
     });

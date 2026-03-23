@@ -112,6 +112,8 @@ const qdrant = createQdrantClient();
 const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".csv"]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
 const MAX_REQUEST_BODY_BYTES = Number.parseInt(process.env.MAX_REQUEST_BODY_BYTES || String(10 * 1024 * 1024), 10);
+const OCR_SCANNER_BASE_URL =
+  String(process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300").trim() || "http://ocr-scanner:3300";
 const pendingWeakAnswers = new Map();
 const assistantChainProgressBySession = new Map();
 const assistantChainProgressClearTimers = new Map();
@@ -250,17 +252,24 @@ async function normalizeUploadedPromptFile(file) {
 
   let content = "";
   if (extension === ".pdf") {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-rag-upload-"));
-    const tempPath = path.join(tempDir, name);
+    content = await requestPromptPdfOcr({
+      name,
+      contentBase64: buffer.toString("base64"),
+    });
 
-    try {
-      fs.writeFileSync(tempPath, buffer);
-      content = await normalizeIndexableFileByExtension(tempPath, extension);
-    } finally {
+    if (!content) {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "local-rag-upload-"));
+      const tempPath = path.join(tempDir, name);
+
       try {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      } catch {
-        // Best-effort cleanup.
+        fs.writeFileSync(tempPath, buffer);
+        content = await normalizeIndexableFileByExtension(tempPath, extension);
+      } finally {
+        try {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch {
+          // Best-effort cleanup.
+        }
       }
     }
   } else {
@@ -278,6 +287,43 @@ async function normalizeUploadedPromptFile(file) {
       content,
     },
   };
+}
+
+async function requestPromptPdfOcr({ name, contentBase64 }) {
+  if (!contentBase64) {
+    return "";
+  }
+
+  try {
+    const response = await fetch(`${OCR_SCANNER_BASE_URL}/ocr/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_type: "prompt_pdf",
+        pdf_base64: contentBase64,
+        minimum_extracted_chars: PDF_MIN_EXTRACTED_CHARS,
+      }),
+    });
+
+    if (!response.ok) {
+      const rawError = await response.text();
+      console.warn(
+        `[retriever] OCR request failed for prompt attachment ${name}: HTTP ${response.status} ${rawError.slice(0, 240)}`
+      );
+      return "";
+    }
+
+    const payload = await response.json();
+    const text = typeof payload?.text === "string" ? payload.text : "";
+    if (!text.trim()) {
+      return "";
+    }
+    console.log(`[retriever] OCR text extracted for prompt attachment ${name} (${text.length} chars)`);
+    return text;
+  } catch (error) {
+    console.warn(`[retriever] OCR request error for prompt attachment ${name}: ${error.message}`);
+    return "";
+  }
 }
 
 async function buildUploadedPromptContext(uploadedFiles) {

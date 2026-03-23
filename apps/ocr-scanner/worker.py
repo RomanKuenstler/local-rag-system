@@ -68,14 +68,14 @@ def resolve_pdf_path_for_request(payload: dict[str, object]) -> tuple[Path, str,
     if request_type not in REQUEST_TYPES:
         raise ValueError("request_type must be one of: library_pdf, prompt_pdf")
 
-    library_dir = Path(os.getenv("OCR_LIBRARY_DIR", "/app/data/_library")).resolve()
+    content_dir = Path(os.getenv("OCR_CONTENT_DIR", "/app/data")).resolve()
     upload_dir = Path(os.getenv("OCR_UPLOAD_DIR", "/app/upload")).resolve()
 
     if request_type == "library_pdf":
         relative_path = str(payload.get("pdf_relative_path") or "").strip()
         if not relative_path:
             raise ValueError("library_pdf requires pdf_relative_path")
-        return safe_join(library_dir, relative_path), request_type, False
+        return safe_join(content_dir, relative_path), request_type, False
 
     prompt_relative_path = str(payload.get("prompt_pdf_relative_path") or "").strip()
     prompt_pdf_base64 = str(payload.get("pdf_base64") or "").strip()
