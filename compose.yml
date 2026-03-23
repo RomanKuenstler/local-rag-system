@@ -113,6 +113,20 @@ services:
       postgres:
         condition: service_healthy
 
+  ocr-scanner:
+    build:
+      context: ./apps/ocr-scanner
+      dockerfile: Dockerfile
+    environment:
+      OCR_POLL_INTERVAL_SECONDS: 10
+      OCR_INPUT_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+      - ./upload:/app/upload
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   webui:
     build:
       context: ./apps/webui
@@ -168,4 +182,3 @@ models:
     model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
   embedding-model:
     model: ai/embeddinggemma:latest
-

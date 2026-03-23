@@ -9,6 +9,7 @@ This stack runs with Docker Compose and includes:
 - `backend` – frontend-facing API gateway.
 - `retriever` – chat/retrieval API, assistant-mode logic, prompt orchestration.
 - `embedder` – indexing worker for files in `./data`.
+- `ocr-scanner` – Python OCR worker scaffold for PDFs/images that need OCR fallback.
 - `qdrant` – vector database for chunk embeddings.
 - `postgres` – chat/session/runtime/index metadata persistence.
 - `webui` – lightweight browser UI (nginx + static JS).
@@ -59,7 +60,7 @@ Endpoints:
 
 ## Repository layout
 
-- `apps/` – deployable service entrypoints and UI (`backend`, `retriever`, `embedder`, `webui`).
+- `apps/` – deployable service entrypoints and UI (`backend`, `retriever`, `embedder`, `ocr-scanner`, `webui`).
 - `shared/` – reusable modules and cross-service assets (`src`, `config`, `db`, `prompts`).
 - Service-local helpers now live with each app (for example `apps/backend/library-service.js` and `apps/retriever/ui.js`) to avoid unnecessary cross-service coupling.
 - `docs/` – architecture, changelog, and contributor notes.
