@@ -25,6 +25,14 @@ Endpoints:
 - Web UI: `http://localhost:5173`
 - Backend API: `http://localhost:3100`
 - Retriever API (internal): `http://retriever:3000`
+- OCR scanner API: `http://localhost:3300`
+
+OCR scanner endpoints:
+
+- `GET /healthz`
+- `POST /ocr/jobs`
+- `GET /ocr/jobs/:jobId`
+- `GET /ocr/jobs/:jobId/result`
 
 ## Core API endpoints
 
