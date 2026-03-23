@@ -251,6 +251,7 @@ def scan_pdf():
         )
 
         response = {
+            "status": "success",
             "request_type": request_type,
             "ocr_performed": ocr_performed,
             "page_count": page_count,
@@ -267,9 +268,15 @@ def scan_pdf():
             source_path=str(pdf_path),
         )
         return jsonify(response), 200
+    except FileNotFoundError as exc:
+        log_event("ocr.scan_failed", error=str(exc), error_code="file_not_found")
+        return jsonify({"status": "error", "error_code": "file_not_found", "error": str(exc)}), 404
+    except ValueError as exc:
+        log_event("ocr.scan_failed", error=str(exc), error_code="invalid_request")
+        return jsonify({"status": "error", "error_code": "invalid_request", "error": str(exc)}), 400
     except Exception as exc:
-        log_event("ocr.scan_failed", error=str(exc))
-        return jsonify({"error": str(exc)}), 400
+        log_event("ocr.scan_failed", error=str(exc), error_code="scan_failed")
+        return jsonify({"status": "error", "error_code": "scan_failed", "error": str(exc)}), 500
     finally:
         if temp_file is not None and temp_file.exists():
             temp_file.unlink()

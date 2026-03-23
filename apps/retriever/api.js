@@ -291,19 +291,33 @@ async function requestPromptPdfOcr({ name, contentBase64 }) {
     });
 
     if (!response.ok) {
-      const rawError = await response.text();
+      const errorPayload = await response.json().catch(() => ({}));
+      const errorCode = String(errorPayload?.error_code || `ocr_http_${response.status}`);
+      const errorMessage = String(errorPayload?.error || "").trim();
       console.warn(
-        `[retriever] OCR request failed for prompt attachment ${name}: HTTP ${response.status} ${rawError.slice(0, 240)}`
+        `[retriever] OCR request failed for prompt attachment ${name}: HTTP ${response.status} ${errorCode} ${errorMessage.slice(0, 240)}`
       );
-      return { ok: false, text: "", error: `ocr_http_${response.status}` };
+      return { ok: false, text: "", error: errorCode };
     }
 
     const payload = await response.json();
+    if (payload?.status !== "success") {
+      const errorCode = String(payload?.error_code || "ocr_unknown_error");
+      console.warn(`[retriever] OCR returned non-success status for ${name}: ${errorCode}`);
+      return { ok: false, text: "", error: errorCode };
+    }
     const text = typeof payload?.text === "string" ? payload.text : "";
     if (!text.trim()) {
       return { ok: false, text: "", error: "ocr_empty_text" };
     }
-    console.log(`[retriever] OCR text extracted for prompt attachment ${name} (${text.length} chars)`);
+    const extractionMode = String(payload?.extraction_details?.mode || "unknown");
+    const quality =
+      payload?.extraction_details?.ocr_quality?.quality
+      || payload?.extraction_details?.quality?.quality
+      || "unknown";
+    console.log(
+      `[retriever] OCR text extracted for prompt attachment ${name} (${text.length} chars, mode=${extractionMode}, quality=${quality})`
+    );
     return { ok: true, text, error: null };
   } catch (error) {
     console.warn(`[retriever] OCR request error for prompt attachment ${name}: ${error.message}`);

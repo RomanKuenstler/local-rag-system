@@ -189,21 +189,33 @@ async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtrac
     });
 
     if (!response.ok) {
-      const rawError = await response.text();
+      const errorPayload = await response.json().catch(() => ({}));
+      const errorCode = String(errorPayload?.error_code || `ocr_http_${response.status}`);
+      const errorMessage = String(errorPayload?.error || "").trim();
       console.warn(
-        `[embedder] OCR request failed for ${relativePath} with HTTP ${response.status}: ${rawError.slice(0, 240)}`
+        `[embedder] OCR request failed for ${relativePath} with HTTP ${response.status}: ${errorCode} ${errorMessage.slice(0, 240)}`
       );
       return null;
     }
 
     const payload = await response.json();
+    if (payload?.status !== "success") {
+      const errorCode = String(payload?.error_code || "ocr_unknown_error");
+      console.warn(`[embedder] OCR returned non-success status for ${relativePath}: ${errorCode}`);
+      return null;
+    }
     const ocrText = typeof payload?.text === "string" ? payload.text : "";
     if (!ocrText.trim()) {
       return null;
     }
 
+    const extractionMode = String(payload?.extraction_details?.mode || "unknown");
+    const quality =
+      payload?.extraction_details?.ocr_quality?.quality
+      || payload?.extraction_details?.quality?.quality
+      || "unknown";
     console.log(
-      `[embedder] OCR fallback used for ${relativePath} (original=${extractedText.length} chars, ocr=${ocrText.length} chars)`
+      `[embedder] OCR text extracted for ${relativePath} (original=${extractedText.length} chars, ocr=${ocrText.length} chars, mode=${extractionMode}, quality=${quality})`
     );
     return ocrText;
   } catch (error) {
