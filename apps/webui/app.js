@@ -286,6 +286,16 @@ marked.setOptions({
 
 function App() {
   const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
+  const buildEnabledTagMapFromDisabledTags = (disabledTags) => {
+    const next = {};
+    const disabled = Array.isArray(disabledTags) ? disabledTags : [];
+    for (const tag of disabled) {
+      const normalizedTag = String(tag || "").trim().toLowerCase();
+      if (!normalizedTag) continue;
+      next[normalizedTag] = false;
+    }
+    return next;
+  };
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const [attachedPromptFiles, setAttachedPromptFiles] = useState([]);
@@ -320,6 +330,7 @@ function App() {
   const [renameInputValue, setRenameInputValue] = useState("");
   const [chatFilterDialogChat, setChatFilterDialogChat] = useState(null);
   const [chatTagFilterEnabledByChatId, setChatTagFilterEnabledByChatId] = useState({});
+  const [isChatFilterSaving, setIsChatFilterSaving] = useState(false);
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
@@ -563,6 +574,9 @@ function App() {
           id: chat.id,
           name: chat.name || buildChatNameFromId(chat.id),
           status: chat.status || "active",
+          tagFilters: chat.tagFilters && typeof chat.tagFilters === "object"
+            ? chat.tagFilters
+            : { disabledTags: [] },
         }))
         : [];
 
@@ -1925,32 +1939,64 @@ function App() {
     if (!chat?.id) return;
     setOpenChatMenuId(null);
     setChatFilterDialogChat(chat);
-    setChatTagFilterEnabledByChatId((previous) => {
-      if (previous[chat.id]) {
-        return previous;
-      }
-      return {
-        ...previous,
-        [chat.id]: {},
-      };
-    });
+    setChatTagFilterEnabledByChatId((previous) => ({
+      ...previous,
+      [chat.id]: buildEnabledTagMapFromDisabledTags(chat?.tagFilters?.disabledTags),
+    }));
   }
 
-  function toggleChatTagFilter(chatId, tag) {
+  async function toggleChatTagFilter(chatId, tag) {
     const normalizedChatId = String(chatId || "").trim();
     const normalizedTag = String(tag || "").trim().toLowerCase();
     if (!normalizedChatId || !normalizedTag) return;
-    setChatTagFilterEnabledByChatId((previous) => {
-      const currentByTag = previous[normalizedChatId] || {};
-      const currentlyEnabled = currentByTag?.[normalizedTag] ?? (tagFilterEnabledByTag[normalizedTag] ?? true);
-      return {
+    if (isChatFilterSaving) return;
+
+    const currentByTag = chatTagFilterEnabledByChatId[normalizedChatId] || {};
+    const currentlyEnabled = currentByTag?.[normalizedTag] ?? (tagFilterEnabledByTag[normalizedTag] ?? true);
+    const nextEnabled = !currentlyEnabled;
+
+    try {
+      setIsChatFilterSaving(true);
+      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(normalizedChatId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          action: "set_tag_filter",
+          tag: normalizedTag,
+          enabled: nextEnabled,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save chat filter");
+      }
+      const persistedDisabledTags = Array.isArray(payload?.chat?.tagFilters?.disabledTags)
+        ? payload.chat.tagFilters.disabledTags
+        : [];
+      const nextEnabledByTag = buildEnabledTagMapFromDisabledTags(persistedDisabledTags);
+      setChatTagFilterEnabledByChatId((previous) => ({
         ...previous,
-        [normalizedChatId]: {
-          ...currentByTag,
-          [normalizedTag]: !currentlyEnabled,
-        },
-      };
-    });
+        [normalizedChatId]: nextEnabledByTag,
+      }));
+      setChatList((previous) => previous.map((chat) => (
+        chat.id === normalizedChatId
+          ? { ...chat, tagFilters: { disabledTags: persistedDisabledTags } }
+          : chat
+      )));
+      setChatFilterDialogChat((previous) => (
+        previous && previous.id === normalizedChatId
+          ? { ...previous, tagFilters: { disabledTags: persistedDisabledTags } }
+          : previous
+      ));
+    } catch (error) {
+      setMessages((previous) => previous.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsChatFilterSaving(false);
+    }
   }
 
   async function confirmRenameChat() {
@@ -3122,7 +3168,7 @@ function App() {
               globalTagFilterEnabledByTag: tagFilterEnabledByTag,
               filterScope: "chat",
               toggleTagFilter: (tag) => toggleChatTagFilter(chatFilterDialogChat.id, tag),
-              isTagFilterSaving: false,
+              isTagFilterSaving: isChatFilterSaving,
               icon,
             })
           )
