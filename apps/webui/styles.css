@@ -343,6 +343,9 @@ body {
   width: 0.84rem;
   height: 0.84rem;
 }
+.chat-filter-modal {
+  width: min(92vw, 560px);
+}
 .side-nav-loading {
   margin: 0.2rem 0.45rem;
   font-size: 0.78rem;
