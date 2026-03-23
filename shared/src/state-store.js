@@ -11,6 +11,15 @@ function normalizeFileTags(tags) {
   return [...new Set(normalized)];
 }
 
+
+function normalizeSessionTagFilterState(input) {
+  const disabledTags = Array.isArray(input?.disabledTags)
+    ? input.disabledTags
+    : [];
+  return {
+    disabledTags: normalizeFileTags(disabledTags),
+  };
+}
 async function replaceFileTags(filePath, tags) {
   const normalizedPath = String(filePath || "").trim();
   if (!normalizedPath) {
@@ -133,6 +142,25 @@ export async function updateSessionPersonalizationSettings(sessionId, nextSettin
     value: mergedSettings,
   });
   return mergedSettings;
+}
+
+export async function getSessionTagFilterState(sessionId) {
+  const rawState = await getSessionSetting({
+    sessionId,
+    settingName: "tag_filter_state",
+    fallbackValue: { disabledTags: [] },
+  });
+  return normalizeSessionTagFilterState(rawState);
+}
+
+export async function updateSessionTagFilterState(sessionId, nextState) {
+  const normalized = normalizeSessionTagFilterState(nextState);
+  await updateSessionSetting({
+    sessionId,
+    settingName: "tag_filter_state",
+    value: normalized,
+  });
+  return normalized;
 }
 
 export async function getRuntimeConfigState(fallbacks) {

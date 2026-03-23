@@ -67,6 +67,7 @@ import {
   getSelectionState,
   getSessionPersonalizationSettings,
   getSessionSetting,
+  getSessionTagFilterState,
   initializeStateDefaults,
   listSessionChats,
   listChatMessages,
@@ -80,6 +81,7 @@ import {
   updateSetting,
   updateSessionPersonalizationSettings,
   updateSessionSetting,
+  updateSessionTagFilterState,
   updateChatStatus,
 } from "../../shared/src/state-store.js";
 import {
@@ -698,7 +700,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   return null;
 }
 
-async function searchKnowledgeBase(prompt) {
+async function searchKnowledgeBase(prompt, sessionId) {
   const userQuestionEmbedding = await embeddingsModel.embedQuery(prompt);
   let totalCollectionPoints = runtimeConfig.maxSimilarities;
   try {
@@ -730,14 +732,13 @@ async function searchKnowledgeBase(prompt) {
   const filteredResults = allCandidateResults
     .filter((result) => result.score >= runtimeConfig.cosineLimit)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const selectedResults = filteredResults.slice(0, runtimeConfig.maxSimilarities);
   const resultSourcePaths = [...new Set(
-    selectedResults
+    filteredResults
       .map((result) => String(result?.payload?.source || "").trim())
       .filter(Boolean)
   )];
   const tagsByPath = await listTagsForFilePathMap(resultSourcePaths);
-  const selectedResultsWithTags = selectedResults.map((result) => {
+  const selectedResultsWithTags = filteredResults.map((result) => {
     const payload = result?.payload && typeof result.payload === "object" ? result.payload : {};
     const sourcePath = String(payload.source || "").trim();
     const payloadTags = Array.isArray(payload.tags)
@@ -755,14 +756,30 @@ async function searchKnowledgeBase(prompt) {
     };
   });
 
-  const evidenceQuality = getEvidenceQuality(selectedResultsWithTags, runtimeConfig.minSimilarities);
+  const normalizedSessionId = String(sessionId || "default-session").trim() || "default-session";
+  const tagFilterState = await getSessionTagFilterState(normalizedSessionId);
+  const disabledTagSet = new Set(
+    (Array.isArray(tagFilterState.disabledTags) ? tagFilterState.disabledTags : [])
+      .map((tag) => String(tag || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const eligibleResults = disabledTagSet.size === 0
+    ? selectedResultsWithTags
+    : selectedResultsWithTags.filter((result) => {
+      const tags = Array.isArray(result?.payload?.tags) ? result.payload.tags : [DEFAULT_FILE_TAG];
+      const normalizedTags = tags.map((tag) => String(tag || "").trim().toLowerCase()).filter(Boolean);
+      return normalizedTags.every((tag) => !disabledTagSet.has(tag));
+    });
+  const selectedResultsByTag = eligibleResults.slice(0, runtimeConfig.maxSimilarities);
+
+  const evidenceQuality = getEvidenceQuality(selectedResultsByTag, runtimeConfig.minSimilarities);
 
   return {
-    results: selectedResultsWithTags,
+    results: selectedResultsByTag,
     evidenceQuality,
-    hasSufficientEvidence: selectedResultsWithTags.length >= runtimeConfig.minSimilarities,
+    hasSufficientEvidence: selectedResultsByTag.length >= runtimeConfig.minSimilarities,
     ragContextPackage: buildRagContextPackage({
-      results: selectedResultsWithTags,
+      results: selectedResultsByTag,
       userMessage: prompt,
       evidenceQuality,
     }),
@@ -938,7 +955,7 @@ async function handlePrompt(req, res) {
 
   let searchResult;
   try {
-    searchResult = await searchKnowledgeBase(promptForRetrieval);
+    searchResult = await searchKnowledgeBase(promptForRetrieval, sessionId);
   } catch (error) {
     clearAssistantChainProgress(sessionId);
     throw error;
@@ -1438,8 +1455,10 @@ async function handlePersonalization(req, res) {
   }
 }
 
-async function handleFiles(_req, res) {
+async function handleFiles(req, res, url) {
+  const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
   const rows = await listFileMetadata();
+  const tagFilterState = await getSessionTagFilterState(sessionId);
 
   const payload = rows.map((row) => ({
     path: row.file_path,
@@ -1455,10 +1474,59 @@ async function handleFiles(_req, res) {
   json(res, 200, {
     contentPath: CONTENT_PATH,
     defaultTag: DEFAULT_FILE_TAG,
+    tagFilters: tagFilterState,
     files: payload,
     totalFiles: payload.length,
     embeddedFiles: payload.filter((file) => file.embedded).length,
   });
+}
+
+async function handleTagFilters(req, res, url) {
+  const requestSessionId = req.method === "GET"
+    ? String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session"
+    : null;
+
+  if (req.method === "GET") {
+    const tagFilters = await getSessionTagFilterState(requestSessionId);
+    json(res, 200, {
+      sessionId: requestSessionId,
+      tagFilters,
+    });
+    return;
+  }
+
+  if (req.method === "PATCH") {
+    const body = await readJsonBody(req);
+    const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+    const tag = String(body.tag || "").trim().toLowerCase();
+    const enabled = body.enabled !== false;
+
+    if (!tag) {
+      json(res, 400, { ok: false, error: "Missing 'tag' in request body." });
+      return;
+    }
+
+    const current = await getSessionTagFilterState(sessionId);
+    const disabledSet = new Set(Array.isArray(current.disabledTags) ? current.disabledTags : []);
+    if (enabled) {
+      disabledSet.delete(tag);
+    } else {
+      disabledSet.add(tag);
+    }
+
+    const nextState = await updateSessionTagFilterState(sessionId, {
+      disabledTags: Array.from(disabledSet),
+    });
+
+    json(res, 200, {
+      ok: true,
+      sessionId,
+      tagFilters: nextState,
+    });
+    return;
+  }
+
+  json(res, 405, { ok: false, error: "Method not allowed" });
 }
 
 async function handleFileTags(req, res) {
@@ -1507,6 +1575,7 @@ const server = http.createServer(async (req, res) => {
     const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
     const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
     const isFileTagsRoute = ["/api/files/tags", "/internal/retriever/files/tags"].includes(url.pathname);
+    const isTagFiltersRoute = ["/api/files/tag-filters", "/internal/retriever/files/tag-filters"].includes(url.pathname);
     const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
     const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
     const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
@@ -1520,7 +1589,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && isFilesRoute) {
-      await handleFiles(req, res);
+      await handleFiles(req, res, url);
+      return;
+    }
+
+    if (isTagFiltersRoute && (req.method === "GET" || req.method === "PATCH")) {
+      await handleTagFilters(req, res, url);
       return;
     }
 
@@ -1619,6 +1693,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, PATCH /internal/retriever/files/tags, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, PATCH /internal/retriever/files/tags, GET|PATCH /internal/retriever/files/tag-filters, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
   );
 });

@@ -134,6 +134,7 @@ export function renderPanelContent({
   tagFilterRows = [],
   tagFilterEnabledByTag = {},
   toggleTagFilter,
+  isTagFilterSaving = false,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
@@ -589,6 +590,7 @@ export function renderPanelContent({
                 React.createElement("input", {
                   type: "checkbox",
                   checked: enabled,
+                  disabled: isTagFilterSaving || interactionDisabled,
                   onChange: () => toggleTagFilter?.(row.tag),
                 }),
                 React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
