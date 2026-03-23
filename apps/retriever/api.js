@@ -1454,6 +1454,7 @@ async function handleFiles(_req, res) {
 
   json(res, 200, {
     contentPath: CONTENT_PATH,
+    defaultTag: DEFAULT_FILE_TAG,
     files: payload,
     totalFiles: payload.length,
     embeddedFiles: payload.filter((file) => file.embedded).length,

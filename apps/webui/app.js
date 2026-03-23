@@ -84,10 +84,12 @@ const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
   { id: "settings", label: "Settings", command: "/config" },
+  { id: "filter", label: "Filter" },
   { id: "info", label: "Info", command: "/info" },
   { id: "archive", label: "Archive" },
   { id: "help", label: "Help", command: "/help" },
 ];
+const DEFAULT_FILE_TAG_LABEL = "default";
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -329,6 +331,7 @@ function App() {
   const [isNicknameDirty, setIsNicknameDirty] = useState(false);
   const [isOccupationDirty, setIsOccupationDirty] = useState(false);
   const [isMoreAboutUserDirty, setIsMoreAboutUserDirty] = useState(false);
+  const [tagFilterEnabledByTag, setTagFilterEnabledByTag] = useState({});
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -1263,6 +1266,16 @@ function App() {
           responseType: null,
           configView: null,
         };
+      } else if (selectedTab.id === "filter") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/filter",
+          title: "Filter",
+          content: null,
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
       } else {
         const payload = await fetchPanelCommand(selectedTab.command);
         nextPanel = buildPanelDataFromCommand(selectedTab.command, payload);
@@ -1667,6 +1680,48 @@ function App() {
   const retrieverStatus = normalizeStatusBadge(statusData?.services?.retriever?.role || statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
+  const defaultFileTag = String(filesData?.defaultTag || DEFAULT_FILE_TAG_LABEL).trim().toLowerCase() || DEFAULT_FILE_TAG_LABEL;
+  const tagFilterRows = useMemo(() => {
+    const usageByTag = new Map();
+    for (const file of libraryFiles) {
+      const fileTags = Array.isArray(file?.tags) ? file.tags : [];
+      const normalizedTags = new Set(fileTags
+        .map((tag) => String(tag || "").trim().toLowerCase())
+        .filter(Boolean));
+      if (normalizedTags.size === 0) {
+        normalizedTags.add(defaultFileTag);
+      }
+      for (const tag of normalizedTags) {
+        usageByTag.set(tag, (usageByTag.get(tag) || 0) + 1);
+      }
+    }
+    if (!usageByTag.has(defaultFileTag)) {
+      usageByTag.set(defaultFileTag, 0);
+    }
+    return Array.from(usageByTag.entries())
+      .map(([tag, fileCount]) => ({ tag, fileCount }))
+      .sort((left, right) => left.tag.localeCompare(right.tag));
+  }, [libraryFiles, defaultFileTag]);
+
+  useEffect(() => {
+    setTagFilterEnabledByTag((previous) => {
+      const next = { ...previous };
+      let changed = false;
+      for (const row of tagFilterRows) {
+        if (typeof next[row.tag] !== "boolean") {
+          next[row.tag] = true;
+          changed = true;
+        }
+      }
+      for (const tag of Object.keys(next)) {
+        if (!tagFilterRows.some((row) => row.tag === tag)) {
+          delete next[tag];
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [tagFilterRows]);
   const managedLibraryFiles = Array.isArray(libraryManagedData?.files) ? libraryManagedData.files : [];
   const managedByPath = new Map(managedLibraryFiles.map((file) => [file.path, file]));
   const retrieverRows = libraryFiles.map((file) => {
@@ -3083,6 +3138,12 @@ function App() {
                       saveNickname,
                       saveOccupation,
                       saveMoreAboutUser,
+                      tagFilterRows,
+                      tagFilterEnabledByTag,
+                      toggleTagFilter: (tag) => setTagFilterEnabledByTag((previous) => ({
+                        ...previous,
+                        [tag]: !(previous[tag] ?? true),
+                      })),
                       icon,
                     })
                     : React.createElement("p", null, "Select a section.")

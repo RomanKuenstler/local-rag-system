@@ -131,6 +131,9 @@ export function renderPanelContent({
   saveNickname,
   saveOccupation,
   saveMoreAboutUser,
+  tagFilterRows = [],
+  tagFilterEnabledByTag = {},
+  toggleTagFilter,
   icon,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
@@ -555,6 +558,46 @@ export function renderPanelContent({
     );
   }
 
+
+  if (panelData.command === "/filter") {
+    const rows = Array.isArray(tagFilterRows) ? tagFilterRows : [];
+    return React.createElement(
+      "section",
+      { className: "filter-table-wrapper" },
+      React.createElement(
+        "div",
+        { className: "filter-table", role: "table", "aria-label": "Tag filters" },
+        React.createElement(
+          "div",
+          { className: "filter-table-head", role: "row" },
+          React.createElement("strong", { role: "columnheader" }, "Tag"),
+          React.createElement("strong", { role: "columnheader" }, "Files"),
+          React.createElement("strong", { role: "columnheader" }, "Action")
+        ),
+        rows.length === 0
+          ? React.createElement("p", { className: "archive-empty" }, "No tags available yet.")
+          : rows.map((row) => {
+            const enabled = tagFilterEnabledByTag[row.tag] ?? true;
+            return React.createElement(
+              "div",
+              { key: row.tag, className: "filter-table-row", role: "row" },
+              React.createElement("strong", { className: "filter-tag-name" }, row.tag),
+              React.createElement("span", { className: "filter-tag-count" }, String(row.fileCount || 0)),
+              React.createElement(
+                "label",
+                { className: "filter-switch", title: enabled ? "Disable tag" : "Enable tag" },
+                React.createElement("input", {
+                  type: "checkbox",
+                  checked: enabled,
+                  onChange: () => toggleTagFilter?.(row.tag),
+                }),
+                React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+              )
+            );
+          })
+      )
+    );
+  }
   if ((panelData.command === "/help" || panelData.command === "?") && parsedHelpPanel) {
     return React.createElement(
       "div",
