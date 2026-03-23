@@ -75,7 +75,7 @@ const PROMPT_ATTACHMENT_RULES = {
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv"],
 };
 const LIBRARY_UPLOAD_RULES = {
-  maxFiles: 10,
+  maxFiles: 5,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
@@ -296,6 +296,8 @@ function App() {
   const [libraryManagedData, setLibraryManagedData] = useState(null);
   const [libraryNotice, setLibraryNotice] = useState("");
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [libraryUploadDrafts, setLibraryUploadDrafts] = useState([]);
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -333,7 +335,7 @@ function App() {
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
   const promptFileInputRef = useRef(null);
-  const libraryFileInputRef = useRef(null);
+  const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
@@ -778,36 +780,56 @@ function App() {
     };
   }
 
-  async function uploadLibraryFiles(files) {
-    const queued = files.map((file) => ({
+  function parseLibraryTagInput(input) {
+    const raw = String(input || "");
+    const normalized = raw
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean);
+    return [...new Set(normalized)];
+  }
+
+  async function uploadLibraryFiles(fileDrafts) {
+    const draftsWithTags = fileDrafts.map((draft) => ({
+      ...draft,
+      parsedTags: parseLibraryTagInput(draft.tagsInput),
+    }));
+    const queued = draftsWithTags.map((draft) => ({
       tempId: crypto.randomUUID(),
-      path: `_library/${file.name}`,
-      originalName: file.name,
+      path: `_library/${draft.file.name}`,
+      originalName: draft.file.name,
       uploadStatus: "uploading",
       embedded: false,
       chunkCount: null,
-      sizeBytes: file.size,
-      extension: getFileExtension(file.name),
+      sizeBytes: draft.file.size,
+      extension: getFileExtension(draft.file.name),
       isVolatile: true,
       lastError: null,
       canDelete: false,
+      tags: draft.parsedTags.length > 0 ? draft.parsedTags : ["default"],
       updatedAt: new Date().toISOString(),
     }));
     setPendingLibraryUploads((previous) => queued.concat(previous));
 
-    const uploadResults = await Promise.all(files.map(async (file) => {
-      const contentBase64 = await fileToBase64(file);
-      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: file.name,
-          contentBase64,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      return { ok: response.ok, payload, fileName: file.name };
-    }));
+    const requestFiles = await Promise.all(draftsWithTags.map(async (draft) => ({
+      name: draft.file.name,
+      contentBase64: await fileToBase64(draft.file),
+      tags: draft.parsedTags,
+    })));
+
+    const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files: requestFiles }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    const uploadResults = Array.isArray(payload.files)
+      ? payload.files
+      : fileDrafts.map((draft) => ({
+        ok: false,
+        fileName: draft.file.name,
+        error: payload?.error || "Upload failed",
+      }));
 
     setPendingLibraryUploads((previous) => previous.map((row) => {
       const result = uploadResults.find((item) => item.fileName === row.originalName);
@@ -816,14 +838,15 @@ function App() {
         return {
           ...row,
           uploadStatus: "error",
-          lastError: result.payload?.error || "Upload failed",
+          lastError: result.error || "Upload failed",
           canDelete: false,
           updatedAt: new Date().toISOString(),
         };
       }
       return {
         ...row,
-        path: result.payload?.file?.path || row.path,
+        path: result.file?.path || row.path,
+        tags: Array.isArray(result.file?.tags) ? result.file.tags : row.tags,
         uploadStatus: "embedding",
         canDelete: true,
         updatedAt: new Date().toISOString(),
@@ -840,7 +863,20 @@ function App() {
     await refreshStatus();
   }
 
-  async function handleLibraryFileSelection(event) {
+  function openLibraryUploadDialog() {
+    setLibraryUploadDrafts([]);
+    setIsUploadDialogOpen(true);
+  }
+
+  function closeLibraryUploadDialog() {
+    setIsUploadDialogOpen(false);
+    setLibraryUploadDrafts([]);
+    if (libraryUploadDialogInputRef.current) {
+      libraryUploadDialogInputRef.current.value = "";
+    }
+  }
+
+  function handleLibraryUploadDraftSelection(event) {
     const selectedFiles = Array.from(event.target.files || []);
     event.target.value = "";
 
@@ -849,8 +885,25 @@ function App() {
     if (validation.validFiles.length === 0) {
       return;
     }
+    setLibraryUploadDrafts(validation.validFiles.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      tagsInput: "",
+    })));
+  }
 
-    await uploadLibraryFiles(validation.validFiles);
+  function setLibraryDraftTags(draftId, nextInput) {
+    setLibraryUploadDrafts((previous) => previous.map((draft) => (
+      draft.id === draftId ? { ...draft, tagsInput: nextInput } : draft
+    )));
+  }
+
+  async function confirmLibraryUploadDialog() {
+    if (libraryUploadDrafts.length === 0) {
+      return;
+    }
+    await uploadLibraryFiles(libraryUploadDrafts);
+    closeLibraryUploadDialog();
   }
 
   async function confirmDeleteLibraryFile() {
@@ -2227,18 +2280,18 @@ function App() {
                 {
                   type: "button",
                   className: "restart-button library-upload-button",
-                  onClick: () => libraryFileInputRef.current?.click(),
+                  onClick: openLibraryUploadDialog,
                 },
                 icon(fileUploadIconPath),
                 "Upload"
               ),
               React.createElement("input", {
-                ref: libraryFileInputRef,
+                ref: libraryUploadDialogInputRef,
                 type: "file",
                 className: "composer-file-input",
                 multiple: true,
                 accept: LIBRARY_UPLOAD_RULES.allowedExtensions.join(","),
-                onChange: handleLibraryFileSelection,
+                onChange: handleLibraryUploadDraftSelection,
                 "aria-hidden": "true",
                 tabIndex: -1,
               })
@@ -2438,13 +2491,9 @@ function App() {
                               ),
                               Array.isArray(match.tags) && match.tags.length > 0
                                 ? React.createElement(
-                                  "div",
+                                  "p",
                                   { className: "assistant-evidence-tags" },
-                                  ...match.tags.map((tag) => React.createElement(
-                                    "span",
-                                    { key: `${message.id}-${match.rank}-${tag}`, className: "assistant-evidence-tag-line" },
-                                    `tag: ${tag}`
-                                  ))
+                                  `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
                                 )
                                 : null,
                               match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
@@ -2627,6 +2676,81 @@ function App() {
           React.createElement("span", { className: "spinner", "aria-hidden": "true" }),
           React.createElement("strong", null, "Embedding in progress"),
           React.createElement("p", null, "Your documents are being indexed. You can browse dialogs while indexing completes.")
+        )
+      )
+      : null,
+    isUploadDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: closeLibraryUploadDialog,
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-upload-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Upload files",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Upload files"),
+          libraryUploadDrafts.length === 0
+            ? React.createElement(
+              "div",
+              { className: "library-upload-empty" },
+              React.createElement(
+                "button",
+                {
+                  type: "button",
+                  className: "library-upload-add",
+                  onClick: () => libraryUploadDialogInputRef.current?.click(),
+                },
+                icon(fileUploadIconPath),
+                "Add files"
+              )
+            )
+            : React.createElement(
+              "div",
+              { className: "library-upload-list" },
+              ...libraryUploadDrafts.map((draft) => React.createElement(
+                "div",
+                { key: draft.id, className: "library-upload-row" },
+                React.createElement("span", { className: "library-upload-name" }, draft.file.name),
+                React.createElement("input", {
+                  type: "text",
+                  className: "library-upload-tags-input",
+                  placeholder: "tags, separated, by, commas",
+                  value: draft.tagsInput,
+                  onChange: (event) => setLibraryDraftTags(draft.id, event.target.value),
+                })
+              ))
+            ),
+          React.createElement(
+            "div",
+            { className: "library-upload-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-cancel",
+                onClick: closeLibraryUploadDialog,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-confirm",
+                onClick: confirmLibraryUploadDialog,
+                disabled: libraryUploadDrafts.length === 0,
+              },
+              icon(fileUploadIconPath),
+              "Upload"
+            )
+          )
         )
       )
       : null,
