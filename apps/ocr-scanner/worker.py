@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
-"""OCR scanner service for PDF jobs.
-
-This service accepts OCR jobs over HTTP, executes extraction/OCR in-process,
-and exposes job status + result text retrieval endpoints.
-"""
+"""OCR scanner microservice for PDF requests from other services."""
 
 from __future__ import annotations
 
 import base64
 import json
 import os
-import threading
-import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -25,40 +18,9 @@ from pypdf import PdfReader
 SUPPORTED_EXTENSIONS = {".pdf"}
 DEFAULT_THRESHOLD = 150
 DEFAULT_LANGUAGE = "eng"
+REQUEST_TYPES = {"library_pdf", "prompt_pdf"}
 
 app = Flask(__name__)
-job_lock = threading.Lock()
-jobs: dict[str, "OcrJob"] = {}
-
-
-@dataclass
-class OcrJob:
-    job_id: str
-    status: str
-    created_at: str
-    updated_at: str
-    source_type: str
-    source_value: str
-    language: str
-    minimum_extracted_chars: int
-    extracted_text: str = ""
-    ocr_performed: bool = False
-    page_count: int = 0
-    error: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "job_id": self.job_id,
-            "status": self.status,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-            "source_type": self.source_type,
-            "language": self.language,
-            "minimum_extracted_chars": self.minimum_extracted_chars,
-            "ocr_performed": self.ocr_performed,
-            "page_count": self.page_count,
-            "error": self.error,
-        }
 
 
 def utc_timestamp() -> str:
@@ -74,21 +36,12 @@ def is_allowed_pdf(path: Path) -> bool:
     return path.suffix.lower() in SUPPORTED_EXTENSIONS
 
 
-def safe_resolve_path(path_str: str) -> Path:
-    candidate = Path(path_str).expanduser().resolve()
-    input_dir = Path(os.getenv("OCR_INPUT_DIR", "/app/data")).resolve()
-    upload_dir = Path(os.getenv("OCR_UPLOAD_DIR", "/app/upload")).resolve()
-    if input_dir in candidate.parents or upload_dir in candidate.parents:
-        return candidate
-    raise ValueError("pdf_path must be inside OCR_INPUT_DIR or OCR_UPLOAD_DIR")
-
-
 def extract_pdf_text(path: Path) -> tuple[str, int]:
     reader = PdfReader(str(path))
-    pages = []
+    page_texts = []
     for page in reader.pages:
-        pages.append(page.extract_text() or "")
-    return "\n".join(pages).strip(), len(reader.pages)
+        page_texts.append(page.extract_text() or "")
+    return "\n".join(page_texts).strip(), len(reader.pages)
 
 
 def ocr_pdf_text(path: Path, language: str) -> tuple[str, int]:
@@ -96,70 +49,66 @@ def ocr_pdf_text(path: Path, language: str) -> tuple[str, int]:
     page_texts: list[str] = []
     for page_index in range(len(document)):
         page = document.get_page(page_index)
-        bitmap = page.render(scale=2)
-        pil_image = bitmap.to_pil()
-        page_texts.append(pytesseract.image_to_string(pil_image, lang=language).strip())
+        image = page.render(scale=2).to_pil()
+        page_texts.append(pytesseract.image_to_string(image, lang=language).strip())
         page.close()
     document.close()
     return "\n".join(page_texts).strip(), len(page_texts)
 
 
-def process_job(job_id: str) -> None:
-    with job_lock:
-        job = jobs[job_id]
-        job.status = "running"
-        job.updated_at = utc_timestamp()
+def safe_join(base_dir: Path, relative_path: str) -> Path:
+    candidate = (base_dir / relative_path).resolve()
+    if base_dir == candidate or base_dir in candidate.parents:
+        return candidate
+    raise ValueError("Relative path escapes allowed base directory")
 
-    tmp_pdf: Path | None = None
-    try:
-        if job.source_type == "pdf_path":
-            pdf_path = safe_resolve_path(job.source_value)
-        else:
-            decoded = base64.b64decode(job.source_value)
-            with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(decoded)
-                tmp_pdf = Path(tmp.name)
-            pdf_path = tmp_pdf
 
-        if not pdf_path.exists():
-            raise FileNotFoundError("PDF file not found")
-        if not is_allowed_pdf(pdf_path):
-            raise ValueError("Only .pdf files are supported for now")
+def resolve_pdf_path_for_request(payload: dict[str, object]) -> tuple[Path, str, bool]:
+    request_type = str(payload.get("request_type") or "").strip()
+    if request_type not in REQUEST_TYPES:
+        raise ValueError("request_type must be one of: library_pdf, prompt_pdf")
 
-        extracted_text, extracted_pages = extract_pdf_text(pdf_path)
-        if len(extracted_text) >= job.minimum_extracted_chars:
-            final_text = extracted_text
-            ocr_performed = False
-            page_count = extracted_pages
-        else:
-            final_text, page_count = ocr_pdf_text(pdf_path, job.language)
-            ocr_performed = True
+    library_dir = Path(os.getenv("OCR_LIBRARY_DIR", "/app/data/_library")).resolve()
+    upload_dir = Path(os.getenv("OCR_UPLOAD_DIR", "/app/upload")).resolve()
 
-        with job_lock:
-            current = jobs[job_id]
-            current.status = "completed"
-            current.updated_at = utc_timestamp()
-            current.extracted_text = final_text
-            current.ocr_performed = ocr_performed
-            current.page_count = page_count
+    if request_type == "library_pdf":
+        relative_path = str(payload.get("pdf_relative_path") or "").strip()
+        if not relative_path:
+            raise ValueError("library_pdf requires pdf_relative_path")
+        return safe_join(library_dir, relative_path), request_type, False
 
-        log_event(
-            "ocr.job_completed",
-            job_id=job_id,
-            page_count=page_count,
-            ocr_performed=ocr_performed,
-            text_chars=len(final_text),
-        )
-    except Exception as exc:
-        with job_lock:
-            current = jobs[job_id]
-            current.status = "failed"
-            current.updated_at = utc_timestamp()
-            current.error = str(exc)
-        log_event("ocr.job_failed", job_id=job_id, error=str(exc))
-    finally:
-        if tmp_pdf is not None and tmp_pdf.exists():
-            tmp_pdf.unlink()
+    prompt_relative_path = str(payload.get("prompt_pdf_relative_path") or "").strip()
+    prompt_pdf_base64 = str(payload.get("pdf_base64") or "").strip()
+
+    has_relative_path = bool(prompt_relative_path)
+    has_base64 = bool(prompt_pdf_base64)
+    if has_relative_path == has_base64:
+        raise ValueError("prompt_pdf requires exactly one of prompt_pdf_relative_path or pdf_base64")
+
+    if has_relative_path:
+        return safe_join(upload_dir, prompt_relative_path), request_type, False
+
+    with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(base64.b64decode(prompt_pdf_base64))
+        return Path(tmp.name), request_type, True
+
+
+def run_pdf_scan(
+    pdf_path: Path,
+    language: str,
+    minimum_extracted_chars: int,
+) -> tuple[str, bool, int]:
+    if not pdf_path.exists():
+        raise FileNotFoundError("PDF file not found")
+    if not is_allowed_pdf(pdf_path):
+        raise ValueError("Only .pdf files are supported")
+
+    extracted_text, extracted_pages = extract_pdf_text(pdf_path)
+    if len(extracted_text) >= minimum_extracted_chars:
+        return extracted_text, False, extracted_pages
+
+    ocr_text, ocr_pages = ocr_pdf_text(pdf_path, language)
+    return ocr_text, True, ocr_pages
 
 
 @app.get("/healthz")
@@ -167,17 +116,10 @@ def healthz():
     return jsonify({"status": "ok", "service": "ocr-scanner"})
 
 
-@app.post("/ocr/jobs")
-def create_job():
+@app.post("/ocr/scan")
+def scan_pdf():
     payload = request.get_json(silent=True) or {}
-    pdf_path = payload.get("pdf_path")
-    pdf_base64 = payload.get("pdf_base64")
-    if bool(pdf_path) == bool(pdf_base64):
-        return jsonify({"error": "Provide exactly one of pdf_path or pdf_base64"}), 400
-
-    source_type = "pdf_path" if pdf_path else "pdf_base64"
-    source_value = str(pdf_path or pdf_base64)
-    language = str(payload.get("language", DEFAULT_LANGUAGE))
+    language = str(payload.get("language", DEFAULT_LANGUAGE)).strip() or DEFAULT_LANGUAGE
     minimum_extracted_chars = int(
         payload.get(
             "minimum_extracted_chars",
@@ -185,66 +127,44 @@ def create_job():
         )
     )
 
-    job_id = str(uuid.uuid4())
-    now = utc_timestamp()
-    job = OcrJob(
-        job_id=job_id,
-        status="queued",
-        created_at=now,
-        updated_at=now,
-        source_type=source_type,
-        source_value=source_value,
-        language=language,
-        minimum_extracted_chars=minimum_extracted_chars,
-    )
+    temp_file: Path | None = None
+    try:
+        pdf_path, request_type, is_temp_file = resolve_pdf_path_for_request(payload)
+        temp_file = pdf_path if is_temp_file else None
+        text, ocr_performed, page_count = run_pdf_scan(pdf_path, language, minimum_extracted_chars)
 
-    with job_lock:
-        jobs[job_id] = job
-
-    worker = threading.Thread(target=process_job, args=(job_id,), daemon=True)
-    worker.start()
-
-    log_event("ocr.job_queued", job_id=job_id, source_type=source_type, language=language)
-    return jsonify({"job_id": job_id, "status": "queued"}), 202
-
-
-@app.get("/ocr/jobs/<job_id>")
-def get_job(job_id: str):
-    with job_lock:
-        job = jobs.get(job_id)
-    if not job:
-        return jsonify({"error": "job_not_found"}), 404
-    return jsonify(job.to_dict())
-
-
-@app.get("/ocr/jobs/<job_id>/result")
-def get_job_result(job_id: str):
-    with job_lock:
-        job = jobs.get(job_id)
-    if not job:
-        return jsonify({"error": "job_not_found"}), 404
-    if job.status != "completed":
-        return jsonify({"error": "job_not_completed", "status": job.status}), 409
-    return jsonify(
-        {
-            "job_id": job.job_id,
-            "status": job.status,
-            "ocr_performed": job.ocr_performed,
-            "page_count": job.page_count,
-            "text": job.extracted_text,
-            "text_chars": len(job.extracted_text),
+        response = {
+            "request_type": request_type,
+            "ocr_performed": ocr_performed,
+            "page_count": page_count,
+            "text_chars": len(text),
+            "text": text,
         }
-    )
+        log_event(
+            "ocr.scan_completed",
+            request_type=request_type,
+            ocr_performed=ocr_performed,
+            page_count=page_count,
+            text_chars=len(text),
+            source_path=str(pdf_path),
+        )
+        return jsonify(response), 200
+    except Exception as exc:
+        log_event("ocr.scan_failed", error=str(exc))
+        return jsonify({"error": str(exc)}), 400
+    finally:
+        if temp_file is not None and temp_file.exists():
+            temp_file.unlink()
 
 
 def main() -> None:
-    port = int(os.getenv("OCR_API_PORT", "3300"))
     host = os.getenv("OCR_API_HOST", "0.0.0.0")
+    port = int(os.getenv("OCR_API_PORT", "3300"))
     log_event(
-        "ocr.worker_started",
+        "ocr.service_started",
         host=host,
         port=port,
-        supported_extensions=sorted(SUPPORTED_EXTENSIONS),
+        request_types=sorted(REQUEST_TYPES),
     )
     app.run(host=host, port=port, debug=False)
 

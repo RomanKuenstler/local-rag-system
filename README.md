@@ -9,7 +9,7 @@ This stack runs with Docker Compose and includes:
 - `backend` – frontend-facing API gateway.
 - `retriever` – chat/retrieval API, assistant-mode logic, prompt orchestration.
 - `embedder` – indexing worker for files in `./data`.
-- `ocr-scanner` – Python OCR worker scaffold for PDFs/images that need OCR fallback.
+- `ocr-scanner` – Python OCR service for scanned/text-poor PDFs from library and prompt uploads.
 - `qdrant` – vector database for chunk embeddings.
 - `postgres` – chat/session/runtime/index metadata persistence.
 - `webui` – lightweight browser UI (nginx + static JS).
@@ -30,9 +30,12 @@ Endpoints:
 OCR scanner endpoints:
 
 - `GET /healthz`
-- `POST /ocr/jobs`
-- `GET /ocr/jobs/:jobId`
-- `GET /ocr/jobs/:jobId/result`
+- `POST /ocr/scan`
+
+`POST /ocr/scan` request types:
+
+- `library_pdf` → pass `pdf_relative_path` under `data/_library`.
+- `prompt_pdf` → pass either `prompt_pdf_relative_path` under `upload/` or `pdf_base64`.
 
 ## Core API endpoints
 

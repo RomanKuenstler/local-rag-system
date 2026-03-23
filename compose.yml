@@ -120,7 +120,7 @@ services:
     environment:
       OCR_API_HOST: 0.0.0.0
       OCR_API_PORT: 3300
-      OCR_INPUT_DIR: /app/data
+      OCR_LIBRARY_DIR: /app/data/_library
       OCR_UPLOAD_DIR: /app/upload
       OCR_PDF_MIN_EXTRACTED_CHARS: 150
     volumes:
