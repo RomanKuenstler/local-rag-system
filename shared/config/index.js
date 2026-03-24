@@ -24,6 +24,7 @@ export const POSTGRES_HOST = process.env.POSTGRES_HOST || "postgres";
 export const POSTGRES_PORT = parseInt(process.env.POSTGRES_PORT || "5432", 10);
 export const POSTGRES_DB = process.env.POSTGRES_DB || "rag";
 export const POSTGRES_USER = process.env.POSTGRES_USER || "rag";
+export const AUTH_PASSWORD_SALT = process.env.AUTH_PASSWORD_SALT || "xzy132";
 
 export const CHUNK_SIZE = parseInt(process.env.CHUNK_SIZE || "1200", 10);
 export const CHUNK_OVERLAP = parseInt(process.env.CHUNK_OVERLAP || "400", 10);

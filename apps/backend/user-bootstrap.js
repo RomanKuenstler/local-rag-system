@@ -1,11 +1,11 @@
 import fs from "fs/promises";
 import path from "path";
 import { dbQuery } from "../../shared/db/index.js";
+import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt } from "../../shared/src/auth.js";
 
 const DEFAULT_USERNAME = "default";
 const DEFAULT_DISPLAY_NAME = "Default User";
-const DEFAULT_PASSWORD_HASH = "__DISABLED__";
-const DEFAULT_PASSWORD_SALT = "__DEFAULT_SALT__";
+const DEFAULT_PASSWORD = "default";
 
 function normalizeConfiguredUsers(rawConfig) {
   const list = Array.isArray(rawConfig)
@@ -18,9 +18,8 @@ function normalizeConfiguredUsers(rawConfig) {
     .map((entry) => {
       const username = String(entry?.username || "").trim();
       const displayName = String(entry?.display_name || "").trim();
-      const passwordHash = String(entry?.password_hash || "").trim();
-      const passwordSalt = String(entry?.password_salt || "").trim();
-      if (!username || !displayName || !passwordHash || !passwordSalt) {
+      const password = String(entry?.password || "");
+      if (!username || !displayName || !password) {
         return null;
       }
       if (username === DEFAULT_USERNAME) {
@@ -29,23 +28,27 @@ function normalizeConfiguredUsers(rawConfig) {
       return {
         username,
         displayName,
-        passwordHash,
-        passwordSalt,
+        password,
       };
     })
     .filter(Boolean);
 }
 
 async function ensureDefaultUser() {
+  const globalSalt = getGlobalPasswordSalt();
+  const hashedDefaultPassword = hashPasswordWithGlobalSalt(DEFAULT_PASSWORD);
   const result = await dbQuery(
-    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, updated_at)
-     VALUES ($1, $2, $3, $4, TRUE, NOW())
+    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw, updated_at)
+     VALUES ($1, $2, $3, $4, TRUE, FALSE, NOW())
      ON CONFLICT (username) DO UPDATE
        SET display_name = EXCLUDED.display_name,
+           password_hash = EXCLUDED.password_hash,
+           password_salt = EXCLUDED.password_salt,
            is_active = TRUE,
+           require_changepw = FALSE,
            updated_at = NOW()
      RETURNING id`,
-    [DEFAULT_USERNAME, DEFAULT_DISPLAY_NAME, DEFAULT_PASSWORD_HASH, DEFAULT_PASSWORD_SALT]
+    [DEFAULT_USERNAME, DEFAULT_DISPLAY_NAME, hashedDefaultPassword, globalSalt]
   );
   return result.rows[0]?.id || null;
 }
@@ -68,16 +71,19 @@ export async function syncUsersFromConfigFile(filePath = path.resolve(process.cw
   await dbQuery("BEGIN");
   try {
     for (const user of configuredUsers) {
+      const passwordHash = hashPasswordWithGlobalSalt(user.password);
+      const globalSalt = getGlobalPasswordSalt();
       await dbQuery(
-        `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, updated_at)
-         VALUES ($1, $2, $3, $4, TRUE, NOW())
+        `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw, updated_at)
+         VALUES ($1, $2, $3, $4, TRUE, TRUE, NOW())
          ON CONFLICT (username) DO UPDATE
            SET display_name = EXCLUDED.display_name,
                password_hash = EXCLUDED.password_hash,
                password_salt = EXCLUDED.password_salt,
                is_active = TRUE,
+               require_changepw = TRUE,
                updated_at = NOW()`,
-        [user.username, user.displayName, user.passwordHash, user.passwordSalt]
+        [user.username, user.displayName, passwordHash, globalSalt]
       );
     }
 

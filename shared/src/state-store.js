@@ -1,6 +1,7 @@
 import { getDefaultPersonalizationSettings, normalizePersonalizationSettings } from "./personalization.js";
 import { dbQuery } from "../db/index.js";
 import { DEFAULT_FILE_TAG } from "../config/index.js";
+import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt } from "./auth.js";
 
 function normalizeFileTags(tags) {
   const input = Array.isArray(tags) ? tags : [];
@@ -107,11 +108,20 @@ function buildSessionSettingKey(sessionId, settingName) {
 }
 
 async function getDefaultUserId() {
+  const globalSalt = getGlobalPasswordSalt();
+  const defaultHash = hashPasswordWithGlobalSalt("default");
   const ensured = await dbQuery(
-    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active)
-     VALUES ('default', 'Default User', '__DISABLED__', '__DEFAULT_SALT__', TRUE)
-     ON CONFLICT (username) DO UPDATE SET username = EXCLUDED.username
+    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw)
+     VALUES ('default', 'Default User', $1, $2, TRUE, FALSE)
+     ON CONFLICT (username) DO UPDATE
+       SET username = EXCLUDED.username,
+           password_hash = EXCLUDED.password_hash,
+           password_salt = EXCLUDED.password_salt,
+           is_active = TRUE,
+           require_changepw = FALSE
      RETURNING id`
+    ,
+    [defaultHash, globalSalt]
   );
   return ensured.rows[0]?.id;
 }
