@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OCR scanner microservice for PDF requests from other services."""
+"""OCR scanner microservice for PDF and image requests from other services."""
 
 from __future__ import annotations
 
@@ -14,12 +14,14 @@ from tempfile import NamedTemporaryFile
 import fitz
 import pypdfium2 as pdfium
 import pytesseract
+from PIL import Image
 from flask import Flask, jsonify, request
 
-SUPPORTED_EXTENSIONS = {".pdf"}
+SUPPORTED_PDF_EXTENSIONS = {".pdf"}
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 DEFAULT_THRESHOLD = 150
 DEFAULT_LANGUAGE = "eng"
-REQUEST_TYPES = {"library_pdf", "prompt_pdf"}
+REQUEST_TYPES = {"library_pdf", "prompt_pdf", "library_image", "prompt_image"}
 
 app = Flask(__name__)
 
@@ -34,7 +36,11 @@ def log_event(event: str, **fields: object) -> None:
 
 
 def is_allowed_pdf(path: Path) -> bool:
-    return path.suffix.lower() in SUPPORTED_EXTENSIONS
+    return path.suffix.lower() in SUPPORTED_PDF_EXTENSIONS
+
+
+def is_allowed_image(path: Path) -> bool:
+    return path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
 
 
 def detect_columns(blocks: list[dict[str, float]], page_width: float) -> int:
@@ -165,10 +171,10 @@ def safe_join(base_dir: Path, relative_path: str) -> Path:
     raise ValueError("Relative path escapes allowed base directory")
 
 
-def resolve_pdf_path_for_request(payload: dict[str, object]) -> tuple[Path, str, bool]:
+def resolve_document_path_for_request(payload: dict[str, object]) -> tuple[Path, str, bool]:
     request_type = str(payload.get("request_type") or "").strip()
     if request_type not in REQUEST_TYPES:
-        raise ValueError("request_type must be one of: library_pdf, prompt_pdf")
+        raise ValueError("request_type must be one of: library_pdf, prompt_pdf, library_image, prompt_image")
 
     content_dir = Path(os.getenv("OCR_CONTENT_DIR", "/app/data")).resolve()
     upload_dir = Path(os.getenv("OCR_UPLOAD_DIR", "/app/upload")).resolve()
@@ -179,19 +185,47 @@ def resolve_pdf_path_for_request(payload: dict[str, object]) -> tuple[Path, str,
             raise ValueError("library_pdf requires pdf_relative_path")
         return safe_join(content_dir, relative_path), request_type, False
 
-    prompt_relative_path = str(payload.get("prompt_pdf_relative_path") or "").strip()
-    prompt_pdf_base64 = str(payload.get("pdf_base64") or "").strip()
+    if request_type == "prompt_pdf":
+        prompt_relative_path = str(payload.get("prompt_pdf_relative_path") or "").strip()
+        prompt_pdf_base64 = str(payload.get("pdf_base64") or "").strip()
+
+        has_relative_path = bool(prompt_relative_path)
+        has_base64 = bool(prompt_pdf_base64)
+        if has_relative_path == has_base64:
+            raise ValueError("prompt_pdf requires exactly one of prompt_pdf_relative_path or pdf_base64")
+
+        if has_relative_path:
+            return safe_join(upload_dir, prompt_relative_path), request_type, False
+
+        with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(base64.b64decode(prompt_pdf_base64))
+            return Path(tmp.name), request_type, True
+
+    if request_type == "library_image":
+        relative_path = str(payload.get("image_relative_path") or "").strip()
+        if not relative_path:
+            raise ValueError("library_image requires image_relative_path")
+        return safe_join(content_dir, relative_path), request_type, False
+
+    prompt_relative_path = str(payload.get("prompt_image_relative_path") or "").strip()
+    prompt_image_base64 = str(payload.get("image_base64") or "").strip()
 
     has_relative_path = bool(prompt_relative_path)
-    has_base64 = bool(prompt_pdf_base64)
+    has_base64 = bool(prompt_image_base64)
     if has_relative_path == has_base64:
-        raise ValueError("prompt_pdf requires exactly one of prompt_pdf_relative_path or pdf_base64")
+        raise ValueError("prompt_image requires exactly one of prompt_image_relative_path or image_base64")
 
     if has_relative_path:
         return safe_join(upload_dir, prompt_relative_path), request_type, False
 
-    with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(base64.b64decode(prompt_pdf_base64))
+    extension = str(payload.get("image_extension") or ".png").strip().lower()
+    if not extension.startswith("."):
+        extension = f".{extension}"
+    if extension not in SUPPORTED_IMAGE_EXTENSIONS:
+        raise ValueError("image_extension must be one of: .png, .jpg, .jpeg, .webp")
+
+    with NamedTemporaryFile(delete=False, suffix=extension) as tmp:
+        tmp.write(base64.b64decode(prompt_image_base64))
         return Path(tmp.name), request_type, True
 
 
@@ -226,6 +260,31 @@ def run_pdf_scan(
     return ocr_text, True, ocr_pages, extraction_details
 
 
+def run_image_scan(
+    image_path: Path,
+    language: str,
+    minimum_extracted_chars: int,
+) -> tuple[str, int, dict[str, object], bool]:
+    if not image_path.exists():
+        raise FileNotFoundError("Image file not found")
+    if not is_allowed_image(image_path):
+        raise ValueError("Only .png, .jpg, .jpeg, and .webp files are supported")
+
+    with Image.open(str(image_path)) as image:
+        image_for_ocr = image.convert("RGB")
+        text = pytesseract.image_to_string(image_for_ocr, lang=language).strip()
+
+    quality = evaluate_text_quality(text, minimum_extracted_chars)
+    useful_text = quality["quality"] == "good"
+    extraction_details: dict[str, object] = {
+        "mode": "ocr_image",
+        "image_format": image_path.suffix.lower(),
+        "quality": quality,
+        "result_status": "ok" if useful_text else "no_useful_text",
+    }
+    return text, 1, extraction_details, useful_text
+
+
 @app.get("/healthz")
 def healthz():
     return jsonify({"status": "ok", "service": "ocr-scanner"})
@@ -244,11 +303,21 @@ def scan_pdf():
 
     temp_file: Path | None = None
     try:
-        pdf_path, request_type, is_temp_file = resolve_pdf_path_for_request(payload)
-        temp_file = pdf_path if is_temp_file else None
-        text, ocr_performed, page_count, extraction_details = run_pdf_scan(
-            pdf_path, language, minimum_extracted_chars
-        )
+        document_path, request_type, is_temp_file = resolve_document_path_for_request(payload)
+        temp_file = document_path if is_temp_file else None
+
+        if request_type in {"library_pdf", "prompt_pdf"}:
+            text, ocr_performed, page_count, extraction_details = run_pdf_scan(
+                document_path, language, minimum_extracted_chars
+            )
+            useful_text = True
+        else:
+            text, page_count, extraction_details, useful_text = run_image_scan(
+                document_path,
+                language,
+                minimum_extracted_chars,
+            )
+            ocr_performed = True
 
         response = {
             "status": "success",
@@ -257,15 +326,18 @@ def scan_pdf():
             "page_count": page_count,
             "text_chars": len(text),
             "text": text,
+            "useful_text": useful_text,
+            "extraction_status": "ok" if useful_text else "no_useful_text",
             "extraction_details": extraction_details,
         }
         log_event(
             "ocr.scan_completed",
             request_type=request_type,
             ocr_performed=ocr_performed,
+            useful_text=useful_text,
             page_count=page_count,
             text_chars=len(text),
-            source_path=str(pdf_path),
+            source_path=str(document_path),
         )
         return jsonify(response), 200
     except FileNotFoundError as exc:

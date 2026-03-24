@@ -72,7 +72,7 @@ const DEFAULT_PERSONALIZATION_PREFERENCES = {
 const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
 const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
 };
 const LIBRARY_UPLOAD_RULES = {
   maxFiles: 5,
