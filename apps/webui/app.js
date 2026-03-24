@@ -319,6 +319,13 @@ function App() {
   const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
   const [dialogTabError, setDialogTabError] = useState("");
   const [activeView, setActiveView] = useState(getInitialView);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticatedUsername, setAuthenticatedUsername] = useState("");
+  const [authenticatedDisplayName, setAuthenticatedDisplayName] = useState("");
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
   const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
@@ -371,6 +378,8 @@ function App() {
     : chatList;
   const activeChainProgress = statusData?.assistant?.chainProgress || null;
   const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
+  const trimmedLoginUsername = loginUsername.trim();
+  const isLoginFormValid = trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
 
   useEffect(() => {
     if (!isSending) {
@@ -476,6 +485,39 @@ function App() {
       };
     }
     return null;
+  }
+
+  async function submitLogin(event) {
+    event?.preventDefault?.();
+    if (!isLoginFormValid || isLoginSubmitting) return;
+
+    setLoginError("");
+    setIsLoginSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: trimmedLoginUsername,
+          password: loginPassword,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Sign in failed.");
+      }
+
+      const user = payload?.user || {};
+      setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
+      setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
+      setIsAuthenticated(true);
+      setLoginPassword("");
+      setLoginError("");
+    } catch (error) {
+      setLoginError(error.message || "Sign in failed.");
+    } finally {
+      setIsLoginSubmitting(false);
+    }
   }
 
   async function refreshStatus() {
@@ -621,6 +663,10 @@ function App() {
   }
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
     async function poll() {
       await refreshStatus();
       const delay = previousEmbeddingReadyRef.current ? 8000 : 2000;
@@ -632,19 +678,21 @@ function App() {
     return () => {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
-  }, [hasShownReadyGreeting]);
+  }, [hasShownReadyGreeting, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     loadMessagesFromDb(activeChatId).catch(() => {
       setMessages([]);
     });
-  }, [activeChatId]);
+  }, [activeChatId, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     refreshChats({ preferredChatId: chatIdRef.current }).catch(() => {
       setChatList(buildInitialChatList(chatIdRef.current));
     });
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -2151,6 +2199,80 @@ function App() {
     await openUnifiedDialog("general");
   }
 
+  if (!isAuthenticated) {
+    return React.createElement(
+      "div",
+      { className: "page page-login" },
+      React.createElement(
+        "header",
+        { className: "topbar" },
+        React.createElement(
+          "div",
+          { className: "brand" },
+          React.createElement("h1", null, "RAG"),
+          React.createElement("span", { className: "brand-status-light", "aria-hidden": "true" })
+        ),
+        React.createElement("div", { className: "header-center-spacer", "aria-hidden": "true" }),
+        React.createElement("div", { className: "quick-actions", "aria-hidden": "true" })
+      ),
+      React.createElement(
+        "main",
+        { className: "login-page-content" },
+        React.createElement(
+          "form",
+          { className: "login-card", onSubmit: submitLogin },
+          React.createElement("h2", null, "Sign In"),
+          React.createElement(
+            "label",
+            { className: "login-field-label", htmlFor: "login-username" },
+            "Username"
+          ),
+          React.createElement("input", {
+            id: "login-username",
+            className: "login-input",
+            type: "text",
+            value: loginUsername,
+            minLength: 4,
+            autoComplete: "username",
+            onChange: (event) => {
+              setLoginUsername(event.target.value);
+              if (loginError) setLoginError("");
+            },
+          }),
+          React.createElement(
+            "label",
+            { className: "login-field-label", htmlFor: "login-password" },
+            "Password"
+          ),
+          React.createElement("input", {
+            id: "login-password",
+            className: "login-input",
+            type: "password",
+            value: loginPassword,
+            minLength: 8,
+            autoComplete: "current-password",
+            onChange: (event) => {
+              setLoginPassword(event.target.value);
+              if (loginError) setLoginError("");
+            },
+          }),
+          loginError
+            ? React.createElement("p", { className: "login-error", role: "alert" }, loginError)
+            : null,
+          React.createElement(
+            "button",
+            {
+              type: "submit",
+              className: "restart-button login-submit-button",
+              disabled: !isLoginFormValid || isLoginSubmitting,
+            },
+            isLoginSubmitting ? "Signing In…" : "Sign In"
+          )
+        )
+      )
+    );
+  }
+
   return React.createElement(
     "div",
     { className: `page${panelData || isUnifiedDialogOpen ? " modal-open" : ""}` },
@@ -2422,8 +2544,8 @@ function App() {
           React.createElement(
             "div",
             { className: "side-nav-user-meta" },
-            React.createElement("strong", null, "Username"),
-            React.createElement("small", null, "Account placeholder")
+            React.createElement("strong", null, authenticatedUsername || "Username"),
+            React.createElement("small", null, authenticatedDisplayName || "Signed in")
           )
         )
       )
