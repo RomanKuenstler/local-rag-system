@@ -104,10 +104,11 @@ body {
   font-size: 0.84rem;
 }
 
-.login-submit-button {
+.restart-button.login-submit-button {
   margin-top: 0.35rem;
   justify-self: stretch;
   width: 100%;
+  border-color: #111827;
   background: #111827;
   color: #ffffff;
   border-radius: 10px;
@@ -115,7 +116,7 @@ body {
   gap: 0.45rem;
 }
 
-.login-submit-button:disabled {
+.restart-button.login-submit-button:disabled {
   opacity: 0.62;
 }
 
