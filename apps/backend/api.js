@@ -88,23 +88,54 @@ function readBody(req) {
   });
 }
 
-async function proxyRetriever({ req, res, targetPath }) {
-  const method = req.method || "GET";
-  const body = ["POST", "PATCH", "DELETE"].includes(method) ? await readBody(req) : undefined;
+function isJsonContentType(contentType) {
+  return String(contentType || "").toLowerCase().includes("application/json");
+}
 
-  const upstreamResponse = await fetch(`${RETRIEVER_BASE_URL}${targetPath}`, {
+async function proxyRetriever({ req, res, targetPath, sessionId }) {
+  const method = req.method || "GET";
+  const targetUrl = new URL(`${RETRIEVER_BASE_URL}${targetPath}`);
+  if (sessionId) {
+    targetUrl.searchParams.set("sessionId", sessionId);
+  }
+  const contentType = String(req.headers["content-type"] || "application/json");
+  let body = undefined;
+  if (["POST", "PATCH", "DELETE"].includes(method)) {
+    const rawBody = await readBody(req);
+    if (sessionId && rawBody && isJsonContentType(contentType)) {
+      try {
+        const parsed = JSON.parse(rawBody);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          body = JSON.stringify({
+            ...parsed,
+            sessionId,
+          });
+        } else {
+          body = rawBody;
+        }
+      } catch {
+        body = rawBody;
+      }
+    } else if (sessionId && !rawBody && isJsonContentType(contentType)) {
+      body = JSON.stringify({ sessionId });
+    } else {
+      body = rawBody;
+    }
+  }
+
+  const upstreamResponse = await fetch(targetUrl, {
     method,
     headers: {
-      "content-type": req.headers["content-type"] || "application/json",
+      "content-type": contentType,
     },
     body,
   });
 
   const text = await upstreamResponse.text();
-  const contentType = upstreamResponse.headers.get("content-type") || "application/json";
+  const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json";
 
   res.writeHead(upstreamResponse.status, {
-    "Content-Type": contentType,
+    "Content-Type": upstreamContentType,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
@@ -210,12 +241,8 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   };
 }
 
-async function handleStatus(req, res) {
-  const requestUrl = new URL(req.url || "/api/status", `http://${req.headers.host || "localhost"}`);
-  const sessionId = String(requestUrl.searchParams.get("sessionId") || "").trim();
-  const retrieverStatusUrl = sessionId
-    ? `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`
-    : `${RETRIEVER_BASE_URL}/internal/retriever/status`;
+async function handleStatus(req, res, sessionId) {
+  const retrieverStatusUrl = `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`;
   const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
 
@@ -577,6 +604,15 @@ async function handleLogout(req, res, url) {
   json(res, 200, { ok: true, loggedOut: true });
 }
 
+async function requireValidatedSession(req, res, url, { body = null, refresh = true } = {}) {
+  const validatedSession = await validateAndRefreshSession({ req, url, body, refresh });
+  if (!validatedSession.ok) {
+    json(res, validatedSession.statusCode || 401, { ok: false, error: validatedSession.error });
+    return null;
+  }
+  return validatedSession.session;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -623,88 +659,137 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const validatedSession = await validateAndRefreshSession({ req, url, refresh: true });
-    if (!validatedSession.ok) {
-      json(res, validatedSession.statusCode || 401, { ok: false, error: validatedSession.error });
-      return;
-    }
-
     if (req.method === "GET" && url.pathname === "/api/status") {
-      await handleStatus(req, res);
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await handleStatus(req, res, session.sessionId);
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/files") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files") });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files"),
+        sessionId: session.sessionId,
+      });
       return;
     }
 
     if (req.method === "PATCH" && url.pathname === "/api/files/tags") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags" });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags", sessionId: session.sessionId });
       return;
     }
 
 
     if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/files/tag-filters") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters") });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters"),
+        sessionId: session.sessionId,
+      });
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
       await handleLibraryList(res);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
       await handleLibraryUpload(req, res);
       return;
     }
 
     if (req.method === "DELETE" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
       await handleLibraryDelete(url, res);
       return;
     }
 
     if (req.method === "PATCH" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
       await handleLibraryToggle(req, res);
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/messages") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages") });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages"),
+        sessionId: session.sessionId,
+      });
       return;
     }
 
     if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/personalization") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/personalization", "/internal/retriever/personalization") });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/personalization", "/internal/retriever/personalization"),
+        sessionId: session.sessionId,
+      });
       return;
     }
 
     if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/chats") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats") });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats"),
+        sessionId: session.sessionId,
+      });
       return;
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/chats/") && url.pathname.endsWith("/download")) {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
       await proxyRetriever({
         req,
         res,
         targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+        sessionId: session.sessionId,
       });
       return;
     }
 
     if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/chats/")) {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
       await proxyRetriever({
         req,
         res,
         targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+        sessionId: session.sessionId,
       });
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/prompt") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt" });
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt", sessionId: session.sessionId });
       return;
     }
 
