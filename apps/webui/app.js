@@ -346,6 +346,7 @@ function App() {
   const [isChatFilterSaving, setIsChatFilterSaving] = useState(false);
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -368,6 +369,7 @@ function App() {
   const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
+  const userMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
 
@@ -559,6 +561,28 @@ function App() {
     } finally {
       setIsLoginSubmitting(false);
     }
+  }
+
+  function handleLogout() {
+    setIsUserMenuOpen(false);
+    setIsAuthenticated(false);
+    setLoginMode("signin");
+    setLoginPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginError("");
+  }
+
+  function openChangePasswordFlow() {
+    const preferredUsername = authenticatedUsername || trimmedLoginUsername;
+    setIsUserMenuOpen(false);
+    setIsAuthenticated(false);
+    setLoginMode("change-password");
+    setLoginUsername(preferredUsername);
+    setLoginPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginError("");
   }
 
   async function refreshStatus() {
@@ -773,6 +797,9 @@ function App() {
       }
       if (!event.target.closest(".chat-item-actions")) {
         setOpenChatMenuId(null);
+      }
+      if (!userMenuRef.current?.contains(event.target)) {
+        setIsUserMenuOpen(false);
       }
     }
 
@@ -2672,14 +2699,61 @@ function App() {
         { className: "side-nav-bottom" },
         React.createElement(
           "div",
-          { className: "side-nav-user" },
-          React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+          { className: `side-nav-user-wrap${isUserMenuOpen ? " menu-open" : ""}`, ref: userMenuRef },
           React.createElement(
-            "div",
-            { className: "side-nav-user-meta" },
-            React.createElement("strong", null, authenticatedUsername || "Username"),
-            React.createElement("small", null, authenticatedDisplayName || "Signed in")
-          )
+            "button",
+            {
+              type: "button",
+              className: "side-nav-user side-nav-user-button",
+              "aria-haspopup": "menu",
+              "aria-expanded": isUserMenuOpen ? "true" : "false",
+              onClick: () => setIsUserMenuOpen((previous) => !previous),
+            },
+            React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+            React.createElement(
+              "div",
+              { className: "side-nav-user-meta" },
+              React.createElement("strong", null, authenticatedDisplayName || "Signed in"),
+              React.createElement("small", null, authenticatedUsername || "Username")
+            ),
+            React.createElement("span", { className: "side-nav-user-menu-icon", "aria-hidden": "true" }, icon(dotsIconPath))
+          ),
+          isUserMenuOpen
+            ? React.createElement(
+              "ul",
+              { className: "side-nav-user-menu", role: "menu" },
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openChangePasswordFlow,
+                  },
+                  icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
+                  React.createElement("span", null, "Change password")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option delete",
+                    role: "menuitem",
+                    onClick: handleLogout,
+                  },
+                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
+                  React.createElement("span", null, "Logout")
+                )
+              )
+            )
+            : null
         )
       )
     ),

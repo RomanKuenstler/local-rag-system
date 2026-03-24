@@ -78,8 +78,8 @@ body {
   top: 50%;
   transform: translateY(-50%);
   border: none;
-  background: transparent;
-  color: #6b7280;
+  background: #111827;
+  color: #ffffff;
   width: 1.6rem;
   height: 1.6rem;
   border-radius: 8px;
@@ -90,7 +90,7 @@ body {
 }
 
 .login-password-visibility:hover {
-  background: #f3f4f6;
+  background: #000000;
 }
 
 .login-password-visibility .icon {
@@ -462,11 +462,52 @@ body {
 }
 .side-nav-user {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 0.55rem;
   border-radius: 12px;
   padding: 0.5rem 0.55rem;
+}
+.side-nav-user-wrap {
+  position: relative;
+}
+.side-nav-user-wrap.menu-open {
+  z-index: 35;
+}
+.side-nav-user-button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.side-nav-user-button:hover {
+  background: #f0f0f2;
+}
+.side-nav-user-menu-icon {
+  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.side-nav-user-menu-icon .icon {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+.side-nav-user-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.3rem);
+  margin: 0;
+  list-style: none;
+  padding: 0.25rem;
+  width: 11.2rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.15);
+  z-index: 40;
 }
 .side-nav-avatar-placeholder {
   width: 2rem;
