@@ -6,6 +6,7 @@ import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt } from "../../shared/
 const DEFAULT_USERNAME = "default";
 const DEFAULT_DISPLAY_NAME = "Default User";
 const DEFAULT_PASSWORD = "default";
+const USERS_CONFIG_PATH = String(process.env.AUTH_USERS_FILE || "").trim();
 
 function normalizeConfiguredUsers(rawConfig) {
   const list = Array.isArray(rawConfig)
@@ -53,7 +54,14 @@ async function ensureDefaultUser() {
   return result.rows[0]?.id || null;
 }
 
-export async function syncUsersFromConfigFile(filePath = path.resolve(process.cwd(), "users.json")) {
+function resolveUsersConfigPath() {
+  if (USERS_CONFIG_PATH) {
+    return path.resolve(USERS_CONFIG_PATH);
+  }
+  return path.resolve(process.cwd(), "users.json");
+}
+
+export async function syncUsersFromConfigFile(filePath = resolveUsersConfigPath()) {
   const defaultUserId = await ensureDefaultUser();
 
   let parsed = { users: [] };

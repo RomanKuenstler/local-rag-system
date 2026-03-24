@@ -8,6 +8,7 @@ RUN npm install
 COPY apps ./apps
 COPY shared ./shared
 COPY migrations ./migrations
+COPY users.json ./users.json
 COPY ./shared/prompts/guardrails.md ./guardrails.md
 
 RUN groupadd --gid 1001 nodejs && \
