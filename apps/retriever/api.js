@@ -60,10 +60,11 @@ import {
   deleteChat,
   ensureSessionExists,
   getRuntimeConfigState,
+  getUserIdForSession,
+  getUserSetting,
   getIndexStateMap,
   getChatTagFilterState,
   initializeRuntimeConfigDefaults,
-  getSelectionState,
   getSessionPersonalizationSettings,
   getSessionSetting,
   getSessionTagFilterState,
@@ -79,6 +80,7 @@ import {
   updateChatName,
   updateChatTagFilterState,
   updateSetting,
+  updateUserSetting,
   updateSessionPersonalizationSettings,
   updateSessionSetting,
   updateSessionTagFilterState,
@@ -99,7 +101,6 @@ const initialUiMode = SUPPORTED_UI_MODES.has(String(process.env.WEB_UI_MODE || "
   ? String(process.env.WEB_UI_MODE).trim().toLowerCase()
   : "clean";
 
-let uiMode = initialUiMode;
 const guardrailsText = loadGuardrails();
 
 const chatModel = createChatModel();
@@ -136,6 +137,15 @@ function generateChatName() {
 
 function normalizePrompt(input) {
   return String(input || "").trim();
+}
+
+async function getSessionUiMode(sessionId) {
+  const userId = await getUserIdForSession(sessionId);
+  return getUserSetting({
+    userId,
+    settingName: "ui_mode",
+    fallbackValue: initialUiMode,
+  });
 }
 
 function extractAssistantTextContent(response) {
@@ -575,8 +585,10 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   }
 
   if (normalizedPrompt === "/info") {
-    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
-      sessionId,
+    const userId = await getUserIdForSession(sessionId);
+    const currentUiMode = await getSessionUiMode(sessionId);
+    const currentAssistantMode = normalizeAssistantMode(await getUserSetting({
+      userId,
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }));
@@ -588,7 +600,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         answer: buildSystemInfoMessage({
           appName: APP_NAME,
           appVersion: APP_VERSION,
-          uiMode,
+          uiMode: currentUiMode,
           assistantMode: currentAssistantMode,
           personalizationSettings,
           chatModelName: chatModel.model,
@@ -643,8 +655,9 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
 
 
   if (normalizedPrompt === "/assistant") {
-    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
-      sessionId,
+    const userId = await getUserIdForSession(sessionId);
+    const currentAssistantMode = normalizeAssistantMode(await getUserSetting({
+      userId,
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }));
@@ -665,6 +678,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   }
 
   if (normalizedPrompt === "/mode") {
+    const currentUiMode = await getSessionUiMode(sessionId);
     return {
       statusCode: 200,
       payload: {
@@ -673,7 +687,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
           "UI modes:",
           "- clean: Clean chat-focused UI without retrieval diagnostics.",
           "- rag: Retrieval-debug UI that includes evidence quality and similarity details.",
-          `Current mode: ${uiMode}`,
+          `Current mode: ${currentUiMode}`,
         ].join("\n"),
         evidenceSeverity: null,
         responseType: "ui_mode",
@@ -695,13 +709,13 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
       };
     }
 
-    uiMode = requestedMode;
-    await updateSetting("ui_mode", uiMode, { sessionId });
+    const userId = await getUserIdForSession(sessionId);
+    await updateUserSetting({ userId, settingName: "ui_mode", value: requestedMode });
     return {
       statusCode: 200,
       payload: {
         sessionId,
-        answer: `UI mode changed to: ${uiMode}`,
+        answer: `UI mode changed to: ${requestedMode}`,
         evidenceSeverity: "ok",
         responseType: "ui_mode",
       },
@@ -724,11 +738,8 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
     }
 
     const nextAssistantMode = normalizeAssistantMode(requestedMode);
-    await updateSessionSetting({
-      sessionId,
-      settingName: "assistant_mode",
-      value: nextAssistantMode,
-    });
+    const userId = await getUserIdForSession(sessionId);
+    await updateUserSetting({ userId, settingName: "assistant_mode", value: nextAssistantMode });
 
     return {
       statusCode: 200,
@@ -1010,8 +1021,9 @@ async function handlePrompt(req, res) {
     return;
   }
   const { chatId, chatName } = resolvedChat;
-  const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
-    sessionId,
+  const currentUserId = await getUserIdForSession(sessionId);
+  const currentAssistantMode = normalizeAssistantMode(await getUserSetting({
+    userId: currentUserId,
     settingName: "assistant_mode",
     fallbackValue: initialAssistantMode,
   }));
@@ -1543,9 +1555,13 @@ async function handleDownloadChat(req, res, chatId) {
 async function handleStatus(_req, res) {
   const url = new URL(_req.url, `http://${_req.headers.host || "localhost"}`);
   const sessionId = String(url.searchParams.get("sessionId") || "").trim();
+  const userId = sessionId ? await getUserIdForSession(sessionId) : null;
+  const currentUiMode = sessionId
+    ? await getSessionUiMode(sessionId)
+    : initialUiMode;
   const currentAssistantMode = sessionId
-    ? normalizeAssistantMode(await getSessionSetting({
-      sessionId,
+    ? normalizeAssistantMode(await getUserSetting({
+      userId,
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }))
@@ -1561,7 +1577,7 @@ async function handleStatus(_req, res) {
       name: APP_NAME,
       version: APP_VERSION,
       role: "retriever-api",
-      uiMode,
+      uiMode: currentUiMode,
     },
     assistant: {
       mode: currentAssistantMode,
@@ -1850,8 +1866,6 @@ await initializeRuntimeConfigDefaults({
   minSimilarities: MIN_SIMILARITIES,
   cosineLimit: COSINE_LIMIT,
 });
-const persistedSelections = await getSelectionState({ uiMode: initialUiMode, assistantMode: initialAssistantMode });
-uiMode = persistedSelections.uiMode;
 const persistedRuntimeConfig = await getRuntimeConfigState({
   historyMessages: runtimeConfig.historyMessages,
   maxSimilarities: runtimeConfig.maxSimilarities,

@@ -3,6 +3,10 @@
     {
       "username": "test",
       "display_name": "Test User"
+    },
+    {
+      "username": "usera",
+      "display_name": "User Alpha"
     }
   ]
 }

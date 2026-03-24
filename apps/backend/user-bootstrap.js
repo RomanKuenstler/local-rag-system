@@ -85,10 +85,7 @@ export async function syncUsersFromConfigFile(filePath = resolveUsersConfigPath(
          VALUES ($1, $2, $3, $4, TRUE, TRUE, NOW())
          ON CONFLICT (username) DO UPDATE
            SET display_name = EXCLUDED.display_name,
-               password_hash = EXCLUDED.password_hash,
-               password_salt = EXCLUDED.password_salt,
                is_active = TRUE,
-               require_changepw = TRUE,
                updated_at = NOW()`,
         [user.username, user.displayName, passwordHash, globalSalt]
       );
