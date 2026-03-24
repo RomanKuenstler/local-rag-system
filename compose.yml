@@ -62,6 +62,7 @@ services:
       INDEX_STATE_FILE: /app/state/index-state.json
       EMBEDDING_STATUS_FILE: /app/state/embedding-status.json
       RETRIEVER_API_PORT: 3000
+      OCR_SCANNER_BASE_URL: http://ocr-scanner:3300
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
@@ -78,6 +79,8 @@ services:
       qdrant:
         condition: service_started
       embedder:
+        condition: service_started
+      ocr-scanner:
         condition: service_started
       postgres:
         condition: service_healthy
@@ -100,6 +103,7 @@ services:
       POSTGRES_DB: rag
       POSTGRES_USER: rag
       POSTGRES_PASSWORD: rag
+      OCR_SCANNER_BASE_URL: http://ocr-scanner:3300
     volumes:
       - ./data:/app/data
       - rag_state:/app/state
@@ -110,6 +114,27 @@ services:
     depends_on:
       qdrant:
         condition: service_started
+      ocr-scanner:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  ocr-scanner:
+    build:
+      context: ./apps/ocr-scanner
+      dockerfile: Dockerfile
+    environment:
+      OCR_API_HOST: 0.0.0.0
+      OCR_API_PORT: 3300
+      OCR_CONTENT_DIR: /app/data
+      OCR_UPLOAD_DIR: /app/upload
+      OCR_PDF_MIN_EXTRACTED_CHARS: 150
+    volumes:
+      - ./data:/app/data
+      - ./upload:/app/upload
+    ports:
+      - "3300:3300"
+    depends_on:
       postgres:
         condition: service_healthy
 
@@ -168,4 +193,3 @@ models:
     model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
   embedding-model:
     model: ai/embeddinggemma:latest
-
