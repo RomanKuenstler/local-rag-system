@@ -80,6 +80,7 @@ const LIBRARY_UPLOAD_RULES = {
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
 const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
@@ -333,6 +334,7 @@ function App() {
   const [loginError, setLoginError] = useState("");
   const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
+  const authSessionTokenRef = useRef("");
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
   const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
   const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
@@ -396,6 +398,61 @@ function App() {
       && confirmNewPassword.length >= 8
       && doNewPasswordsMatch
     : trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
+
+  function clearAuthenticatedSessionState() {
+    authSessionTokenRef.current = "";
+    try {
+      window.localStorage.removeItem(AUTH_SESSION_TOKEN_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+    setIsUserMenuOpen(false);
+    setIsAuthenticated(false);
+  }
+
+  async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
+    const rawUrl = String(pathOrUrl || "");
+    const requestUrl = rawUrl.startsWith("http") ? rawUrl : `${API_BASE_URL}${rawUrl}`;
+    const headers = new Headers(options.headers || {});
+    if (!skipAuth && authSessionTokenRef.current) {
+      headers.set("X-Session-Token", authSessionTokenRef.current);
+    }
+
+    const response = await fetch(requestUrl, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401 && !skipAuth) {
+      clearAuthenticatedSessionState();
+    }
+    return response;
+  }
+
+  async function restoreActiveSession() {
+    let storedToken = "";
+    try {
+      storedToken = String(window.localStorage.getItem(AUTH_SESSION_TOKEN_STORAGE_KEY) || "");
+    } catch {
+      storedToken = "";
+    }
+    if (!storedToken) return false;
+
+    authSessionTokenRef.current = storedToken;
+    const sessionPath = `/api/auth/session?sessionId=${encodeURIComponent(sessionIdRef.current)}`;
+    const response = await apiFetch(sessionPath, {}, { skipAuth: false });
+    if (!response.ok) {
+      clearAuthenticatedSessionState();
+      return false;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const user = payload?.user || {};
+    setAuthenticatedUsername(String(user.username || ""));
+    setAuthenticatedDisplayName(String(user.displayName || user.username || ""));
+    setIsAuthenticated(true);
+    return true;
+  }
 
   useEffect(() => {
     if (!isSending) {
@@ -524,16 +581,18 @@ function App() {
           oldPassword: loginPassword,
           newPassword,
           confirmNewPassword,
+          sessionId: sessionIdRef.current,
         }
         : {
           username: trimmedLoginUsername,
           password: loginPassword,
+          sessionId: sessionIdRef.current,
         };
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+      }, { skipAuth: true });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
@@ -547,6 +606,16 @@ function App() {
         setConfirmNewPassword("");
         setLoginError("");
         return;
+      }
+      const nextSessionToken = String(payload?.session?.sessionToken || "").trim();
+      if (!nextSessionToken) {
+        throw new Error("Session was not created.");
+      }
+      authSessionTokenRef.current = nextSessionToken;
+      try {
+        window.localStorage.setItem(AUTH_SESSION_TOKEN_STORAGE_KEY, nextSessionToken);
+      } catch {
+        // ignore storage errors
       }
       setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
       setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
@@ -564,8 +633,12 @@ function App() {
   }
 
   function handleLogout() {
-    setIsUserMenuOpen(false);
-    setIsAuthenticated(false);
+    apiFetch(`/api/auth/logout?sessionId=${encodeURIComponent(sessionIdRef.current)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: sessionIdRef.current }),
+    }).catch(() => null);
+    clearAuthenticatedSessionState();
     setLoginMode("signin");
     setLoginPassword("");
     setNewPassword("");
@@ -575,8 +648,7 @@ function App() {
 
   function openChangePasswordFlow() {
     const preferredUsername = authenticatedUsername || trimmedLoginUsername;
-    setIsUserMenuOpen(false);
-    setIsAuthenticated(false);
+    clearAuthenticatedSessionState();
     setLoginMode("change-password");
     setLoginUsername(preferredUsername);
     setLoginPassword("");
@@ -585,12 +657,41 @@ function App() {
     setLoginError("");
   }
 
+  useEffect(() => {
+    restoreActiveSession().catch(() => {
+      clearAuthenticatedSessionState();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
+    const pollSession = async () => {
+      try {
+        const response = await apiFetch(
+          `/api/auth/session?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+        );
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          const user = payload?.user || {};
+          setAuthenticatedUsername(String(user.username || ""));
+          setAuthenticatedDisplayName(String(user.displayName || user.username || ""));
+        }
+      } catch {
+        clearAuthenticatedSessionState();
+      }
+    };
+
+    const timerId = window.setInterval(pollSession, 60_000);
+    return () => window.clearInterval(timerId);
+  }, [isAuthenticated]);
+
   async function refreshStatus() {
     try {
       const [statusRes, filesRes, libraryRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/status?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
-        fetch(`${API_BASE_URL}/api/files?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
-        fetch(`${API_BASE_URL}/api/library/files`),
+        apiFetch(`/api/status?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
+        apiFetch(`/api/files?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
+        apiFetch(`/api/library/files`),
       ]);
 
       if (statusRes.ok) {
@@ -636,7 +737,7 @@ function App() {
     const sessionId = sessionIdRef.current;
     const chatId = explicitChatId || chatIdRef.current;
     const messageLoadLimit = 40;
-    const response = await fetch(
+    const response = await apiFetch(
       `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
     );
     const payload = await response.json();
@@ -668,7 +769,7 @@ function App() {
     const sessionId = sessionIdRef.current;
     setIsLoadingChats(true);
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
       );
       const payload = await response.json().catch(() => ({}));
@@ -953,7 +1054,7 @@ function App() {
       tags: draft.parsedTags,
     })));
 
-    const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+    const response = await apiFetch(`/api/library/files`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files: requestFiles }),
@@ -1050,7 +1151,7 @@ function App() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/library/files?path=${encodeURIComponent(target.path)}`, {
+      const response = await apiFetch(`/api/library/files?path=${encodeURIComponent(target.path)}`, {
         method: "DELETE",
       });
       const payload = await response.json().catch(() => ({}));
@@ -1085,7 +1186,7 @@ function App() {
     });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+      const response = await apiFetch(`/api/library/files`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: file.path, action }),
@@ -1139,7 +1240,7 @@ function App() {
       try {
         if (!volatileChatCreatePromiseRef.current) {
           volatileChatCreatePromiseRef.current = (async () => {
-            const response = await fetch(`${API_BASE_URL}/api/chats`, {
+            const response = await apiFetch(`/api/chats`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1207,7 +1308,7 @@ function App() {
       }
 
       const uploadedFilesPayload = isPanelCommand ? [] : await buildUploadedFilesPayload(selectedPromptFiles);
-      const response = await fetch(`${API_BASE_URL}/api/prompt`, {
+      const response = await apiFetch(`/api/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1277,7 +1378,7 @@ function App() {
   }
 
   async function fetchPanelCommand(command) {
-    const response = await fetch(`${API_BASE_URL}/api/prompt`, {
+    const response = await apiFetch(`/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: command, sessionId: sessionIdRef.current, chatId: chatIdRef.current }),
@@ -1372,7 +1473,7 @@ function App() {
           configView: null,
         };
       } else if (selectedTab.id === "archive") {
-        const response = await fetch(
+        const response = await apiFetch(
           `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`
         );
         const payload = await response.json().catch(() => ({}));
@@ -1445,7 +1546,7 @@ function App() {
     const currentlyEnabled = tagFilterEnabledByTag[normalizedTag] ?? true;
     try {
       setIsTagFilterSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/files/tag-filters`, {
+      const response = await apiFetch(`/api/files/tag-filters`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1562,7 +1663,7 @@ function App() {
 
       setIsSending(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+        const response = await apiFetch(`/api/personalization`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -1650,7 +1751,7 @@ function App() {
     if (isSending || !isEmbeddingReady || !isCustomInstructionsDirty) return;
     setIsSending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+      const response = await apiFetch(`/api/personalization`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1686,7 +1787,7 @@ function App() {
     if (isSending || !isEmbeddingReady) return;
     setIsSending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+      const response = await apiFetch(`/api/personalization`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1986,7 +2087,7 @@ function App() {
     setIsMenuOpen(false);
     window.location.hash = "";
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(selectedId)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(selectedId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, action: "switch" }),
@@ -2013,13 +2114,13 @@ function App() {
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
     }
-    let response = await fetch(
+    let response = await apiFetch(
       `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`
     );
     if (!response.ok) {
       const [chatListResponse, messagesResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`),
-        fetch(`${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`),
+        apiFetch(`/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`),
+        apiFetch(`/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`),
       ]);
       const chatListPayload = await chatListResponse.json().catch(() => ({}));
       const messagesPayload = await messagesResponse.json().catch(() => ({}));
@@ -2073,7 +2174,7 @@ function App() {
 
     try {
       setIsChatFilterSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(normalizedChatId)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(normalizedChatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2123,7 +2224,7 @@ function App() {
 
     setIsChatActionPending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2161,7 +2262,7 @@ function App() {
     setIsChatActionPending(true);
     setOpenChatMenuId(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(chatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2198,7 +2299,7 @@ function App() {
     if (!targetChat || isChatActionPending) return;
     setIsChatActionPending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionIdRef.current }),
@@ -2234,7 +2335,7 @@ function App() {
     if (!chatId || isChatActionPending) return;
     setIsChatActionPending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(chatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

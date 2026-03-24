@@ -1,5 +1,6 @@
 import { dbQuery, ensureDatabaseReady, pingDatabase } from "../../shared/db/index.js";
 import http from "http";
+import crypto from "crypto";
 import {
   deleteManagedLibraryFile,
   listManagedLibraryFiles,
@@ -10,6 +11,9 @@ import { syncUsersFromConfigFile } from "./user-bootstrap.js";
 import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt, hashPasswordWithSalt } from "../../shared/src/auth.js";
 
 const MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST = 5;
+const SESSION_INITIAL_TTL_MS = 2 * 60 * 60 * 1000;
+const SESSION_REFRESH_THRESHOLD_MS = SESSION_INITIAL_TTL_MS / 2;
+const SESSION_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
@@ -22,9 +26,46 @@ function json(res, statusCode, payload) {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
   });
   res.end(JSON.stringify(payload));
+}
+
+function hashSessionToken(token) {
+  return crypto.createHash("sha256").update(`${getGlobalPasswordSalt()}:${String(token || "")}`).digest("hex");
+}
+
+function buildSessionWindow(now = new Date()) {
+  const createdAt = new Date(now);
+  const maxExpiresAt = new Date(createdAt.getTime() + SESSION_MAX_LIFETIME_MS);
+  const expiresAt = new Date(Math.min(createdAt.getTime() + SESSION_INITIAL_TTL_MS, maxExpiresAt.getTime()));
+  return { createdAt, expiresAt, maxExpiresAt };
+}
+
+async function createOrReplaceSession({ userId, sessionId }) {
+  const now = new Date();
+  const { createdAt, expiresAt, maxExpiresAt } = buildSessionWindow(now);
+  const sessionToken = crypto.randomUUID();
+  const sessionTokenHash = hashSessionToken(sessionToken);
+
+  await dbQuery(
+    `INSERT INTO sessions (user_id, session_identifier, session_token_hash, created_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (session_identifier) DO UPDATE
+       SET user_id = EXCLUDED.user_id,
+           session_token_hash = EXCLUDED.session_token_hash,
+           created_at = EXCLUDED.created_at,
+           expires_at = EXCLUDED.expires_at`,
+    [userId, sessionId, sessionTokenHash, createdAt.toISOString(), expiresAt.toISOString()]
+  );
+
+  return {
+    sessionId,
+    sessionToken,
+    createdAt: createdAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    maxExpiresAt: maxExpiresAt.toISOString(),
+  };
 }
 
 function readBody(req) {
@@ -66,7 +107,7 @@ async function proxyRetriever({ req, res, targetPath }) {
     "Content-Type": contentType,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
   });
   res.end(text);
 }
@@ -83,6 +124,89 @@ async function fetchJson(url) {
   } catch {
     return null;
   }
+}
+
+function getSessionIdFromRequest(url, body = null) {
+  const fromQuery = String(url.searchParams.get("sessionId") || "").trim();
+  if (fromQuery) return fromQuery;
+  const fromBody = String(body?.sessionId || "").trim();
+  return fromBody;
+}
+
+async function validateAndRefreshSession({ req, url, body = null, refresh = true }) {
+  const sessionId = getSessionIdFromRequest(url, body);
+  const sessionToken = String(req.headers["x-session-token"] || "").trim();
+  if (!sessionToken) {
+    return { ok: false, statusCode: 401, error: "Missing session token." };
+  }
+  const expectedTokenHash = hashSessionToken(sessionToken);
+
+  const result = sessionId
+    ? await dbQuery(
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.session_identifier = $1
+       LIMIT 1`,
+      [sessionId]
+    )
+    : await dbQuery(
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.session_token_hash = $1
+       LIMIT 1`,
+      [expectedTokenHash]
+    );
+  const session = result.rows[0];
+  if (!session || !session.session_token_hash) {
+    return { ok: false, statusCode: 401, error: "Session not found." };
+  }
+
+  if (expectedTokenHash !== session.session_token_hash) {
+    return { ok: false, statusCode: 401, error: "Session token is invalid." };
+  }
+
+  const nowMs = Date.now();
+  const createdMs = new Date(session.created_at).getTime();
+  const expiresMs = session.expires_at ? new Date(session.expires_at).getTime() : 0;
+  const maxExpiresMs = createdMs + SESSION_MAX_LIFETIME_MS;
+
+  if (nowMs >= maxExpiresMs) {
+    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [sessionId]);
+    return { ok: false, statusCode: 401, error: "Session reached its maximum lifetime. Please log in again." };
+  }
+
+  if (!expiresMs || nowMs >= expiresMs) {
+    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [sessionId]);
+    return { ok: false, statusCode: 401, error: "Session expired. Please log in again." };
+  }
+
+  let nextExpiresAt = new Date(expiresMs).toISOString();
+  if (refresh && (expiresMs - nowMs) <= SESSION_REFRESH_THRESHOLD_MS) {
+    const refreshedMs = Math.min(nowMs + SESSION_INITIAL_TTL_MS, maxExpiresMs);
+    if (refreshedMs > expiresMs) {
+      nextExpiresAt = new Date(refreshedMs).toISOString();
+      await dbQuery(
+        `UPDATE sessions
+         SET expires_at = $2
+         WHERE session_identifier = $1`,
+        [sessionId, nextExpiresAt]
+      );
+    }
+  }
+
+  return {
+    ok: true,
+    session: {
+      sessionId,
+      username: session.username,
+      displayName: session.display_name,
+      createdAt: new Date(createdMs).toISOString(),
+      expiresAt: nextExpiresAt,
+      maxExpiresAt: new Date(maxExpiresMs).toISOString(),
+    },
+  };
 }
 
 async function handleStatus(req, res) {
@@ -143,7 +267,7 @@ async function handleLibraryUpload(req, res) {
   try {
     body = rawBody ? JSON.parse(rawBody) : {};
   } catch {
-    json(res, 400, { error: "Invalid JSON payload" });
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
     return;
   }
 
@@ -263,7 +387,7 @@ async function handleLibraryList(res) {
   });
 }
 
-async function handleLogin(req, res) {
+async function handleLogin(req, res, url) {
   const rawBody = await readBody(req);
   let body;
   try {
@@ -275,8 +399,13 @@ async function handleLogin(req, res) {
 
   const username = String(body?.username || "").trim();
   const password = String(body?.password || "");
+  const sessionId = getSessionIdFromRequest(url, body);
   if (!username || !password) {
     json(res, 400, { ok: false, error: "Username and password are required." });
+    return;
+  }
+  if (!sessionId) {
+    json(res, 400, { ok: false, error: "Session id is required." });
     return;
   }
 
@@ -316,6 +445,7 @@ async function handleLogin(req, res) {
     return;
   }
 
+  const session = await createOrReplaceSession({ userId: user.id, sessionId });
   json(res, 200, {
     ok: true,
     requirePasswordChange: false,
@@ -324,10 +454,11 @@ async function handleLogin(req, res) {
       username: user.username,
       displayName: user.display_name,
     },
+    session,
   });
 }
 
-async function handleChangePassword(req, res) {
+async function handleChangePassword(req, res, url) {
   const rawBody = await readBody(req);
   let body;
   try {
@@ -341,8 +472,13 @@ async function handleChangePassword(req, res) {
   const oldPassword = String(body?.oldPassword || "");
   const newPassword = String(body?.newPassword || "");
   const confirmNewPassword = String(body?.confirmNewPassword || "");
+  const sessionId = getSessionIdFromRequest(url, body);
   if (!username || !oldPassword || !newPassword || !confirmNewPassword) {
     json(res, 400, { ok: false, error: "All fields are required." });
+    return;
+  }
+  if (!sessionId) {
+    json(res, 400, { ok: false, error: "Session id is required." });
     return;
   }
   if (newPassword !== confirmNewPassword) {
@@ -385,6 +521,7 @@ async function handleChangePassword(req, res) {
     [newPasswordHash, globalSalt, user.id]
   );
 
+  const session = await createOrReplaceSession({ userId: user.id, sessionId });
   json(res, 200, {
     ok: true,
     requirePasswordChange: false,
@@ -393,7 +530,50 @@ async function handleChangePassword(req, res) {
       username: user.username,
       displayName: user.display_name,
     },
+    session,
   });
+}
+
+async function handleSession(req, res, url) {
+  const validation = await validateAndRefreshSession({ req, url, refresh: true });
+  if (!validation.ok) {
+    json(res, validation.statusCode || 401, { ok: false, error: validation.error });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    user: {
+      username: validation.session.username,
+      displayName: validation.session.displayName,
+    },
+    session: {
+      sessionId: validation.session.sessionId,
+      createdAt: validation.session.createdAt,
+      expiresAt: validation.session.expiresAt,
+      maxExpiresAt: validation.session.maxExpiresAt,
+    },
+  });
+}
+
+async function handleLogout(req, res, url) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const validation = await validateAndRefreshSession({ req, url, body, refresh: false });
+  if (!validation.ok) {
+    json(res, validation.statusCode || 401, { ok: false, error: validation.error });
+    return;
+  }
+
+  await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [validation.session.sessionId]);
+  json(res, 200, { ok: true, loggedOut: true });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -410,18 +590,46 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/status") {
-      await handleStatus(req, res);
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/auth/login") {
-      await handleLogin(req, res);
+      await handleLogin(req, res, url);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/auth/change-password") {
-      await handleChangePassword(req, res);
+      await handleChangePassword(req, res, url);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/auth/session") {
+      await handleSession(req, res, url);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+      await handleLogout(req, res, url);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      const db = await getDbHealth();
+      json(res, db.ok ? 200 : 503, {
+        ok: db.ok,
+        service: "backend-api",
+        retrieverBaseUrl: RETRIEVER_BASE_URL,
+        embedderBaseUrl: EMBEDDER_BASE_URL,
+        postgres: db,
+      });
+      return;
+    }
+
+    const validatedSession = await validateAndRefreshSession({ req, url, refresh: true });
+    if (!validatedSession.ok) {
+      json(res, validatedSession.statusCode || 401, { ok: false, error: validatedSession.error });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/status") {
+      await handleStatus(req, res);
       return;
     }
 
@@ -499,18 +707,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/healthz") {
-      const db = await getDbHealth();
-      json(res, db.ok ? 200 : 503, {
-        ok: db.ok,
-        service: "backend-api",
-        retrieverBaseUrl: RETRIEVER_BASE_URL,
-        embedderBaseUrl: EMBEDDER_BASE_URL,
-        postgres: db,
-      });
-      return;
-    }
-
     json(res, 404, { error: "Not found" });
   } catch (error) {
     if (error.message === "Payload too large") {
@@ -533,5 +729,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
