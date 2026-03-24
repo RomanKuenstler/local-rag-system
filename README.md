@@ -9,7 +9,7 @@ This stack runs with Docker Compose and includes:
 - `backend` – frontend-facing API gateway.
 - `retriever` – chat/retrieval API, assistant-mode logic, prompt orchestration.
 - `embedder` – indexing worker for files in `./data`.
-- `ocr-scanner` – Python OCR service for scanned/text-poor PDFs from library and prompt uploads.
+- `ocr-scanner` – Python OCR service for scanned/text-poor PDFs and images from library and prompt uploads.
 - `qdrant` – vector database for chunk embeddings.
 - `postgres` – chat/session/runtime/index metadata persistence.
 - `webui` – lightweight browser UI (nginx + static JS).
@@ -36,7 +36,11 @@ OCR scanner endpoints:
 
 - `library_pdf` → pass `pdf_relative_path` under `data/` (works for `_library/...` and direct PDFs in data root/subfolders).
 - `prompt_pdf` → pass either `prompt_pdf_relative_path` under `upload/` or `pdf_base64`.
+- `library_image` → pass `image_relative_path` under `data/` for `.png`, `.jpg`, `.jpeg`, or `.webp` images.
+- `prompt_image` → pass either `prompt_image_relative_path` under `upload/` or `image_base64` (optionally `image_extension` for base64 requests, default `.png`).
 - OCR scanner performs layout-aware PDF extraction first (including block ordering / multi-column handling), evaluates extraction quality, and falls back to OCR when quality is weak.
+- OCR scanner performs OCR extraction directly for supported image formats.
+- Image OCR responses include `useful_text` / `extraction_status`; if OCR output is empty or below threshold (`minimum_extracted_chars`), the service marks it as `no_useful_text`.
 - OCR scanner responses include `status` and `extraction_details`; on failures it returns `status=error` with `error_code` (used by retriever/embedder for robust error handling).
 
 Embedder behavior:

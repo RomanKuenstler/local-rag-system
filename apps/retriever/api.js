@@ -106,7 +106,8 @@ const chatModel = createChatModel();
 
 const embeddingsModel = createEmbeddingsModel();
 const qdrant = createQdrantClient();
-const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".csv"]);
+const OCR_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+const UPLOADABLE_EXTENSIONS = new Set([".md", ".txt", ".html", ".htm", ".pdf", ".csv", ...OCR_IMAGE_EXTENSIONS]);
 const MAX_PROMPT_UPLOAD_FILES = 3;
 const MAX_REQUEST_BODY_BYTES = Number.parseInt(process.env.MAX_REQUEST_BODY_BYTES || String(10 * 1024 * 1024), 10);
 const OCR_SCANNER_BASE_URL =
@@ -257,6 +258,16 @@ async function normalizeUploadedPromptFile(file) {
       return { ok: false, reason: "ocr_failed", name, detail: ocrResult.error };
     }
     content = ocrResult.text;
+  } else if (OCR_IMAGE_EXTENSIONS.has(extension)) {
+    const ocrResult = await requestPromptImageOcr({
+      name,
+      extension,
+      contentBase64: buffer.toString("base64"),
+    });
+    if (!ocrResult.ok) {
+      return { ok: false, reason: "ocr_failed", name, detail: ocrResult.error };
+    }
+    content = ocrResult.text;
   } else {
     content = normalizeIndexableTextByExtension(buffer.toString("utf8"), extension);
   }
@@ -321,6 +332,57 @@ async function requestPromptPdfOcr({ name, contentBase64 }) {
     return { ok: true, text, error: null };
   } catch (error) {
     console.warn(`[retriever] OCR request error for prompt attachment ${name}: ${error.message}`);
+    return { ok: false, text: "", error: "ocr_request_error" };
+  }
+}
+
+async function requestPromptImageOcr({ name, extension, contentBase64 }) {
+  if (!contentBase64) {
+    return { ok: false, text: "", error: "missing_image_content" };
+  }
+
+  try {
+    const response = await fetch(`${OCR_SCANNER_BASE_URL}/ocr/scan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_type: "prompt_image",
+        image_base64: contentBase64,
+        image_extension: extension,
+        minimum_extracted_chars: PDF_MIN_EXTRACTED_CHARS,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      const errorCode = String(errorPayload?.error_code || `ocr_http_${response.status}`);
+      const errorMessage = String(errorPayload?.error || "").trim();
+      console.warn(
+        `[retriever] OCR request failed for prompt image attachment ${name}: HTTP ${response.status} ${errorCode} ${errorMessage.slice(0, 240)}`
+      );
+      return { ok: false, text: "", error: errorCode };
+    }
+
+    const payload = await response.json();
+    if (payload?.status !== "success") {
+      const errorCode = String(payload?.error_code || "ocr_unknown_error");
+      console.warn(`[retriever] OCR returned non-success status for prompt image ${name}: ${errorCode}`);
+      return { ok: false, text: "", error: errorCode };
+    }
+
+    const text = typeof payload?.text === "string" ? payload.text : "";
+    const usefulText = payload?.useful_text !== false && payload?.extraction_status !== "no_useful_text";
+    if (!text.trim() || !usefulText) {
+      return { ok: false, text: "", error: "ocr_no_useful_text" };
+    }
+    const extractionMode = String(payload?.extraction_details?.mode || "unknown");
+    const quality = String(payload?.extraction_details?.quality?.quality || "unknown");
+    console.log(
+      `[retriever] OCR text extracted for prompt image attachment ${name} (${text.length} chars, mode=${extractionMode}, quality=${quality})`
+    );
+    return { ok: true, text, error: null };
+  } catch (error) {
+    console.warn(`[retriever] OCR request error for prompt image attachment ${name}: ${error.message}`);
     return { ok: false, text: "", error: "ocr_request_error" };
   }
 }
