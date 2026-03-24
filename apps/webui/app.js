@@ -319,6 +319,19 @@ function App() {
   const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
   const [dialogTabError, setDialogTabError] = useState("");
   const [activeView, setActiveView] = useState(getInitialView);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticatedUsername, setAuthenticatedUsername] = useState("");
+  const [authenticatedDisplayName, setAuthenticatedDisplayName] = useState("");
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginMode, setLoginMode] = useState("signin");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
   const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
@@ -333,6 +346,7 @@ function App() {
   const [isChatFilterSaving, setIsChatFilterSaving] = useState(false);
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -355,6 +369,7 @@ function App() {
   const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
+  const userMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
 
@@ -371,6 +386,16 @@ function App() {
     : chatList;
   const activeChainProgress = statusData?.assistant?.chainProgress || null;
   const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
+  const trimmedLoginUsername = loginUsername.trim();
+  const isChangePasswordMode = loginMode === "change-password";
+  const doNewPasswordsMatch = newPassword === confirmNewPassword;
+  const isLoginFormValid = isChangePasswordMode
+    ? trimmedLoginUsername.length >= 4
+      && loginPassword.length >= 8
+      && newPassword.length >= 8
+      && confirmNewPassword.length >= 8
+      && doNewPasswordsMatch
+    : trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
 
   useEffect(() => {
     if (!isSending) {
@@ -476,6 +501,88 @@ function App() {
       };
     }
     return null;
+  }
+
+  async function submitLogin(event) {
+    event?.preventDefault?.();
+    if (!isLoginFormValid || isLoginSubmitting) return;
+
+    if (isChangePasswordMode && !doNewPasswordsMatch) {
+      setLoginError("New password and confirmation must match.");
+      return;
+    }
+
+    setLoginError("");
+    setIsLoginSubmitting(true);
+    try {
+      const endpoint = isChangePasswordMode
+        ? `${API_BASE_URL}/api/auth/change-password`
+        : `${API_BASE_URL}/api/auth/login`;
+      const body = isChangePasswordMode
+        ? {
+          username: trimmedLoginUsername,
+          oldPassword: loginPassword,
+          newPassword,
+          confirmNewPassword,
+        }
+        : {
+          username: trimmedLoginUsername,
+          password: loginPassword,
+        };
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
+      }
+
+      const user = payload?.user || {};
+      if (payload?.requirePasswordChange === true && !isChangePasswordMode) {
+        setLoginMode("change-password");
+        setLoginPassword("");
+        setNewPassword("");
+        setConfirmNewPassword("");
+        setLoginError("");
+        return;
+      }
+      setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
+      setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
+      setIsAuthenticated(true);
+      setLoginMode("signin");
+      setLoginPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setLoginError("");
+    } catch (error) {
+      setLoginError(error.message || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
+    } finally {
+      setIsLoginSubmitting(false);
+    }
+  }
+
+  function handleLogout() {
+    setIsUserMenuOpen(false);
+    setIsAuthenticated(false);
+    setLoginMode("signin");
+    setLoginPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginError("");
+  }
+
+  function openChangePasswordFlow() {
+    const preferredUsername = authenticatedUsername || trimmedLoginUsername;
+    setIsUserMenuOpen(false);
+    setIsAuthenticated(false);
+    setLoginMode("change-password");
+    setLoginUsername(preferredUsername);
+    setLoginPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginError("");
   }
 
   async function refreshStatus() {
@@ -621,6 +728,10 @@ function App() {
   }
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
     async function poll() {
       await refreshStatus();
       const delay = previousEmbeddingReadyRef.current ? 8000 : 2000;
@@ -632,19 +743,21 @@ function App() {
     return () => {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
-  }, [hasShownReadyGreeting]);
+  }, [hasShownReadyGreeting, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     loadMessagesFromDb(activeChatId).catch(() => {
       setMessages([]);
     });
-  }, [activeChatId]);
+  }, [activeChatId, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     refreshChats({ preferredChatId: chatIdRef.current }).catch(() => {
       setChatList(buildInitialChatList(chatIdRef.current));
     });
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -684,6 +797,9 @@ function App() {
       }
       if (!event.target.closest(".chat-item-actions")) {
         setOpenChatMenuId(null);
+      }
+      if (!userMenuRef.current?.contains(event.target)) {
+        setIsUserMenuOpen(false);
       }
     }
 
@@ -2151,6 +2267,172 @@ function App() {
     await openUnifiedDialog("general");
   }
 
+  if (!isAuthenticated) {
+    return React.createElement(
+      "div",
+      { className: "page page-login" },
+      React.createElement(
+        "header",
+        { className: "topbar" },
+        React.createElement(
+          "div",
+          { className: "brand" },
+          React.createElement("h1", null, "RAG"),
+          React.createElement("span", { className: "brand-status-light", "aria-hidden": "true" })
+        ),
+        React.createElement("div", { className: "header-center-spacer", "aria-hidden": "true" }),
+        React.createElement("div", { className: "quick-actions", "aria-hidden": "true" })
+      ),
+      React.createElement(
+        "main",
+        { className: "login-page-content" },
+        React.createElement(
+          "form",
+          { className: "login-card", onSubmit: submitLogin },
+          React.createElement("h2", null, isChangePasswordMode ? "Please change your password" : "Sign In"),
+          React.createElement(
+            "label",
+            { className: "login-field-label", htmlFor: "login-username" },
+            "Username"
+          ),
+          React.createElement("input", {
+            id: "login-username",
+            className: "login-input",
+            type: "text",
+            value: loginUsername,
+            minLength: 4,
+            autoComplete: "username",
+            onChange: (event) => {
+              setLoginUsername(event.target.value);
+              if (loginError) setLoginError("");
+            },
+          }),
+          React.createElement(
+            "label",
+            { className: "login-field-label", htmlFor: "login-password" },
+            isChangePasswordMode ? "Old password" : "Password"
+          ),
+          React.createElement(
+            "div",
+            { className: "login-input-wrap" },
+            React.createElement("input", {
+              id: "login-password",
+              className: "login-input",
+              type: isLoginPasswordVisible ? "text" : "password",
+              value: loginPassword,
+              minLength: 8,
+              autoComplete: "current-password",
+              onChange: (event) => {
+                setLoginPassword(event.target.value);
+                if (loginError) setLoginError("");
+              },
+            }),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "login-password-visibility",
+                "aria-label": isLoginPasswordVisible ? "Hide password" : "Show password",
+                onClick: () => setIsLoginPasswordVisible((previous) => !previous),
+              },
+              icon(isLoginPasswordVisible ? eyeOffIconPath : eyeIconPath)
+            )
+          ),
+          isChangePasswordMode
+            ? React.createElement(
+              React.Fragment,
+              null,
+              React.createElement(
+                "label",
+                { className: "login-field-label", htmlFor: "login-new-password" },
+                "New password"
+              ),
+              React.createElement(
+                "div",
+                { className: "login-input-wrap" },
+                React.createElement("input", {
+                  id: "login-new-password",
+                  className: "login-input",
+                  type: isNewPasswordVisible ? "text" : "password",
+                  value: newPassword,
+                  minLength: 8,
+                  autoComplete: "new-password",
+                  onChange: (event) => {
+                    setNewPassword(event.target.value);
+                    if (loginError) setLoginError("");
+                  },
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "login-password-visibility",
+                    "aria-label": isNewPasswordVisible ? "Hide new password" : "Show new password",
+                    onClick: () => setIsNewPasswordVisible((previous) => !previous),
+                  },
+                  icon(isNewPasswordVisible ? eyeOffIconPath : eyeIconPath)
+                )
+              ),
+              React.createElement(
+                "label",
+                { className: "login-field-label", htmlFor: "login-confirm-password" },
+                "Confirm new password"
+              ),
+              React.createElement(
+                "div",
+                { className: "login-input-wrap" },
+                React.createElement("input", {
+                  id: "login-confirm-password",
+                  className: "login-input",
+                  type: isConfirmPasswordVisible ? "text" : "password",
+                  value: confirmNewPassword,
+                  minLength: 8,
+                  autoComplete: "new-password",
+                  onChange: (event) => {
+                    setConfirmNewPassword(event.target.value);
+                    if (loginError) setLoginError("");
+                  },
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "login-password-visibility",
+                    "aria-label": isConfirmPasswordVisible ? "Hide confirmed password" : "Show confirmed password",
+                    onClick: () => setIsConfirmPasswordVisible((previous) => !previous),
+                  },
+                  icon(isConfirmPasswordVisible ? eyeOffIconPath : eyeIconPath)
+                )
+              )
+            )
+            : null,
+          isChangePasswordMode && confirmNewPassword.length > 0 && !doNewPasswordsMatch
+            ? React.createElement("p", { className: "login-error", role: "alert" }, "New password and confirmation must match.")
+            : null,
+          loginError
+            ? React.createElement("p", { className: "login-error", role: "alert" }, loginError)
+            : null,
+          React.createElement(
+            "button",
+            {
+              type: "submit",
+              className: "restart-button login-submit-button",
+              disabled: !isLoginFormValid || isLoginSubmitting,
+            },
+            icon("M2 21l20-9L2 3v7l14 2-14 2z"),
+            React.createElement(
+              "span",
+              null,
+              isLoginSubmitting
+                ? (isChangePasswordMode ? "Changing password…" : "Signing In…")
+                : (isChangePasswordMode ? "Change password" : "Sign In")
+            )
+          )
+        )
+      )
+    );
+  }
+
   return React.createElement(
     "div",
     { className: `page${panelData || isUnifiedDialogOpen ? " modal-open" : ""}` },
@@ -2417,14 +2699,61 @@ function App() {
         { className: "side-nav-bottom" },
         React.createElement(
           "div",
-          { className: "side-nav-user" },
-          React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+          { className: `side-nav-user-wrap${isUserMenuOpen ? " menu-open" : ""}`, ref: userMenuRef },
           React.createElement(
-            "div",
-            { className: "side-nav-user-meta" },
-            React.createElement("strong", null, "Username"),
-            React.createElement("small", null, "Account placeholder")
-          )
+            "button",
+            {
+              type: "button",
+              className: "side-nav-user side-nav-user-button",
+              "aria-haspopup": "menu",
+              "aria-expanded": isUserMenuOpen ? "true" : "false",
+              onClick: () => setIsUserMenuOpen((previous) => !previous),
+            },
+            React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+            React.createElement(
+              "div",
+              { className: "side-nav-user-meta" },
+              React.createElement("strong", null, authenticatedDisplayName || "Signed in"),
+              React.createElement("small", null, authenticatedUsername || "Username")
+            ),
+            React.createElement("span", { className: "side-nav-user-menu-icon", "aria-hidden": "true" }, icon(dotsIconPath))
+          ),
+          isUserMenuOpen
+            ? React.createElement(
+              "ul",
+              { className: "side-nav-user-menu", role: "menu" },
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openChangePasswordFlow,
+                  },
+                  icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
+                  React.createElement("span", null, "Change password")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option delete",
+                    role: "menuitem",
+                    onClick: handleLogout,
+                  },
+                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
+                  React.createElement("span", null, "Logout")
+                )
+              )
+            )
+            : null
         )
       )
     ),

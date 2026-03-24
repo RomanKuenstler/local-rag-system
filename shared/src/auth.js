@@ -5,8 +5,13 @@ export function getGlobalPasswordSalt() {
   return String(AUTH_PASSWORD_SALT || "xzy132");
 }
 
-export function hashPasswordWithGlobalSalt(password) {
+export function hashPasswordWithSalt(password, salt) {
   const plainPassword = String(password || "");
-  const saltedValue = `${getGlobalPasswordSalt()}${plainPassword}`;
+  const normalizedSalt = String(salt || "");
+  const saltedValue = `${normalizedSalt}${plainPassword}`;
   return crypto.createHash("sha256").update(saltedValue).digest("hex");
+}
+
+export function hashPasswordWithGlobalSalt(password) {
+  return hashPasswordWithSalt(password, getGlobalPasswordSalt());
 }

@@ -1,4 +1,4 @@
-import { ensureDatabaseReady, pingDatabase } from "../../shared/db/index.js";
+import { dbQuery, ensureDatabaseReady, pingDatabase } from "../../shared/db/index.js";
 import http from "http";
 import {
   deleteManagedLibraryFile,
@@ -7,6 +7,7 @@ import {
   toggleManagedLibraryFile,
 } from "./library-service.js";
 import { syncUsersFromConfigFile } from "./user-bootstrap.js";
+import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt, hashPasswordWithSalt } from "../../shared/src/auth.js";
 
 const MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST = 5;
 
@@ -262,6 +263,139 @@ async function handleLibraryList(res) {
   });
 }
 
+async function handleLogin(req, res) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const username = String(body?.username || "").trim();
+  const password = String(body?.password || "");
+  if (!username || !password) {
+    json(res, 400, { ok: false, error: "Username and password are required." });
+    return;
+  }
+
+  const userResult = await dbQuery(
+    `SELECT id, username, display_name, password_hash, password_salt, is_active, require_changepw
+     FROM users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+  if (!user.is_active) {
+    json(res, 403, { ok: false, error: "User account is inactive." });
+    return;
+  }
+
+  const enteredPasswordHash = hashPasswordWithSalt(password, user.password_salt);
+  if (enteredPasswordHash !== user.password_hash) {
+    json(res, 401, { ok: false, error: "Invalid password." });
+    return;
+  }
+
+  if (user.require_changepw) {
+    json(res, 200, {
+      ok: true,
+      requirePasswordChange: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.display_name,
+      },
+    });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    requirePasswordChange: false,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+    },
+  });
+}
+
+async function handleChangePassword(req, res) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const username = String(body?.username || "").trim();
+  const oldPassword = String(body?.oldPassword || "");
+  const newPassword = String(body?.newPassword || "");
+  const confirmNewPassword = String(body?.confirmNewPassword || "");
+  if (!username || !oldPassword || !newPassword || !confirmNewPassword) {
+    json(res, 400, { ok: false, error: "All fields are required." });
+    return;
+  }
+  if (newPassword !== confirmNewPassword) {
+    json(res, 400, { ok: false, error: "New password and confirmation do not match." });
+    return;
+  }
+
+  const userResult = await dbQuery(
+    `SELECT id, username, display_name, password_hash, password_salt, is_active
+     FROM users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+  if (!user.is_active) {
+    json(res, 403, { ok: false, error: "User account is inactive." });
+    return;
+  }
+
+  const enteredOldPasswordHash = hashPasswordWithSalt(oldPassword, user.password_salt);
+  if (enteredOldPasswordHash !== user.password_hash) {
+    json(res, 401, { ok: false, error: "Old password is invalid." });
+    return;
+  }
+
+  const newPasswordHash = hashPasswordWithGlobalSalt(newPassword);
+  const globalSalt = getGlobalPasswordSalt();
+  await dbQuery(
+    `UPDATE users
+     SET password_hash = $1,
+         password_salt = $2,
+         require_changepw = FALSE,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [newPasswordHash, globalSalt, user.id]
+  );
+
+  json(res, 200, {
+    ok: true,
+    requirePasswordChange: false,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+    },
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -278,6 +412,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/status") {
       await handleStatus(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/login") {
+      await handleLogin(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/auth/change-password") {
+      await handleChangePassword(req, res);
       return;
     }
 
@@ -389,5 +533,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
