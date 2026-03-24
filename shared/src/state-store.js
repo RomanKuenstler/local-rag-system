@@ -498,16 +498,42 @@ export async function deleteChat({ sessionId, chatId }) {
 
 export async function resolveSessionChatId({ sessionId, requestedChatId = null, fallbackChatId = "default-chat" }) {
   await ensureSessionExists(sessionId);
+  const userId = await resolveUserIdForSession(sessionId);
 
   const sessionResult = await dbQuery(
-    "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
-    [sessionId]
+    "SELECT active_chat_id FROM chat_sessions WHERE id = $1 AND user_id = $2",
+    [sessionId, userId]
   );
   const sessionActiveChatId = sessionResult.rows[0]?.active_chat_id || null;
-  const chatId = requestedChatId || sessionActiveChatId || fallbackChatId;
-  const ensured = await ensureChatContext({ sessionId, chatId });
+  const normalizedFallbackChatId = String(fallbackChatId || "").trim() || "default-chat";
+  const userScopedFallbackChatId = normalizedFallbackChatId === "default-chat"
+    ? `default-chat-u${userId}`
+    : normalizedFallbackChatId;
 
-  if (!ensured || ensured.status !== "active") {
+  const candidateChatIds = [];
+  if (requestedChatId) {
+    candidateChatIds.push(requestedChatId);
+  }
+  if (sessionActiveChatId && !candidateChatIds.includes(sessionActiveChatId)) {
+    candidateChatIds.push(sessionActiveChatId);
+  }
+  if (!candidateChatIds.includes(userScopedFallbackChatId)) {
+    candidateChatIds.push(userScopedFallbackChatId);
+  }
+
+  let resolvedChatId = null;
+  let resolvedChat = null;
+  for (const candidateChatId of candidateChatIds) {
+    const ensured = await ensureChatContext({ sessionId, chatId: candidateChatId });
+    if (!ensured || ensured.status !== "active") {
+      continue;
+    }
+    resolvedChatId = candidateChatId;
+    resolvedChat = ensured;
+    break;
+  }
+
+  if (!resolvedChat || !resolvedChatId) {
     return null;
   }
 
@@ -516,12 +542,12 @@ export async function resolveSessionChatId({ sessionId, requestedChatId = null, 
      SET active_chat_id = $2,
          updated_at = NOW()
      WHERE id = $1`,
-    [sessionId, chatId]
+    [sessionId, resolvedChatId]
   );
 
   return {
-    chatId,
-    chatName: ensured.name,
+    chatId: resolvedChatId,
+    chatName: resolvedChat.name,
   };
 }
 
