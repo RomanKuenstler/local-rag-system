@@ -88,23 +88,54 @@ function readBody(req) {
   });
 }
 
-async function proxyRetriever({ req, res, targetPath }) {
-  const method = req.method || "GET";
-  const body = ["POST", "PATCH", "DELETE"].includes(method) ? await readBody(req) : undefined;
+function isJsonContentType(contentType) {
+  return String(contentType || "").toLowerCase().includes("application/json");
+}
 
-  const upstreamResponse = await fetch(`${RETRIEVER_BASE_URL}${targetPath}`, {
+async function proxyRetriever({ req, res, targetPath, sessionId }) {
+  const method = req.method || "GET";
+  const targetUrl = new URL(`${RETRIEVER_BASE_URL}${targetPath}`);
+  if (sessionId) {
+    targetUrl.searchParams.set("sessionId", sessionId);
+  }
+  const contentType = String(req.headers["content-type"] || "application/json");
+  let body = undefined;
+  if (["POST", "PATCH", "DELETE"].includes(method)) {
+    const rawBody = await readBody(req);
+    if (sessionId && rawBody && isJsonContentType(contentType)) {
+      try {
+        const parsed = JSON.parse(rawBody);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          body = JSON.stringify({
+            ...parsed,
+            sessionId,
+          });
+        } else {
+          body = rawBody;
+        }
+      } catch {
+        body = rawBody;
+      }
+    } else if (sessionId && !rawBody && isJsonContentType(contentType)) {
+      body = JSON.stringify({ sessionId });
+    } else {
+      body = rawBody;
+    }
+  }
+
+  const upstreamResponse = await fetch(targetUrl, {
     method,
     headers: {
-      "content-type": req.headers["content-type"] || "application/json",
+      "content-type": contentType,
     },
     body,
   });
 
   const text = await upstreamResponse.text();
-  const contentType = upstreamResponse.headers.get("content-type") || "application/json";
+  const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json";
 
   res.writeHead(upstreamResponse.status, {
-    "Content-Type": contentType,
+    "Content-Type": upstreamContentType,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
@@ -210,12 +241,8 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   };
 }
 
-async function handleStatus(req, res) {
-  const requestUrl = new URL(req.url || "/api/status", `http://${req.headers.host || "localhost"}`);
-  const sessionId = String(requestUrl.searchParams.get("sessionId") || "").trim();
-  const retrieverStatusUrl = sessionId
-    ? `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`
-    : `${RETRIEVER_BASE_URL}/internal/retriever/status`;
+async function handleStatus(req, res, sessionId) {
+  const retrieverStatusUrl = `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`;
   const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
 
@@ -630,23 +657,33 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/status") {
-      await handleStatus(req, res);
+      await handleStatus(req, res, validatedSession.session.sessionId);
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/files") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files") });
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files"),
+        sessionId: validatedSession.session.sessionId,
+      });
       return;
     }
 
     if (req.method === "PATCH" && url.pathname === "/api/files/tags") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags" });
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags", sessionId: validatedSession.session.sessionId });
       return;
     }
 
 
     if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/files/tag-filters") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters") });
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters"),
+        sessionId: validatedSession.session.sessionId,
+      });
       return;
     }
 
@@ -671,17 +708,32 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/messages") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages") });
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages"),
+        sessionId: validatedSession.session.sessionId,
+      });
       return;
     }
 
     if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/personalization") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/personalization", "/internal/retriever/personalization") });
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/personalization", "/internal/retriever/personalization"),
+        sessionId: validatedSession.session.sessionId,
+      });
       return;
     }
 
     if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/chats") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats") });
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats"),
+        sessionId: validatedSession.session.sessionId,
+      });
       return;
     }
 
@@ -690,6 +742,7 @@ const server = http.createServer(async (req, res) => {
         req,
         res,
         targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+        sessionId: validatedSession.session.sessionId,
       });
       return;
     }
@@ -699,12 +752,13 @@ const server = http.createServer(async (req, res) => {
         req,
         res,
         targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+        sessionId: validatedSession.session.sessionId,
       });
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/prompt") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt" });
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt", sessionId: validatedSession.session.sessionId });
       return;
     }
 

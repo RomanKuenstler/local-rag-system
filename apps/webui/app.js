@@ -81,6 +81,7 @@ const LIBRARY_UPLOAD_RULES = {
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
+const LOGIN_PAGE_HASH = "#login";
 const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
@@ -377,6 +378,7 @@ function App() {
   const userMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
+  const postLoginHashRef = useRef("");
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
@@ -403,6 +405,12 @@ function App() {
     : trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
 
   function clearAuthenticatedSessionState() {
+    const currentHash = String(window.location.hash || "").trim().toLowerCase();
+    if (currentHash === "#library") {
+      postLoginHashRef.current = "#library";
+    } else if (currentHash !== LOGIN_PAGE_HASH) {
+      postLoginHashRef.current = "";
+    }
     authSessionTokenRef.current = "";
     try {
       window.localStorage.removeItem(AUTH_SESSION_TOKEN_STORAGE_KEY);
@@ -410,8 +418,22 @@ function App() {
       // ignore storage errors
     }
     setIsUserMenuOpen(false);
+    setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
+    setIsUnifiedDialogOpen(false);
+    setPanelData(null);
+    setDeleteConfirmFile(null);
+    setDeleteConfirmChat(null);
+    setIsUploadDialogOpen(false);
+    setLibraryUploadDrafts([]);
+    setRenameDialogChat(null);
+    setChatFilterDialogChat(null);
+    setOpenChatMenuId(null);
     setIsAuthenticated(false);
     setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
+    if (window.location.hash !== LOGIN_PAGE_HASH) {
+      window.location.hash = LOGIN_PAGE_HASH;
+    }
   }
 
   async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
@@ -624,6 +646,9 @@ function App() {
       setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
       setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
       setIsAuthenticated(true);
+      if (window.location.hash === LOGIN_PAGE_HASH) {
+        window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
+      }
       setLoginMode("signin");
       setLoginPassword("");
       setNewPassword("");
@@ -911,12 +936,27 @@ function App() {
 
   useEffect(() => {
     function syncViewFromHash() {
-      setActiveView(window.location.hash === "#library" ? "library" : "chat");
+      const currentHash = String(window.location.hash || "").trim().toLowerCase();
+      if (!isAuthenticated) {
+        if (currentHash !== LOGIN_PAGE_HASH) {
+          if (currentHash === "#library") {
+            postLoginHashRef.current = "#library";
+          }
+          window.location.hash = LOGIN_PAGE_HASH;
+        }
+        return;
+      }
+      if (currentHash === LOGIN_PAGE_HASH) {
+        window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
+        return;
+      }
+      setActiveView(currentHash === "#library" ? "library" : "chat");
     }
 
+    syncViewFromHash();
     window.addEventListener("hashchange", syncViewFromHash);
     return () => window.removeEventListener("hashchange", syncViewFromHash);
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => () => {
     if (sendingStatusPollRef.current) {
