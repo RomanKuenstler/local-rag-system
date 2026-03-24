@@ -6,6 +6,7 @@ import {
   saveManagedLibraryFile,
   toggleManagedLibraryFile,
 } from "./library-service.js";
+import { syncUsersFromConfigFile } from "./user-bootstrap.js";
 
 const MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST = 5;
 
@@ -383,6 +384,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 await ensureDatabaseReady();
+const syncedUsers = await syncUsersFromConfigFile();
+console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${syncedUsers.configured})`);
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);

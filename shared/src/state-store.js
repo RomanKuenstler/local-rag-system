@@ -1,6 +1,7 @@
 import { getDefaultPersonalizationSettings, normalizePersonalizationSettings } from "./personalization.js";
 import { dbQuery } from "../db/index.js";
 import { DEFAULT_FILE_TAG } from "../config/index.js";
+import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt } from "./auth.js";
 
 function normalizeFileTags(tags) {
   const input = Array.isArray(tags) ? tags : [];
@@ -50,6 +51,7 @@ async function replaceFileTags(filePath, tags) {
 }
 
 export async function initializeStateDefaults({ uiMode, assistantMode }) {
+  const userId = await resolveUserIdForSession(null);
   const defaults = [
     ["ui_mode", { value: uiMode }],
     ["assistant_mode", { value: assistantMode }],
@@ -57,15 +59,16 @@ export async function initializeStateDefaults({ uiMode, assistantMode }) {
 
   for (const [key, value] of defaults) {
     await dbQuery(
-      `INSERT INTO app_settings (setting_key, setting_value)
-       VALUES ($1, $2::jsonb)
-       ON CONFLICT (setting_key) DO NOTHING`,
-      [key, JSON.stringify(value)]
+      `INSERT INTO app_settings (user_id, setting_key, setting_value)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (user_id, setting_key) DO NOTHING`,
+      [userId, key, JSON.stringify(value)]
     );
   }
 }
 
 export async function initializeRuntimeConfigDefaults({ historyMessages, maxSimilarities, minSimilarities, cosineLimit }) {
+  const userId = await resolveUserIdForSession(null);
   const defaults = [
     ["history_messages", { value: historyMessages }],
     ["max_similarities", { value: maxSimilarities }],
@@ -75,18 +78,19 @@ export async function initializeRuntimeConfigDefaults({ historyMessages, maxSimi
 
   for (const [key, value] of defaults) {
     await dbQuery(
-      `INSERT INTO app_settings (setting_key, setting_value)
-       VALUES ($1, $2::jsonb)
-       ON CONFLICT (setting_key) DO NOTHING`,
-      [key, JSON.stringify(value)]
+      `INSERT INTO app_settings (user_id, setting_key, setting_value)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (user_id, setting_key) DO NOTHING`,
+      [userId, key, JSON.stringify(value)]
     );
   }
 }
 
 export async function getSelectionState(fallbacks) {
+  const userId = await resolveUserIdForSession(null);
   const result = await dbQuery(
-    "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
-    [["ui_mode", "assistant_mode"]]
+    "SELECT setting_key, setting_value FROM app_settings WHERE user_id = $1 AND setting_key = ANY($2)",
+    [userId, ["ui_mode", "assistant_mode"]]
   );
 
   const map = new Map(result.rows.map((row) => [row.setting_key, row.setting_value?.value]));
@@ -97,25 +101,76 @@ export async function getSelectionState(fallbacks) {
 }
 
 function buildSessionSettingKey(sessionId, settingName) {
-  return `session:${sessionId}:${settingName}`;
+  if (!sessionId) {
+    return String(settingName || "").trim();
+  }
+  return String(settingName || "").trim();
 }
 
-export async function updateSetting(key, value) {
+async function getDefaultUserId() {
+  const globalSalt = getGlobalPasswordSalt();
+  const defaultHash = hashPasswordWithGlobalSalt("default");
+  const ensured = await dbQuery(
+    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw)
+     VALUES ('default', 'Default User', $1, $2, TRUE, FALSE)
+     ON CONFLICT (username) DO UPDATE
+       SET username = EXCLUDED.username,
+           password_hash = EXCLUDED.password_hash,
+           password_salt = EXCLUDED.password_salt,
+           is_active = TRUE,
+           require_changepw = FALSE
+     RETURNING id`
+    ,
+    [defaultHash, globalSalt]
+  );
+  return ensured.rows[0]?.id;
+}
+
+async function resolveUserIdForSession(sessionId) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  const defaultUserId = await getDefaultUserId();
+  if (!normalizedSessionId) {
+    return defaultUserId;
+  }
+
+  const existing = await dbQuery(
+    "SELECT user_id FROM sessions WHERE session_identifier = $1",
+    [normalizedSessionId]
+  );
+  const existingUserId = existing.rows[0]?.user_id;
+  if (existingUserId) {
+    return existingUserId;
+  }
+
+  const inserted = await dbQuery(
+    `INSERT INTO sessions (user_id, session_identifier, created_at, expires_at)
+     VALUES ($1, $2, NOW(), NULL)
+     ON CONFLICT (session_identifier) DO UPDATE
+       SET user_id = EXCLUDED.user_id
+     RETURNING user_id`,
+    [defaultUserId, normalizedSessionId]
+  );
+  return inserted.rows[0]?.user_id || defaultUserId;
+}
+
+export async function updateSetting(key, value, { sessionId = null } = {}) {
+  const userId = await resolveUserIdForSession(sessionId);
   await dbQuery(
-    `INSERT INTO app_settings (setting_key, setting_value, updated_at)
-     VALUES ($1, $2::jsonb, NOW())
-     ON CONFLICT (setting_key) DO UPDATE
+    `INSERT INTO app_settings (user_id, setting_key, setting_value, updated_at)
+     VALUES ($1, $2, $3::jsonb, NOW())
+     ON CONFLICT (user_id, setting_key) DO UPDATE
        SET setting_value = EXCLUDED.setting_value,
            updated_at = NOW()`,
-    [key, JSON.stringify({ value })]
+    [userId, key, JSON.stringify({ value })]
   );
 }
 
 export async function getSessionSetting({ sessionId, settingName, fallbackValue }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const settingKey = buildSessionSettingKey(sessionId, settingName);
   const result = await dbQuery(
-    "SELECT setting_value FROM app_settings WHERE setting_key = $1",
-    [settingKey]
+    "SELECT setting_value FROM app_settings WHERE user_id = $1 AND setting_key = $2",
+    [userId, settingKey]
   );
   const value = result.rows[0]?.setting_value?.value;
   return value ?? fallbackValue;
@@ -123,7 +178,7 @@ export async function getSessionSetting({ sessionId, settingName, fallbackValue 
 
 export async function updateSessionSetting({ sessionId, settingName, value }) {
   const settingKey = buildSessionSettingKey(sessionId, settingName);
-  await updateSetting(settingKey, value);
+  await updateSetting(settingKey, value, { sessionId });
 }
 
 export async function getSessionPersonalizationSettings(sessionId) {
@@ -168,9 +223,10 @@ export async function updateSessionTagFilterState(sessionId, nextState) {
 }
 
 export async function getRuntimeConfigState(fallbacks) {
+  const userId = await resolveUserIdForSession(null);
   const result = await dbQuery(
-    "SELECT setting_key, setting_value FROM app_settings WHERE setting_key = ANY($1)",
-    [["history_messages", "max_similarities", "min_similarities", "cosine_limit"]]
+    "SELECT setting_key, setting_value FROM app_settings WHERE user_id = $1 AND setting_key = ANY($2)",
+    [userId, ["history_messages", "max_similarities", "min_similarities", "cosine_limit"]]
   );
 
   const map = new Map(result.rows.map((row) => [row.setting_key, row.setting_value?.value]));
@@ -183,32 +239,36 @@ export async function getRuntimeConfigState(fallbacks) {
 }
 
 export async function ensureSessionExists(sessionId) {
+  const userId = await resolveUserIdForSession(sessionId);
   await dbQuery(
-    `INSERT INTO chat_sessions (id, updated_at)
-     VALUES ($1, NOW())
-     ON CONFLICT (id) DO UPDATE SET updated_at = NOW()`,
-    [sessionId]
+    `INSERT INTO chat_sessions (id, user_id, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (id) DO UPDATE
+       SET user_id = EXCLUDED.user_id,
+           updated_at = NOW()`,
+    [sessionId, userId]
   );
 }
 
 export async function ensureChatContext({ sessionId, chatId, chatName = null }) {
   await ensureSessionExists(sessionId);
+  const userId = await resolveUserIdForSession(sessionId);
 
   await dbQuery(
-    `INSERT INTO chats (id, session_id, name, status, archived_at, updated_at)
-     VALUES ($1, $2, COALESCE($3, CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), 'active', NULL, NOW())
+    `INSERT INTO chats (id, session_id, user_id, name, status, archived_at, updated_at)
+     VALUES ($1, $2, $3, COALESCE($4, CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), 'active', NULL, NOW())
      ON CONFLICT (id) DO NOTHING`,
-    [chatId, sessionId, chatName]
+    [chatId, sessionId, userId, chatName]
   );
 
   const result = await dbQuery(
-    `SELECT id, session_id, name, status
+    `SELECT id, session_id, user_id, name, status
      FROM chats
      WHERE id = $1`,
     [chatId]
   );
   const row = result.rows[0];
-  if (!row || row.session_id !== sessionId) {
+  if (!row || row.session_id !== sessionId || row.user_id !== userId) {
     return null;
   }
 
@@ -229,10 +289,11 @@ export async function ensureChatContext({ sessionId, chatId, chatName = null }) 
 
 export async function createChat({ sessionId, chatId, chatName }) {
   await ensureSessionExists(sessionId);
+  const userId = await resolveUserIdForSession(sessionId);
   await dbQuery(
-    `INSERT INTO chats (id, session_id, name, status, archived_at, updated_at)
-     VALUES ($1, $2, COALESCE(NULLIF(BTRIM($3), ''), CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), 'active', NULL, NOW())`,
-    [chatId, sessionId, chatName || null]
+    `INSERT INTO chats (id, session_id, user_id, name, status, archived_at, updated_at)
+     VALUES ($1, $2, $3, COALESCE(NULLIF(BTRIM($4), ''), CONCAT('chat-', SUBSTRING(MD5(random()::text), 1, 6))), 'active', NULL, NOW())`,
+    [chatId, sessionId, userId, chatName || null]
   );
 
   await dbQuery(
@@ -244,7 +305,7 @@ export async function createChat({ sessionId, chatId, chatName }) {
   );
 
   const result = await dbQuery(
-    `SELECT id, session_id, name, status, created_at, updated_at, archived_at, tag_filter_state
+    `SELECT id, session_id, user_id, name, status, created_at, updated_at, archived_at, tag_filter_state
      FROM chats
      WHERE id = $1`,
     [chatId]
@@ -254,9 +315,10 @@ export async function createChat({ sessionId, chatId, chatName }) {
 
 export async function listSessionChats({ sessionId, includeArchived = false }) {
   await ensureSessionExists(sessionId);
+  const userId = await resolveUserIdForSession(sessionId);
   const sessionResult = await dbQuery(
-    "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
-    [sessionId]
+    "SELECT active_chat_id FROM chat_sessions WHERE id = $1 AND user_id = $2",
+    [sessionId, userId]
   );
   const activeChatId = sessionResult.rows[0]?.active_chat_id || null;
 
@@ -264,9 +326,10 @@ export async function listSessionChats({ sessionId, includeArchived = false }) {
     `SELECT id, name, status, created_at, updated_at, archived_at, tag_filter_state
      FROM chats
      WHERE session_id = $1
-       AND ($2::boolean OR status = 'active')
+       AND user_id = $2
+       AND ($3::boolean OR status = 'active')
      ORDER BY updated_at DESC, created_at DESC`,
-    [sessionId, includeArchived]
+    [sessionId, userId, includeArchived]
   );
 
   return {
@@ -276,11 +339,12 @@ export async function listSessionChats({ sessionId, includeArchived = false }) {
 }
 
 export async function setSessionActiveChat({ sessionId, chatId }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const chat = await dbQuery(
     `SELECT id, name, status
      FROM chats
-     WHERE session_id = $1 AND id = $2`,
-    [sessionId, chatId]
+     WHERE session_id = $1 AND user_id = $2 AND id = $3`,
+    [sessionId, userId, chatId]
   );
   const selectedChat = chat.rows[0];
   if (!selectedChat) {
@@ -301,14 +365,15 @@ export async function setSessionActiveChat({ sessionId, chatId }) {
 }
 
 export async function updateChatStatus({ sessionId, chatId, status }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const result = await dbQuery(
     `UPDATE chats
      SET status = $3,
          archived_at = CASE WHEN $3 = 'archived' THEN NOW() ELSE NULL END,
          updated_at = NOW()
-     WHERE session_id = $1 AND id = $2
+     WHERE session_id = $1 AND user_id = $4 AND id = $2
      RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
-    [sessionId, chatId, status]
+    [sessionId, chatId, status, userId]
   );
   const chat = result.rows[0];
   if (!chat) {
@@ -317,17 +382,17 @@ export async function updateChatStatus({ sessionId, chatId, status }) {
 
   if (status === "archived") {
     const sessionRow = await dbQuery(
-      "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
-      [sessionId]
+      "SELECT active_chat_id FROM chat_sessions WHERE id = $1 AND user_id = $2",
+      [sessionId, userId]
     );
     if (sessionRow.rows[0]?.active_chat_id === chatId) {
       const fallbackResult = await dbQuery(
         `SELECT id
          FROM chats
-         WHERE session_id = $1 AND status = 'active'
+         WHERE session_id = $1 AND user_id = $2 AND status = 'active'
          ORDER BY updated_at DESC
          LIMIT 1`,
-        [sessionId]
+        [sessionId, userId]
       );
       const fallbackChatId = fallbackResult.rows[0]?.id || null;
       await dbQuery(
@@ -344,6 +409,7 @@ export async function updateChatStatus({ sessionId, chatId, status }) {
 }
 
 export async function updateChatName({ sessionId, chatId, name }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const nextName = String(name || "").trim();
   if (!nextName) {
     return null;
@@ -353,33 +419,35 @@ export async function updateChatName({ sessionId, chatId, name }) {
     `UPDATE chats
      SET name = $3,
          updated_at = NOW()
-     WHERE session_id = $1 AND id = $2
+     WHERE session_id = $1 AND user_id = $4 AND id = $2
      RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
-    [sessionId, chatId, nextName]
+    [sessionId, chatId, nextName, userId]
   );
   return result.rows[0] || null;
 }
 
 export async function getChatTagFilterState({ sessionId, chatId }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const result = await dbQuery(
     `SELECT tag_filter_state
      FROM chats
-     WHERE session_id = $1 AND id = $2`,
-    [sessionId, chatId]
+     WHERE session_id = $1 AND user_id = $2 AND id = $3`,
+    [sessionId, userId, chatId]
   );
   const rawState = result.rows[0]?.tag_filter_state || { disabledTags: [] };
   return normalizeChatTagFilterState(rawState);
 }
 
 export async function updateChatTagFilterState({ sessionId, chatId, nextState }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const normalized = normalizeChatTagFilterState(nextState);
   const result = await dbQuery(
     `UPDATE chats
      SET tag_filter_state = $3::jsonb,
          updated_at = NOW()
-     WHERE session_id = $1 AND id = $2
+     WHERE session_id = $1 AND user_id = $4 AND id = $2
      RETURNING id, name, status, created_at, updated_at, archived_at, tag_filter_state`,
-    [sessionId, chatId, JSON.stringify(normalized)]
+    [sessionId, chatId, JSON.stringify(normalized), userId]
   );
   const row = result.rows[0] || null;
   if (!row) return null;
@@ -390,30 +458,31 @@ export async function updateChatTagFilterState({ sessionId, chatId, nextState })
 }
 
 export async function deleteChat({ sessionId, chatId }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const activeBeforeDelete = await dbQuery(
-    "SELECT active_chat_id FROM chat_sessions WHERE id = $1",
-    [sessionId]
+    "SELECT active_chat_id FROM chat_sessions WHERE id = $1 AND user_id = $2",
+    [sessionId, userId]
   );
   const existing = await dbQuery(
     `SELECT id
      FROM chats
-     WHERE session_id = $1 AND id = $2`,
-    [sessionId, chatId]
+     WHERE session_id = $1 AND user_id = $2 AND id = $3`,
+    [sessionId, userId, chatId]
   );
   if (!existing.rows[0]) {
     return false;
   }
 
-  await dbQuery("DELETE FROM chats WHERE session_id = $1 AND id = $2", [sessionId, chatId]);
+  await dbQuery("DELETE FROM chats WHERE session_id = $1 AND user_id = $2 AND id = $3", [sessionId, userId, chatId]);
 
   if (activeBeforeDelete.rows[0]?.active_chat_id === chatId) {
     const fallbackResult = await dbQuery(
       `SELECT id
        FROM chats
-       WHERE session_id = $1 AND status = 'active'
+       WHERE session_id = $1 AND user_id = $2 AND status = 'active'
        ORDER BY updated_at DESC
        LIMIT 1`,
-      [sessionId]
+      [sessionId, userId]
     );
     const fallbackChatId = fallbackResult.rows[0]?.id || null;
     await dbQuery(
@@ -458,10 +527,11 @@ export async function resolveSessionChatId({ sessionId, requestedChatId = null, 
 }
 
 export async function addChatMessage({ sessionId, chatId, role, content, metadata = {} }) {
+  const userId = await resolveUserIdForSession(sessionId);
   await dbQuery(
-    `INSERT INTO chat_messages (session_id, chat_id, role, content, metadata)
-     VALUES ($1, $2, $3, $4, $5::jsonb)`,
-    [sessionId, chatId, role, content, JSON.stringify(metadata || {})]
+    `INSERT INTO chat_messages (session_id, chat_id, user_id, role, content, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+    [sessionId, chatId, userId, role, content, JSON.stringify(metadata || {})]
   );
 
   await dbQuery("UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1", [sessionId]);
@@ -469,6 +539,7 @@ export async function addChatMessage({ sessionId, chatId, role, content, metadat
 }
 
 export async function listChatMessages({ sessionId, chatId, limit = null }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const hasLimit = Number.isInteger(limit) && limit > 0;
   const result = hasLimit
     ? await dbQuery(
@@ -476,25 +547,26 @@ export async function listChatMessages({ sessionId, chatId, limit = null }) {
        FROM (
          SELECT id, role, content, metadata, created_at
          FROM chat_messages
-         WHERE session_id = $1 AND chat_id = $2
+         WHERE session_id = $1 AND chat_id = $2 AND user_id = $3
          ORDER BY created_at DESC, id DESC
-         LIMIT $3
+         LIMIT $4
        ) recent
        ORDER BY created_at ASC, id ASC`,
-      [sessionId, chatId, limit]
+      [sessionId, chatId, userId, limit]
     )
     : await dbQuery(
       `SELECT role, content, metadata, created_at
        FROM chat_messages
-       WHERE session_id = $1 AND chat_id = $2
+       WHERE session_id = $1 AND chat_id = $2 AND user_id = $3
        ORDER BY created_at ASC, id ASC`,
-      [sessionId, chatId]
+      [sessionId, chatId, userId]
     );
 
   return result.rows;
 }
 
 export async function listRecentPromptHistory({ sessionId, chatId, limit }) {
+  const userId = await resolveUserIdForSession(sessionId);
   const safeLimit = Math.max(0, Number.parseInt(String(limit || 0), 10));
   if (safeLimit === 0) {
     return [];
@@ -505,12 +577,12 @@ export async function listRecentPromptHistory({ sessionId, chatId, limit }) {
      FROM (
        SELECT id, role, content
        FROM chat_messages
-       WHERE session_id = $1 AND chat_id = $2
+       WHERE session_id = $1 AND chat_id = $2 AND user_id = $3
        ORDER BY created_at DESC, id DESC
-       LIMIT $3
+       LIMIT $4
      ) recent
      ORDER BY id ASC`,
-    [sessionId, chatId, safeLimit]
+    [sessionId, chatId, userId, safeLimit]
   );
 
   return result.rows.map((row) => [row.role === "assistant" ? "ai" : "human", row.content]);
