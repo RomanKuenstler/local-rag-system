@@ -134,21 +134,21 @@ function getSessionIdFromRequest(url, body = null) {
 }
 
 async function validateAndRefreshSession({ req, url, body = null, refresh = true }) {
-  const sessionId = getSessionIdFromRequest(url, body);
+  const requestedSessionId = getSessionIdFromRequest(url, body);
   const sessionToken = String(req.headers["x-session-token"] || "").trim();
   if (!sessionToken) {
     return { ok: false, statusCode: 401, error: "Missing session token." };
   }
   const expectedTokenHash = hashSessionToken(sessionToken);
 
-  const result = sessionId
+  const result = requestedSessionId
     ? await dbQuery(
       `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.session_identifier = $1
        LIMIT 1`,
-      [sessionId]
+      [requestedSessionId]
     )
     : await dbQuery(
       `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
@@ -162,6 +162,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   if (!session || !session.session_token_hash) {
     return { ok: false, statusCode: 401, error: "Session not found." };
   }
+  const resolvedSessionId = String(session.session_identifier || "").trim();
 
   if (expectedTokenHash !== session.session_token_hash) {
     return { ok: false, statusCode: 401, error: "Session token is invalid." };
@@ -173,12 +174,12 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   const maxExpiresMs = createdMs + SESSION_MAX_LIFETIME_MS;
 
   if (nowMs >= maxExpiresMs) {
-    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [sessionId]);
+    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [resolvedSessionId]);
     return { ok: false, statusCode: 401, error: "Session reached its maximum lifetime. Please log in again." };
   }
 
   if (!expiresMs || nowMs >= expiresMs) {
-    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [sessionId]);
+    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [resolvedSessionId]);
     return { ok: false, statusCode: 401, error: "Session expired. Please log in again." };
   }
 
@@ -191,7 +192,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
         `UPDATE sessions
          SET expires_at = $2
          WHERE session_identifier = $1`,
-        [sessionId, nextExpiresAt]
+        [resolvedSessionId, nextExpiresAt]
       );
     }
   }
@@ -199,7 +200,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   return {
     ok: true,
     session: {
-      sessionId,
+      sessionId: resolvedSessionId,
       username: session.username,
       displayName: session.display_name,
       createdAt: new Date(createdMs).toISOString(),
