@@ -98,7 +98,10 @@ function buildChatNameFromId(chatId) {
 }
 
 function buildInitialChatList(activeChatId) {
-  const primaryId = String(activeChatId || "").trim() || `chat-${crypto.randomUUID()}`;
+  const primaryId = String(activeChatId || "").trim();
+  if (!primaryId) {
+    return [];
+  }
   return [{ id: primaryId, name: buildChatNameFromId(primaryId) }];
 }
 
@@ -336,8 +339,8 @@ function App() {
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
   const authSessionTokenRef = useRef("");
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
-  const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
-  const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [chatList, setChatList] = useState([]);
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [volatileChat, setVolatileChat] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
@@ -408,6 +411,7 @@ function App() {
     }
     setIsUserMenuOpen(false);
     setIsAuthenticated(false);
+    setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
   }
 
   async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
@@ -769,15 +773,15 @@ function App() {
     const sessionId = sessionIdRef.current;
     setIsLoadingChats(true);
     try {
-      const response = await apiFetch(
+      let response = await apiFetch(
         `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
       );
-      const payload = await response.json().catch(() => ({}));
+      let payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to load chats");
       }
 
-      const nextChats = Array.isArray(payload.chats)
+      let nextChats = Array.isArray(payload.chats)
         ? payload.chats.map((chat) => ({
           id: chat.id,
           name: chat.name || buildChatNameFromId(chat.id),
@@ -788,18 +792,50 @@ function App() {
         }))
         : [];
 
+      if (nextChats.length === 0) {
+        const createResponse = await apiFetch(`/api/chats`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        const createPayload = await createResponse.json().catch(() => ({}));
+        if (!createResponse.ok) {
+          throw new Error(createPayload?.error || "Failed to create initial chat");
+        }
+
+        response = await apiFetch(
+          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
+        );
+        payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load chats");
+        }
+        nextChats = Array.isArray(payload.chats)
+          ? payload.chats.map((chat) => ({
+            id: chat.id,
+            name: chat.name || buildChatNameFromId(chat.id),
+            status: chat.status || "active",
+            tagFilters: chat.tagFilters && typeof chat.tagFilters === "object"
+              ? chat.tagFilters
+              : { disabledTags: [] },
+          }))
+          : [];
+      }
+
       const fallbackChatId = preferredChatId || payload.activeChatId || chatIdRef.current;
       const nextActiveChat = nextChats.find((chat) => chat.id === fallbackChatId)
         ? fallbackChatId
-        : (payload.activeChatId || nextChats[0]?.id || chatIdRef.current);
+        : (payload.activeChatId || nextChats[0]?.id || null);
 
-      setChatList(nextChats.length > 0 ? nextChats : buildInitialChatList(nextActiveChat));
+      setChatList(nextChats);
       setActiveChatId(nextActiveChat);
-      chatIdRef.current = nextActiveChat;
-      try {
-        window.localStorage.setItem(CHAT_ID_STORAGE_KEY, nextActiveChat);
-      } catch {
-        // ignore storage write errors
+      chatIdRef.current = nextActiveChat || "";
+      if (nextActiveChat) {
+        try {
+          window.localStorage.setItem(CHAT_ID_STORAGE_KEY, nextActiveChat);
+        } catch {
+          // ignore storage write errors
+        }
       }
     } finally {
       setIsLoadingChats(false);
@@ -847,7 +883,7 @@ function App() {
   }, [hasShownReadyGreeting, isAuthenticated]);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || !activeChatId) return;
     loadMessagesFromDb(activeChatId).catch(() => {
       setMessages([]);
     });
@@ -856,7 +892,8 @@ function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
     refreshChats({ preferredChatId: chatIdRef.current }).catch(() => {
-      setChatList(buildInitialChatList(chatIdRef.current));
+      setChatList([]);
+      setActiveChatId(null);
     });
   }, [isAuthenticated]);
 
