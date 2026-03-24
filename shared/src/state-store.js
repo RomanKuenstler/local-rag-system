@@ -153,6 +153,10 @@ async function resolveUserIdForSession(sessionId) {
   return inserted.rows[0]?.user_id || defaultUserId;
 }
 
+export async function getUserIdForSession(sessionId) {
+  return resolveUserIdForSession(sessionId);
+}
+
 export async function updateSetting(key, value, { sessionId = null } = {}) {
   const userId = await resolveUserIdForSession(sessionId);
   await dbQuery(
@@ -165,20 +169,44 @@ export async function updateSetting(key, value, { sessionId = null } = {}) {
   );
 }
 
-export async function getSessionSetting({ sessionId, settingName, fallbackValue }) {
-  const userId = await resolveUserIdForSession(sessionId);
-  const settingKey = buildSessionSettingKey(sessionId, settingName);
+export async function getUserSetting({ userId, settingName, fallbackValue }) {
+  const normalizedUserId = Number.parseInt(String(userId || ""), 10);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return fallbackValue;
+  }
+  const settingKey = buildSessionSettingKey(null, settingName);
   const result = await dbQuery(
     "SELECT setting_value FROM app_settings WHERE user_id = $1 AND setting_key = $2",
-    [userId, settingKey]
+    [normalizedUserId, settingKey]
   );
   const value = result.rows[0]?.setting_value?.value;
   return value ?? fallbackValue;
 }
 
+export async function updateUserSetting({ userId, settingName, value }) {
+  const normalizedUserId = Number.parseInt(String(userId || ""), 10);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    throw new Error("Invalid user id");
+  }
+  const settingKey = buildSessionSettingKey(null, settingName);
+  await dbQuery(
+    `INSERT INTO app_settings (user_id, setting_key, setting_value, updated_at)
+     VALUES ($1, $2, $3::jsonb, NOW())
+     ON CONFLICT (user_id, setting_key) DO UPDATE
+       SET setting_value = EXCLUDED.setting_value,
+           updated_at = NOW()`,
+    [normalizedUserId, settingKey, JSON.stringify({ value })]
+  );
+}
+
+export async function getSessionSetting({ sessionId, settingName, fallbackValue }) {
+  const userId = await resolveUserIdForSession(sessionId);
+  return getUserSetting({ userId, settingName, fallbackValue });
+}
+
 export async function updateSessionSetting({ sessionId, settingName, value }) {
-  const settingKey = buildSessionSettingKey(sessionId, settingName);
-  await updateSetting(settingKey, value, { sessionId });
+  const userId = await resolveUserIdForSession(sessionId);
+  await updateUserSetting({ userId, settingName, value });
 }
 
 export async function getSessionPersonalizationSettings(sessionId) {

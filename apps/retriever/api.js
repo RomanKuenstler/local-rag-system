@@ -60,6 +60,8 @@ import {
   deleteChat,
   ensureSessionExists,
   getRuntimeConfigState,
+  getUserIdForSession,
+  getUserSetting,
   getIndexStateMap,
   getChatTagFilterState,
   initializeRuntimeConfigDefaults,
@@ -78,6 +80,7 @@ import {
   updateChatName,
   updateChatTagFilterState,
   updateSetting,
+  updateUserSetting,
   updateSessionPersonalizationSettings,
   updateSessionSetting,
   updateSessionTagFilterState,
@@ -137,8 +140,9 @@ function normalizePrompt(input) {
 }
 
 async function getSessionUiMode(sessionId) {
-  return getSessionSetting({
-    sessionId,
+  const userId = await getUserIdForSession(sessionId);
+  return getUserSetting({
+    userId,
     settingName: "ui_mode",
     fallbackValue: initialUiMode,
   });
@@ -581,9 +585,10 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
   }
 
   if (normalizedPrompt === "/info") {
+    const userId = await getUserIdForSession(sessionId);
     const currentUiMode = await getSessionUiMode(sessionId);
-    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
-      sessionId,
+    const currentAssistantMode = normalizeAssistantMode(await getUserSetting({
+      userId,
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }));
@@ -650,8 +655,9 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
 
 
   if (normalizedPrompt === "/assistant") {
-    const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
-      sessionId,
+    const userId = await getUserIdForSession(sessionId);
+    const currentAssistantMode = normalizeAssistantMode(await getUserSetting({
+      userId,
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }));
@@ -703,7 +709,8 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
       };
     }
 
-    await updateSetting("ui_mode", requestedMode, { sessionId });
+    const userId = await getUserIdForSession(sessionId);
+    await updateUserSetting({ userId, settingName: "ui_mode", value: requestedMode });
     return {
       statusCode: 200,
       payload: {
@@ -731,11 +738,8 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
     }
 
     const nextAssistantMode = normalizeAssistantMode(requestedMode);
-    await updateSessionSetting({
-      sessionId,
-      settingName: "assistant_mode",
-      value: nextAssistantMode,
-    });
+    const userId = await getUserIdForSession(sessionId);
+    await updateUserSetting({ userId, settingName: "assistant_mode", value: nextAssistantMode });
 
     return {
       statusCode: 200,
@@ -1017,8 +1021,9 @@ async function handlePrompt(req, res) {
     return;
   }
   const { chatId, chatName } = resolvedChat;
-  const currentAssistantMode = normalizeAssistantMode(await getSessionSetting({
-    sessionId,
+  const currentUserId = await getUserIdForSession(sessionId);
+  const currentAssistantMode = normalizeAssistantMode(await getUserSetting({
+    userId: currentUserId,
     settingName: "assistant_mode",
     fallbackValue: initialAssistantMode,
   }));
@@ -1550,12 +1555,13 @@ async function handleDownloadChat(req, res, chatId) {
 async function handleStatus(_req, res) {
   const url = new URL(_req.url, `http://${_req.headers.host || "localhost"}`);
   const sessionId = String(url.searchParams.get("sessionId") || "").trim();
+  const userId = sessionId ? await getUserIdForSession(sessionId) : null;
   const currentUiMode = sessionId
     ? await getSessionUiMode(sessionId)
     : initialUiMode;
   const currentAssistantMode = sessionId
-    ? normalizeAssistantMode(await getSessionSetting({
-      sessionId,
+    ? normalizeAssistantMode(await getUserSetting({
+      userId,
       settingName: "assistant_mode",
       fallbackValue: initialAssistantMode,
     }))
