@@ -324,6 +324,12 @@ function App() {
   const [authenticatedDisplayName, setAuthenticatedDisplayName] = useState("");
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [loginMode, setLoginMode] = useState("signin");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
@@ -379,7 +385,15 @@ function App() {
   const activeChainProgress = statusData?.assistant?.chainProgress || null;
   const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
   const trimmedLoginUsername = loginUsername.trim();
-  const isLoginFormValid = trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
+  const isChangePasswordMode = loginMode === "change-password";
+  const doNewPasswordsMatch = newPassword === confirmNewPassword;
+  const isLoginFormValid = isChangePasswordMode
+    ? trimmedLoginUsername.length >= 4
+      && loginPassword.length >= 8
+      && newPassword.length >= 8
+      && confirmNewPassword.length >= 8
+      && doNewPasswordsMatch
+    : trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
 
   useEffect(() => {
     if (!isSending) {
@@ -491,30 +505,57 @@ function App() {
     event?.preventDefault?.();
     if (!isLoginFormValid || isLoginSubmitting) return;
 
+    if (isChangePasswordMode && !doNewPasswordsMatch) {
+      setLoginError("New password and confirmation must match.");
+      return;
+    }
+
     setLoginError("");
     setIsLoginSubmitting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const endpoint = isChangePasswordMode
+        ? `${API_BASE_URL}/api/auth/change-password`
+        : `${API_BASE_URL}/api/auth/login`;
+      const body = isChangePasswordMode
+        ? {
+          username: trimmedLoginUsername,
+          oldPassword: loginPassword,
+          newPassword,
+          confirmNewPassword,
+        }
+        : {
           username: trimmedLoginUsername,
           password: loginPassword,
-        }),
+        };
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.error || "Sign in failed.");
+        throw new Error(payload?.error || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
       }
 
       const user = payload?.user || {};
+      if (payload?.requirePasswordChange === true && !isChangePasswordMode) {
+        setLoginMode("change-password");
+        setLoginPassword("");
+        setNewPassword("");
+        setConfirmNewPassword("");
+        setLoginError("");
+        return;
+      }
       setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
       setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
       setIsAuthenticated(true);
+      setLoginMode("signin");
       setLoginPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
       setLoginError("");
     } catch (error) {
-      setLoginError(error.message || "Sign in failed.");
+      setLoginError(error.message || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
     } finally {
       setIsLoginSubmitting(false);
     }
@@ -2221,7 +2262,7 @@ function App() {
         React.createElement(
           "form",
           { className: "login-card", onSubmit: submitLogin },
-          React.createElement("h2", null, "Sign In"),
+          React.createElement("h2", null, isChangePasswordMode ? "Please change your password" : "Sign In"),
           React.createElement(
             "label",
             { className: "login-field-label", htmlFor: "login-username" },
@@ -2242,20 +2283,105 @@ function App() {
           React.createElement(
             "label",
             { className: "login-field-label", htmlFor: "login-password" },
-            "Password"
+            isChangePasswordMode ? "Old password" : "Password"
           ),
-          React.createElement("input", {
-            id: "login-password",
-            className: "login-input",
-            type: "password",
-            value: loginPassword,
-            minLength: 8,
-            autoComplete: "current-password",
-            onChange: (event) => {
-              setLoginPassword(event.target.value);
-              if (loginError) setLoginError("");
-            },
-          }),
+          React.createElement(
+            "div",
+            { className: "login-input-wrap" },
+            React.createElement("input", {
+              id: "login-password",
+              className: "login-input",
+              type: isLoginPasswordVisible ? "text" : "password",
+              value: loginPassword,
+              minLength: 8,
+              autoComplete: "current-password",
+              onChange: (event) => {
+                setLoginPassword(event.target.value);
+                if (loginError) setLoginError("");
+              },
+            }),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "login-password-visibility",
+                "aria-label": isLoginPasswordVisible ? "Hide password" : "Show password",
+                onClick: () => setIsLoginPasswordVisible((previous) => !previous),
+              },
+              icon(isLoginPasswordVisible ? eyeOffIconPath : eyeIconPath)
+            )
+          ),
+          isChangePasswordMode
+            ? React.createElement(
+              React.Fragment,
+              null,
+              React.createElement(
+                "label",
+                { className: "login-field-label", htmlFor: "login-new-password" },
+                "New password"
+              ),
+              React.createElement(
+                "div",
+                { className: "login-input-wrap" },
+                React.createElement("input", {
+                  id: "login-new-password",
+                  className: "login-input",
+                  type: isNewPasswordVisible ? "text" : "password",
+                  value: newPassword,
+                  minLength: 8,
+                  autoComplete: "new-password",
+                  onChange: (event) => {
+                    setNewPassword(event.target.value);
+                    if (loginError) setLoginError("");
+                  },
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "login-password-visibility",
+                    "aria-label": isNewPasswordVisible ? "Hide new password" : "Show new password",
+                    onClick: () => setIsNewPasswordVisible((previous) => !previous),
+                  },
+                  icon(isNewPasswordVisible ? eyeOffIconPath : eyeIconPath)
+                )
+              ),
+              React.createElement(
+                "label",
+                { className: "login-field-label", htmlFor: "login-confirm-password" },
+                "Confirm new password"
+              ),
+              React.createElement(
+                "div",
+                { className: "login-input-wrap" },
+                React.createElement("input", {
+                  id: "login-confirm-password",
+                  className: "login-input",
+                  type: isConfirmPasswordVisible ? "text" : "password",
+                  value: confirmNewPassword,
+                  minLength: 8,
+                  autoComplete: "new-password",
+                  onChange: (event) => {
+                    setConfirmNewPassword(event.target.value);
+                    if (loginError) setLoginError("");
+                  },
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "login-password-visibility",
+                    "aria-label": isConfirmPasswordVisible ? "Hide confirmed password" : "Show confirmed password",
+                    onClick: () => setIsConfirmPasswordVisible((previous) => !previous),
+                  },
+                  icon(isConfirmPasswordVisible ? eyeOffIconPath : eyeIconPath)
+                )
+              )
+            )
+            : null,
+          isChangePasswordMode && confirmNewPassword.length > 0 && !doNewPasswordsMatch
+            ? React.createElement("p", { className: "login-error", role: "alert" }, "New password and confirmation must match.")
+            : null,
           loginError
             ? React.createElement("p", { className: "login-error", role: "alert" }, loginError)
             : null,
@@ -2266,7 +2392,14 @@ function App() {
               className: "restart-button login-submit-button",
               disabled: !isLoginFormValid || isLoginSubmitting,
             },
-            isLoginSubmitting ? "Signing In…" : "Sign In"
+            icon("M2 21l20-9L2 3v7l14 2-14 2z"),
+            React.createElement(
+              "span",
+              null,
+              isLoginSubmitting
+                ? (isChangePasswordMode ? "Changing password…" : "Signing In…")
+                : (isChangePasswordMode ? "Change password" : "Sign In")
+            )
           )
         )
       )

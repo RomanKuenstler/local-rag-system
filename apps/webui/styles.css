@@ -33,8 +33,8 @@ body {
   display: grid;
   gap: 0.7rem;
   padding: 1.5rem 1.3rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
+  border: none;
+  border-radius: 0;
   background: #ffffff;
 }
 
@@ -64,6 +64,40 @@ body {
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
 }
 
+.login-input-wrap {
+  position: relative;
+}
+
+.login-input-wrap .login-input {
+  padding-right: 2.45rem;
+}
+
+.login-password-visibility {
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.login-password-visibility:hover {
+  background: #f3f4f6;
+}
+
+.login-password-visibility .icon {
+  width: 1rem;
+  height: 1rem;
+}
+
 .login-error {
   margin: 0;
   color: #b91c1c;
@@ -72,8 +106,17 @@ body {
 
 .login-submit-button {
   margin-top: 0.35rem;
-  justify-self: center;
-  min-width: 8rem;
+  justify-self: stretch;
+  width: 100%;
+  background: #111827;
+  color: #ffffff;
+  border-radius: 10px;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.login-submit-button:disabled {
+  opacity: 0.62;
 }
 
 .topbar {

@@ -7,6 +7,7 @@ const DEFAULT_USERNAME = "default";
 const DEFAULT_DISPLAY_NAME = "Default User";
 const DEFAULT_PASSWORD = "default";
 const USERS_CONFIG_PATH = String(process.env.AUTH_USERS_FILE || "").trim();
+const INITIAL_USER_PASSWORD = String(process.env.AUTH_INITIAL_PASSWORD || "Passw0rd!");
 
 function normalizeConfiguredUsers(rawConfig) {
   const list = Array.isArray(rawConfig)
@@ -19,8 +20,7 @@ function normalizeConfiguredUsers(rawConfig) {
     .map((entry) => {
       const username = String(entry?.username || "").trim();
       const displayName = String(entry?.display_name || "").trim();
-      const password = String(entry?.password || "");
-      if (!username || !displayName || !password) {
+      if (!username || !displayName) {
         return null;
       }
       if (username === DEFAULT_USERNAME) {
@@ -29,7 +29,6 @@ function normalizeConfiguredUsers(rawConfig) {
       return {
         username,
         displayName,
-        password,
       };
     })
     .filter(Boolean);
@@ -79,7 +78,7 @@ export async function syncUsersFromConfigFile(filePath = resolveUsersConfigPath(
   await dbQuery("BEGIN");
   try {
     for (const user of configuredUsers) {
-      const passwordHash = hashPasswordWithGlobalSalt(user.password);
+      const passwordHash = hashPasswordWithGlobalSalt(INITIAL_USER_PASSWORD);
       const globalSalt = getGlobalPasswordSalt();
       await dbQuery(
         `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw, updated_at)

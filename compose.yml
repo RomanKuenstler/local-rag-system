@@ -26,6 +26,7 @@ services:
       POSTGRES_PASSWORD: rag
       AUTH_PASSWORD_SALT: xzy132
       AUTH_USERS_FILE: /app/users.json
+      AUTH_INITIAL_PASSWORD: Passw0rd!
     volumes:
       - ./data:/app/data
       - ./users.json:/app/users.json:ro
