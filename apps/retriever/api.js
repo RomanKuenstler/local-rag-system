@@ -696,7 +696,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
     }
 
     uiMode = requestedMode;
-    await updateSetting("ui_mode", uiMode);
+    await updateSetting("ui_mode", uiMode, { sessionId });
     return {
       statusCode: 200,
       payload: {
@@ -797,7 +797,7 @@ async function handlePromptCommand(prompt, sessionId, chatId) {
         "max similarities": "maxSimilarities",
         "min similarities": "minSimilarities",
         "cosine limit": "cosineLimit",
-      }[normalizedConfigName]]);
+      }[normalizedConfigName]], { sessionId });
     }
 
     return {

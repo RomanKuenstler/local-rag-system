@@ -1,0 +1,10 @@
+{
+  "users": [
+    {
+      "username": "test",
+      "display_name": "Test User",
+      "password_hash": "b8de38d77f7daefce973812f3bcf45308f6f72f4f23358648f9c4f64f8ec4bc1",
+      "password_salt": "example-static-salt-change-me"
+    }
+  ]
+}
