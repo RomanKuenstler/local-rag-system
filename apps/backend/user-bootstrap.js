@@ -6,8 +6,17 @@ import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt } from "../../shared/
 const DEFAULT_USERNAME = "default";
 const DEFAULT_DISPLAY_NAME = "Default User";
 const DEFAULT_PASSWORD = "default";
+const DEFAULT_ROLE = "users";
+const DEFAULT_ADMIN_USERNAME = "defaultadm";
+const DEFAULT_ADMIN_DISPLAY_NAME = "Default Admin";
+const DEFAULT_ADMIN_PASSWORD = "defaultadm";
+const ADMIN_ROLE = "admin";
 const USERS_CONFIG_PATH = String(process.env.AUTH_USERS_FILE || "").trim();
 const INITIAL_USER_PASSWORD = String(process.env.AUTH_INITIAL_PASSWORD || "Passw0rd!");
+
+function normalizeRole(input) {
+  return String(input || "").trim().toLowerCase() === ADMIN_ROLE ? ADMIN_ROLE : DEFAULT_ROLE;
+}
 
 function normalizeConfiguredUsers(rawConfig) {
   const list = Array.isArray(rawConfig)
@@ -23,34 +32,57 @@ function normalizeConfiguredUsers(rawConfig) {
       if (!username || !displayName) {
         return null;
       }
-      if (username === DEFAULT_USERNAME) {
+      if (username === DEFAULT_USERNAME || username === DEFAULT_ADMIN_USERNAME) {
         return null;
       }
       return {
         username,
         displayName,
+        role: normalizeRole(entry?.role),
       };
     })
     .filter(Boolean);
 }
 
-async function ensureDefaultUser() {
+async function ensureDefaultUsers() {
   const globalSalt = getGlobalPasswordSalt();
-  const hashedDefaultPassword = hashPasswordWithGlobalSalt(DEFAULT_PASSWORD);
-  const result = await dbQuery(
-    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw, updated_at)
-     VALUES ($1, $2, $3, $4, TRUE, FALSE, NOW())
+  const defaults = [
+    {
+      username: DEFAULT_USERNAME,
+      displayName: DEFAULT_DISPLAY_NAME,
+      password: DEFAULT_PASSWORD,
+      role: DEFAULT_ROLE,
+    },
+    {
+      username: DEFAULT_ADMIN_USERNAME,
+      displayName: DEFAULT_ADMIN_DISPLAY_NAME,
+      password: DEFAULT_ADMIN_PASSWORD,
+      role: ADMIN_ROLE,
+    },
+  ];
+  const ensuredUserIds = [];
+  for (const entry of defaults) {
+    const hashedPassword = hashPasswordWithGlobalSalt(entry.password);
+    const result = await dbQuery(
+    `INSERT INTO users (username, display_name, password_hash, password_salt, role, is_active, require_changepw, updated_at)
+     VALUES ($1, $2, $3, $4, $5, TRUE, FALSE, NOW())
      ON CONFLICT (username) DO UPDATE
        SET display_name = EXCLUDED.display_name,
            password_hash = EXCLUDED.password_hash,
            password_salt = EXCLUDED.password_salt,
+           role = EXCLUDED.role,
            is_active = TRUE,
            require_changepw = FALSE,
            updated_at = NOW()
      RETURNING id`,
-    [DEFAULT_USERNAME, DEFAULT_DISPLAY_NAME, hashedDefaultPassword, globalSalt]
-  );
-  return result.rows[0]?.id || null;
+      [entry.username, entry.displayName, hashedPassword, globalSalt, entry.role]
+    );
+    const userId = result.rows[0]?.id;
+    if (userId) {
+      ensuredUserIds.push(userId);
+    }
+  }
+  return ensuredUserIds;
 }
 
 function resolveUsersConfigPath() {
@@ -61,7 +93,7 @@ function resolveUsersConfigPath() {
 }
 
 export async function syncUsersFromConfigFile(filePath = resolveUsersConfigPath()) {
-  const defaultUserId = await ensureDefaultUser();
+  const defaultUserIds = await ensureDefaultUsers();
 
   let parsed = { users: [] };
   try {
@@ -81,35 +113,37 @@ export async function syncUsersFromConfigFile(filePath = resolveUsersConfigPath(
       const passwordHash = hashPasswordWithGlobalSalt(INITIAL_USER_PASSWORD);
       const globalSalt = getGlobalPasswordSalt();
       await dbQuery(
-        `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw, updated_at)
-         VALUES ($1, $2, $3, $4, TRUE, TRUE, NOW())
+        `INSERT INTO users (username, display_name, password_hash, password_salt, role, is_active, require_changepw, updated_at)
+         VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, NOW())
          ON CONFLICT (username) DO UPDATE
            SET display_name = EXCLUDED.display_name,
+               role = EXCLUDED.role,
                is_active = TRUE,
                updated_at = NOW()`,
-        [user.username, user.displayName, passwordHash, globalSalt]
+        [user.username, user.displayName, passwordHash, globalSalt, user.role]
       );
     }
 
     const configuredUsernames = configuredUsers.map((entry) => entry.username);
+    const protectedUsernames = [DEFAULT_USERNAME, DEFAULT_ADMIN_USERNAME];
     if (configuredUsernames.length > 0) {
       await dbQuery(
         `UPDATE users
          SET is_active = FALSE,
              updated_at = NOW()
-         WHERE username <> $1
+         WHERE username <> ALL($1::text[])
            AND username <> ALL($2::text[])
            AND is_active = TRUE`,
-        [DEFAULT_USERNAME, configuredUsernames]
+        [protectedUsernames, configuredUsernames]
       );
     } else {
       await dbQuery(
         `UPDATE users
          SET is_active = FALSE,
              updated_at = NOW()
-         WHERE username <> $1
+         WHERE username <> ALL($1::text[])
            AND is_active = TRUE`,
-        [DEFAULT_USERNAME]
+        [protectedUsernames]
       );
     }
 
@@ -117,8 +151,8 @@ export async function syncUsersFromConfigFile(filePath = resolveUsersConfigPath(
       `UPDATE users
        SET is_active = TRUE,
            updated_at = NOW()
-       WHERE id = $1`,
-      [defaultUserId]
+       WHERE id = ANY($1::bigint[])`,
+      [defaultUserIds]
     );
 
     await dbQuery("COMMIT");

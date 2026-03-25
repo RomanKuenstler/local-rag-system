@@ -174,7 +174,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
 
   const result = requestedSessionId
     ? await dbQuery(
-      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name, u.role
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.session_identifier = $1
@@ -182,7 +182,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
       [requestedSessionId]
     )
     : await dbQuery(
-      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name, u.role
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.session_token_hash = $1
@@ -235,6 +235,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
       sessionId: resolvedSessionId,
       username: session.username,
       displayName: session.display_name,
+      role: session.role,
       createdAt: new Date(createdMs).toISOString(),
       expiresAt: nextExpiresAt,
       maxExpiresAt: new Date(maxExpiresMs).toISOString(),
@@ -448,7 +449,7 @@ async function handleLogin(req, res, url) {
   }
 
   const userResult = await dbQuery(
-    `SELECT id, username, display_name, password_hash, password_salt, is_active, require_changepw
+    `SELECT id, username, display_name, password_hash, password_salt, role, is_active, require_changepw
      FROM users
      WHERE username = $1
      LIMIT 1`,
@@ -478,6 +479,7 @@ async function handleLogin(req, res, url) {
         id: user.id,
         username: user.username,
         displayName: user.display_name,
+        role: user.role,
       },
     });
     return;
@@ -491,6 +493,7 @@ async function handleLogin(req, res, url) {
       id: user.id,
       username: user.username,
       displayName: user.display_name,
+      role: user.role,
     },
     session,
   });
@@ -525,7 +528,7 @@ async function handleChangePassword(req, res, url) {
   }
 
   const userResult = await dbQuery(
-    `SELECT id, username, display_name, password_hash, password_salt, is_active
+    `SELECT id, username, display_name, password_hash, password_salt, role, is_active
      FROM users
      WHERE username = $1
      LIMIT 1`,
@@ -567,6 +570,7 @@ async function handleChangePassword(req, res, url) {
       id: user.id,
       username: user.username,
       displayName: user.display_name,
+      role: user.role,
     },
     session,
   });
@@ -584,6 +588,7 @@ async function handleSession(req, res, url) {
     user: {
       username: validation.session.username,
       displayName: validation.session.displayName,
+      role: validation.session.role,
     },
     session: {
       sessionId: validation.session.sessionId,

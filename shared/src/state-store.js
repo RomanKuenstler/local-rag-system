@@ -111,12 +111,13 @@ async function getDefaultUserId() {
   const globalSalt = getGlobalPasswordSalt();
   const defaultHash = hashPasswordWithGlobalSalt("default");
   const ensured = await dbQuery(
-    `INSERT INTO users (username, display_name, password_hash, password_salt, is_active, require_changepw)
-     VALUES ('default', 'Default User', $1, $2, TRUE, FALSE)
+    `INSERT INTO users (username, display_name, password_hash, password_salt, role, is_active, require_changepw)
+     VALUES ('default', 'Default User', $1, $2, 'users', TRUE, FALSE)
      ON CONFLICT (username) DO UPDATE
        SET username = EXCLUDED.username,
            password_hash = EXCLUDED.password_hash,
            password_salt = EXCLUDED.password_salt,
+           role = EXCLUDED.role,
            is_active = TRUE,
            require_changepw = FALSE
      RETURNING id`
