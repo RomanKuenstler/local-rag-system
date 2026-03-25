@@ -1,10 +1,27 @@
 export function parseIntegerConfig(rawValue) {
-  const parsed = Number.parseInt(String(rawValue), 10);
+  const normalized = String(rawValue ?? "").trim();
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
 export function parseFloatConfig(rawValue) {
-  const parsed = Number.parseFloat(String(rawValue));
+  const normalized = String(rawValue ?? "").trim().replace(",", ".");
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number.parseFloat(normalized);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function parseCosineLimitConfig(rawValue) {
+  const normalized = String(rawValue ?? "").trim();
+  if (!/^0[.,]\d{2}$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number.parseFloat(normalized.replace(",", "."));
   return Number.isNaN(parsed) ? null : parsed;
 }
 
@@ -41,8 +58,8 @@ export function createRuntimeConfigManager(initialConfig, onHistoryMessagesChang
       key: "historyMessages",
       parse: parseIntegerConfig,
       validate: (value) => {
-        if (!Number.isInteger(value) || value < 1) {
-          return "must be an integer >= 1";
+        if (!Number.isInteger(value) || value < 1 || value > 5) {
+          return "must be an integer between 1 and 5";
         }
         return null;
       },
@@ -51,8 +68,8 @@ export function createRuntimeConfigManager(initialConfig, onHistoryMessagesChang
       key: "maxSimilarities",
       parse: parseIntegerConfig,
       validate: (value, config) => {
-        if (!Number.isInteger(value) || value < 1) {
-          return "must be an integer >= 1";
+        if (!Number.isInteger(value) || value < 2 || value > 8) {
+          return "must be an integer between 2 and 8";
         }
         if (value < config.minSimilarities) {
           return `must be >= min similarities (${config.minSimilarities})`;
@@ -64,8 +81,8 @@ export function createRuntimeConfigManager(initialConfig, onHistoryMessagesChang
       key: "minSimilarities",
       parse: parseIntegerConfig,
       validate: (value, config) => {
-        if (!Number.isInteger(value) || value < 0) {
-          return "must be an integer >= 0";
+        if (!Number.isInteger(value) || value < 2 || value > 8) {
+          return "must be an integer between 2 and 8";
         }
         if (value > config.maxSimilarities) {
           return `must be <= max similarities (${config.maxSimilarities})`;
@@ -75,13 +92,13 @@ export function createRuntimeConfigManager(initialConfig, onHistoryMessagesChang
     },
     "cosine limit": {
       key: "cosineLimit",
-      parse: parseFloatConfig,
+      parse: parseCosineLimitConfig,
       validate: (value) => {
         if (!Number.isFinite(value)) {
-          return "must be a valid number";
+          return "must be a valid decimal formatted as 0.xx";
         }
-        if (value < 0 || value > 1) {
-          return "must be between 0 and 1";
+        if (value < 0.45 || value > 0.85) {
+          return "must be between 0.45 and 0.85";
         }
         return null;
       },
