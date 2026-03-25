@@ -82,6 +82,8 @@ const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
 const LOGIN_PAGE_HASH = "#login";
+const LIBRARY_PAGE_HASH = "#library";
+const ADMIN_PAGE_HASH = "#admin";
 const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
@@ -290,7 +292,12 @@ marked.setOptions({
 });
 
 function App() {
-  const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
+  const getInitialView = () => {
+    const currentHash = String(window.location.hash || "").trim().toLowerCase();
+    if (currentHash === LIBRARY_PAGE_HASH) return "library";
+    if (currentHash === ADMIN_PAGE_HASH) return "admin";
+    return "chat";
+  };
   const buildEnabledTagMapFromDisabledTags = (disabledTags) => {
     const next = {};
     const disabled = Array.isArray(disabledTags) ? disabledTags : [];
@@ -409,8 +416,8 @@ function App() {
 
   function clearAuthenticatedSessionState() {
     const currentHash = String(window.location.hash || "").trim().toLowerCase();
-    if (currentHash === "#library") {
-      postLoginHashRef.current = "#library";
+    if (currentHash === LIBRARY_PAGE_HASH || currentHash === ADMIN_PAGE_HASH) {
+      postLoginHashRef.current = currentHash;
     } else if (currentHash !== LOGIN_PAGE_HASH) {
       postLoginHashRef.current = "";
     }
@@ -666,7 +673,9 @@ function App() {
       setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
       setIsAuthenticated(true);
       if (window.location.hash === LOGIN_PAGE_HASH) {
-        window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
+        window.location.hash = [LIBRARY_PAGE_HASH, ADMIN_PAGE_HASH].includes(postLoginHashRef.current)
+          ? postLoginHashRef.current
+          : "";
       }
       setLoginMode("signin");
       setLoginPassword("");
@@ -957,26 +966,33 @@ function App() {
   useEffect(() => {
     function syncViewFromHash() {
       const currentHash = String(window.location.hash || "").trim().toLowerCase();
+      const isAdmin = authenticatedRole === "admin";
       if (!isAuthenticated) {
         if (currentHash !== LOGIN_PAGE_HASH) {
-          if (currentHash === "#library") {
-            postLoginHashRef.current = "#library";
+          if (currentHash === LIBRARY_PAGE_HASH || currentHash === ADMIN_PAGE_HASH) {
+            postLoginHashRef.current = currentHash;
           }
           window.location.hash = LOGIN_PAGE_HASH;
         }
         return;
       }
       if (currentHash === LOGIN_PAGE_HASH) {
-        window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
+        window.location.hash = [LIBRARY_PAGE_HASH, ADMIN_PAGE_HASH].includes(postLoginHashRef.current)
+          ? postLoginHashRef.current
+          : "";
         return;
       }
-      setActiveView(currentHash === "#library" ? "library" : "chat");
+      if (currentHash === ADMIN_PAGE_HASH && !isAdmin) {
+        window.location.hash = "";
+        return;
+      }
+      setActiveView(currentHash === LIBRARY_PAGE_HASH ? "library" : currentHash === ADMIN_PAGE_HASH ? "admin" : "chat");
     }
 
     syncViewFromHash();
     window.addEventListener("hashchange", syncViewFromHash);
     return () => window.removeEventListener("hashchange", syncViewFromHash);
-  }, [isAuthenticated]);
+  }, [authenticatedRole, isAuthenticated]);
 
   useEffect(() => () => {
     if (sendingStatusPollRef.current) {
@@ -2065,6 +2081,7 @@ function App() {
     React.createElement("path", { d: path })
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
+  const adminIconPath = "M12 2 4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5zm0 8.3A2.7 2.7 0 1 1 12 5a2.7 2.7 0 0 1 0 5.3m0 8.7c-2.3-.7-4.1-2.4-5.1-4.7a6.8 6.8 0 0 1 10.2 0A8.6 8.6 0 0 1 12 19";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
   const plusChatIconPath = "M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1";
   const settingsIconPath = "M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5";
@@ -2232,7 +2249,14 @@ function App() {
     setIsMenuOpen(false);
     setIsAssistantModeMenuOpen(false);
     setPanelData(null);
-    window.location.hash = "#library";
+    window.location.hash = LIBRARY_PAGE_HASH;
+  }
+
+  function openAdminPage() {
+    setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
+    setPanelData(null);
+    window.location.hash = ADMIN_PAGE_HASH;
   }
 
   function openChatPage() {
@@ -2749,11 +2773,11 @@ function App() {
       React.createElement(
         "div",
         { className: "quick-actions" },
-        activeView === "library"
+        activeView === "library" || activeView === "admin"
           ? React.createElement(
             React.Fragment,
             null,
-            React.createElement("h2", { className: "header-title" }, "Library")
+            React.createElement("h2", { className: "header-title" }, activeView === "admin" ? "ADMIN" : "LIBRARY")
           )
           : React.createElement(
             "div",
@@ -2816,12 +2840,36 @@ function App() {
           "button",
           {
             type: "button",
-            className: "side-nav-item",
-            onClick: activeView === "library" ? openChatPage : openLibraryPage,
+            className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
+            onClick: openChatPage,
             disabled: isNavigationLocked,
           },
-          icon(activeView === "library" ? chatIconPath : libraryIconPath),
-          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
+          icon(chatIconPath),
+          React.createElement("span", null, "Chat")
+        ),
+        isAdminUser
+          ? React.createElement(
+            "button",
+            {
+              type: "button",
+              className: `side-nav-item${activeView === "admin" ? " active" : ""}`,
+              onClick: openAdminPage,
+              disabled: isNavigationLocked,
+            },
+            icon(adminIconPath),
+            React.createElement("span", null, "Admin")
+          )
+          : null,
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${activeView === "library" ? " active" : ""}`,
+            onClick: openLibraryPage,
+            disabled: isNavigationLocked,
+          },
+          icon(libraryIconPath),
+          React.createElement("span", null, "Library")
         ),
         React.createElement(
           "button",
@@ -3214,7 +3262,17 @@ function App() {
             )
           )
         )
-        : React.createElement(
+        : activeView === "admin"
+          ? React.createElement(
+            "section",
+            { className: "chat-column library-column" },
+            React.createElement(
+              "section",
+              { className: "info-group-card library-summary-card" },
+              React.createElement("h4", null, "Admin")
+            )
+          )
+          : React.createElement(
         "section",
         { className: "chat-column" },
         React.createElement(
@@ -3446,10 +3504,22 @@ function App() {
               "Chat"
             )
             : React.createElement(
-              "button",
-              { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
-              icon(libraryIconPath),
-              "Library"
+              React.Fragment,
+              null,
+              isAdminUser
+                ? React.createElement(
+                  "button",
+                  { type: "button", onClick: openAdminPage, disabled: isNavigationLocked },
+                  icon(adminIconPath),
+                  "Admin"
+                )
+                : null,
+              React.createElement(
+                "button",
+                { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
+                icon(libraryIconPath),
+                "Library"
+              )
             ),
           React.createElement(
             "button",
@@ -3473,7 +3543,7 @@ function App() {
         : null,
       null
     ),
-    activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
+    activeView !== "library" && activeView !== "admin" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
         "div",
         { className: "embedding-loading-overlay" },
