@@ -385,7 +385,7 @@ async function handleLibraryDelete(url, res, session) {
     return;
   }
 
-  json(res, 200, { ok: true, path: result.path });
+  json(res, 200, { ok: true, path: result.path, removedVectors: result.removedVectors ?? null });
 }
 
 async function handleLibraryToggle(req, res, session) {

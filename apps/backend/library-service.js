@@ -16,6 +16,8 @@ const LIBRARY_UPLOAD_SUBDIR = (process.env.LIBRARY_UPLOAD_SUBDIR || "_library").
 const MAX_LIBRARY_UPLOAD_BYTES = Number.parseInt(process.env.MAX_LIBRARY_UPLOAD_BYTES || String(15 * 1024 * 1024), 10);
 const EMBEDDABLE_EXTENSION_SET = new Set(EMBEDDABLE_EXTENSIONS.map((extension) => extension.toLowerCase()));
 const TAG_PATTERN = /^[a-z0-9][a-z0-9_\-:.]{0,63}$/;
+const VECTOR_DELETE_VERIFY_RETRIES = 12;
+const VECTOR_DELETE_VERIFY_DELAY_MS = 150;
 
 function normalizeTags(tags) {
   const input = Array.isArray(tags)
@@ -131,19 +133,48 @@ export async function saveManagedLibraryFile({
 
 async function deletePointsBySource(relativePath) {
   const qdrant = createQdrantClient();
+  const sourceFilter = {
+    must: [
+      {
+        key: "source",
+        match: {
+          value: relativePath,
+        },
+      },
+    ],
+  };
+
+  let beforeCount = null;
+  try {
+    const before = await qdrant.count(COLLECTION_NAME, {
+      exact: true,
+      filter: sourceFilter,
+    });
+    if (Number.isFinite(before?.count)) {
+      beforeCount = Number(before.count);
+    }
+  } catch {
+    beforeCount = null;
+  }
+
   await qdrant.delete(COLLECTION_NAME, {
     wait: true,
-    filter: {
-      must: [
-        {
-          key: "source",
-          match: {
-            value: relativePath,
-          },
-        },
-      ],
-    },
+    filter: sourceFilter,
   });
+
+  for (let attempt = 0; attempt < VECTOR_DELETE_VERIFY_RETRIES; attempt++) {
+    const remaining = await qdrant.count(COLLECTION_NAME, {
+      exact: true,
+      filter: sourceFilter,
+    });
+    const remainingCount = Number(remaining?.count || 0);
+    if (remainingCount <= 0) {
+      return { removedVectors: beforeCount };
+    }
+    await new Promise((resolve) => setTimeout(resolve, VECTOR_DELETE_VERIFY_DELAY_MS));
+  }
+
+  throw new Error(`Vector deletion verification failed for '${relativePath}'.`);
 }
 
 export async function deleteManagedLibraryFileForUser(filePath, { userId, isAdmin = false }) {
@@ -180,11 +211,11 @@ export async function deleteManagedLibraryFileForUser(filePath, { userId, isAdmi
 
   const absolutePath = ensurePathInsideContentRoot(effectivePath);
   await fs.rm(absolutePath, { force: true });
-  await deletePointsBySource(effectivePath).catch((error) => {
+  const vectorDeletion = await deletePointsBySource(effectivePath).catch((error) => {
     throw new Error(`Failed deleting vector chunks: ${error.message}`);
   });
   await hardDeleteManagedLibraryFile(effectivePath);
-  return { deleted: true, path: effectivePath };
+  return { deleted: true, path: effectivePath, removedVectors: vectorDeletion?.removedVectors ?? null };
 }
 
 export async function listManagedLibraryFiles({ userId, isAdmin = false }) {

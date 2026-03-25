@@ -1268,7 +1268,11 @@ function App() {
       if (!response.ok) {
         throw new Error(payload?.error || "Delete failed.");
       }
-      setLibraryNotice(`Deleted ${target.path}.`);
+      const removedVectors = Number(payload?.removedVectors);
+      const removedSuffix = Number.isFinite(removedVectors) && removedVectors >= 0
+        ? ` Removed ${removedVectors} vector chunk${removedVectors === 1 ? "" : "s"}.`
+        : "";
+      setLibraryNotice(`Deleted ${target.path}.${removedSuffix}`);
       setPendingLibraryUploads((previous) => previous.filter((file) => file.path !== target.path));
       await refreshStatus();
     } catch (error) {
