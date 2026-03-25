@@ -782,21 +782,23 @@ export async function upsertManagedLibraryFile({
   source = "webui",
   sizeBytes,
   status = "uploaded",
+  uploadedByUserId = null,
 }) {
   await dbQuery(
     `INSERT INTO library_managed_files (
-       file_path, original_name, source, upload_status, size_bytes, uploaded_at, embedded_at, last_error, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, NOW(), NULL, NULL, NOW())
+       file_path, original_name, source, upload_status, size_bytes, uploaded_by_user_id, uploaded_at, embedded_at, last_error, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NULL, NULL, NOW())
      ON CONFLICT (file_path) DO UPDATE SET
        original_name = EXCLUDED.original_name,
        source = EXCLUDED.source,
        upload_status = EXCLUDED.upload_status,
        size_bytes = EXCLUDED.size_bytes,
+       uploaded_by_user_id = EXCLUDED.uploaded_by_user_id,
        uploaded_at = NOW(),
        embedded_at = NULL,
        last_error = NULL,
        updated_at = NOW()`,
-    [filePath, originalName, source, status, sizeBytes]
+    [filePath, originalName, source, status, sizeBytes, uploadedByUserId]
   );
 }
 
@@ -855,12 +857,28 @@ export async function setManagedLibraryFileStatus(filePath, status) {
 
 export async function getManagedLibraryFile(filePath) {
   const result = await dbQuery(
-    `SELECT file_path, original_name, source, upload_status, size_bytes, uploaded_at, embedded_at, last_error, last_job_id, updated_at
+    `SELECT file_path, original_name, source, upload_status, size_bytes, uploaded_by_user_id, uploaded_at, embedded_at, last_error, last_job_id, updated_at
      FROM library_managed_files
      WHERE file_path = $1`,
     [filePath]
   );
   return result.rows[0] || null;
+}
+
+export async function hardDeleteManagedLibraryFile(filePath) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return false;
+  }
+
+  await dbQuery("DELETE FROM file_tags WHERE file_path = $1", [normalizedPath]);
+  await dbQuery("DELETE FROM file_metadata WHERE file_path = $1", [normalizedPath]);
+  const result = await dbQuery(
+    `DELETE FROM library_managed_files
+     WHERE file_path = $1`,
+    [normalizedPath]
+  );
+  return result.rowCount > 0;
 }
 
 export async function listManagedLibraryFilesWithStatus() {
@@ -871,6 +889,7 @@ export async function listManagedLibraryFilesWithStatus() {
        m.source,
        m.upload_status,
        m.size_bytes,
+       m.uploaded_by_user_id,
        m.uploaded_at,
        m.embedded_at,
        m.last_error,
@@ -887,6 +906,92 @@ export async function listManagedLibraryFilesWithStatus() {
      ORDER BY m.updated_at DESC, m.file_path ASC`
   );
   return result.rows;
+}
+
+export async function setManagedLibraryFileEnabledForUser({ userId, filePath, enabled }) {
+  const normalizedUserId = Number.parseInt(String(userId || ""), 10);
+  const normalizedPath = String(filePath || "").trim();
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0 || !normalizedPath) {
+    return null;
+  }
+
+  const result = await dbQuery(
+    `INSERT INTO user_library_file_preferences (user_id, file_path, enabled, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_id, file_path) DO UPDATE
+       SET enabled = EXCLUDED.enabled,
+           updated_at = NOW()
+     RETURNING user_id, file_path, enabled, updated_at`,
+    [normalizedUserId, normalizedPath, enabled !== false]
+  );
+  return result.rows[0] || null;
+}
+
+export async function listManagedLibraryFilesWithUserPreferences(userId) {
+  const normalizedUserId = Number.parseInt(String(userId || ""), 10);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return listManagedLibraryFilesWithStatus();
+  }
+
+  const result = await dbQuery(
+    `SELECT
+       m.file_path,
+       m.original_name,
+       m.source,
+       m.upload_status,
+       m.size_bytes,
+       m.uploaded_by_user_id,
+       m.uploaded_at,
+       m.embedded_at,
+       m.last_error,
+       m.last_job_id,
+       m.updated_at,
+       f.extension,
+       f.last_modified,
+       f.file_hash,
+       f.chunk_count,
+       f.embedded,
+       COALESCE(p.enabled, TRUE) AS enabled
+     FROM library_managed_files m
+     LEFT JOIN file_metadata f ON f.file_path = m.file_path
+     LEFT JOIN user_library_file_preferences p
+       ON p.file_path = m.file_path
+      AND p.user_id = $1
+     WHERE m.upload_status <> 'deleted'
+     ORDER BY m.updated_at DESC, m.file_path ASC`,
+    [normalizedUserId]
+  );
+  return result.rows;
+}
+
+export async function listDisabledManagedLibraryFilePathsForUser(userId, filePaths = null) {
+  const normalizedUserId = Number.parseInt(String(userId || ""), 10);
+  if (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0) {
+    return [];
+  }
+
+  const normalizedPaths = Array.isArray(filePaths)
+    ? [...new Set(filePaths.map((item) => String(item || "").trim()).filter(Boolean))]
+    : [];
+
+  const result = normalizedPaths.length > 0
+    ? await dbQuery(
+      `SELECT file_path
+       FROM user_library_file_preferences
+       WHERE user_id = $1
+         AND enabled = FALSE
+         AND file_path = ANY($2)`,
+      [normalizedUserId, normalizedPaths]
+    )
+    : await dbQuery(
+      `SELECT file_path
+       FROM user_library_file_preferences
+       WHERE user_id = $1
+         AND enabled = FALSE`,
+      [normalizedUserId]
+    );
+
+  return result.rows.map((row) => row.file_path).filter(Boolean);
 }
 
 export async function markIndexingStarted(startedAt) {

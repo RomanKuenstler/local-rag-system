@@ -2,7 +2,7 @@ import { dbQuery, ensureDatabaseReady, pingDatabase } from "../../shared/db/inde
 import http from "http";
 import crypto from "crypto";
 import {
-  deleteManagedLibraryFile,
+  deleteManagedLibraryFileForUser,
   listManagedLibraryFiles,
   saveManagedLibraryFile,
   toggleManagedLibraryFile,
@@ -231,6 +231,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   return {
     ok: true,
     session: {
+      userId: Number.parseInt(String(session.user_id || ""), 10),
       sessionId: resolvedSessionId,
       username: session.username,
       displayName: session.display_name,
@@ -289,7 +290,11 @@ async function getDbHealth() {
   }
 }
 
-async function handleLibraryUpload(req, res) {
+async function handleLibraryUpload(req, res, session) {
+  if (!Number.isInteger(session?.userId) || session.userId <= 0) {
+    json(res, 401, { ok: false, error: "Invalid session user." });
+    return;
+  }
   const rawBody = await readBody(req);
   let body;
   try {
@@ -331,6 +336,7 @@ async function handleLibraryUpload(req, res) {
           contentBase64: entry?.contentBase64,
           overwrite: Boolean(entry?.overwrite),
           tags: entry?.tags,
+          uploadedByUserId: session.userId,
         });
         return { ok: true, fileName: entry?.name, file };
       } catch (error) {
@@ -358,15 +364,19 @@ async function handleLibraryUpload(req, res) {
   }
 }
 
-async function handleLibraryDelete(url, res) {
+async function handleLibraryDelete(url, res, session) {
   const filePath = String(url.searchParams.get("path") || "");
   if (!filePath) {
     json(res, 400, { ok: false, error: "Missing 'path' query parameter." });
     return;
   }
 
-  const result = await deleteManagedLibraryFile(filePath);
+  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId });
   if (!result.deleted) {
+    if (result.reason === "not_owner") {
+      json(res, 403, { ok: false, error: "You can only delete files that you uploaded." });
+      return;
+    }
     json(res, 404, { ok: false, error: "Managed file not found." });
     return;
   }
@@ -374,7 +384,7 @@ async function handleLibraryDelete(url, res) {
   json(res, 200, { ok: true, path: result.path });
 }
 
-async function handleLibraryToggle(req, res) {
+async function handleLibraryToggle(req, res, session) {
   const rawBody = await readBody(req);
   let body;
   try {
@@ -395,16 +405,16 @@ async function handleLibraryToggle(req, res) {
     return;
   }
 
-  const result = await toggleManagedLibraryFile(filePath, action === "activate");
+  const result = await toggleManagedLibraryFile(filePath, action === "activate", { userId: session.userId });
   if (!result.updated) {
-    json(res, 404, { ok: false, error: "Managed file not found." });
+    json(res, 404, { ok: false, error: "Managed file not found for this user." });
     return;
   }
   json(res, 200, { ok: true, file: result });
 }
 
-async function handleLibraryList(res) {
-  const files = await listManagedLibraryFiles();
+async function handleLibraryList(res, session) {
+  const files = await listManagedLibraryFiles({ userId: session.userId });
   json(res, 200, {
     ok: true,
     files,
@@ -701,28 +711,28 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/library/files") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return;
-      await handleLibraryList(res);
+      await handleLibraryList(res, session);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/library/files") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return;
-      await handleLibraryUpload(req, res);
+      await handleLibraryUpload(req, res, session);
       return;
     }
 
     if (req.method === "DELETE" && url.pathname === "/api/library/files") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return;
-      await handleLibraryDelete(url, res);
+      await handleLibraryDelete(url, res, session);
       return;
     }
 
     if (req.method === "PATCH" && url.pathname === "/api/library/files") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return;
-      await handleLibraryToggle(req, res);
+      await handleLibraryToggle(req, res, session);
       return;
     }
 

@@ -1,12 +1,13 @@
 import fs from "fs/promises";
 import path from "path";
-import { CONTENT_PATH, DEFAULT_FILE_TAG, EMBEDDABLE_EXTENSIONS } from "../../shared/config/index.js";
+import { COLLECTION_NAME, CONTENT_PATH, DEFAULT_FILE_TAG, EMBEDDABLE_EXTENSIONS } from "../../shared/config/index.js";
+import { createQdrantClient } from "../../shared/src/embedding-service.js";
 import {
   getManagedLibraryFile,
-  listManagedLibraryFilesWithStatus,
-  markManagedLibraryFileDeleted,
+  hardDeleteManagedLibraryFile,
+  listManagedLibraryFilesWithUserPreferences,
+  setManagedLibraryFileEnabledForUser,
   setFileTagsForPath,
-  setManagedLibraryFileStatus,
   upsertManagedLibraryFile,
 } from "../../shared/src/state-store.js";
 
@@ -50,7 +51,8 @@ function ensurePathInsideContentRoot(relativePath) {
   return absoluteTarget;
 }
 
-export async function saveManagedLibraryFile({ fileName, contentBase64, overwrite = false, tags = [] }) {
+export async function saveManagedLibraryFile({ fileName, contentBase64, overwrite = false, tags = [], uploadedByUserId = null }) {
+  const normalizedUploadedByUserId = Number.parseInt(String(uploadedByUserId || ""), 10);
   const normalizedName = normalizeFilename(fileName);
   if (!normalizedName) {
     throw new Error("Missing file name.");
@@ -101,6 +103,9 @@ export async function saveManagedLibraryFile({ fileName, contentBase64, overwrit
     source: "webui",
     sizeBytes: fileBuffer.length,
     status: "uploaded",
+    uploadedByUserId: Number.isInteger(normalizedUploadedByUserId) && normalizedUploadedByUserId > 0
+      ? normalizedUploadedByUserId
+      : null,
   });
   const normalizedTags = normalizeTags(tags);
   await setFileTagsForPath(relativePath, normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG]);
@@ -114,20 +119,46 @@ export async function saveManagedLibraryFile({ fileName, contentBase64, overwrit
   };
 }
 
-export async function deleteManagedLibraryFile(filePath) {
+async function deletePointsBySource(relativePath) {
+  const qdrant = createQdrantClient();
+  await qdrant.delete(COLLECTION_NAME, {
+    wait: true,
+    filter: {
+      must: [
+        {
+          key: "source",
+          match: {
+            value: relativePath,
+          },
+        },
+      ],
+    },
+  });
+}
+
+export async function deleteManagedLibraryFileForUser(filePath, { userId }) {
   const file = await getManagedLibraryFile(filePath);
   if (!file) {
     return { deleted: false, reason: "not_found" };
   }
+  if (!String(file.file_path || "").startsWith(`${LIBRARY_UPLOAD_SUBDIR}/`)) {
+    return { deleted: false, reason: "not_user_managed" };
+  }
+  if (!userId || Number(file.uploaded_by_user_id) !== Number(userId)) {
+    return { deleted: false, reason: "not_owner" };
+  }
 
   const absolutePath = ensurePathInsideContentRoot(file.file_path);
   await fs.rm(absolutePath, { force: true });
-  await markManagedLibraryFileDeleted(file.file_path);
+  await deletePointsBySource(file.file_path).catch((error) => {
+    throw new Error(`Failed deleting vector chunks: ${error.message}`);
+  });
+  await hardDeleteManagedLibraryFile(file.file_path);
   return { deleted: true, path: file.file_path };
 }
 
-export async function listManagedLibraryFiles() {
-  const rows = await listManagedLibraryFilesWithStatus();
+export async function listManagedLibraryFiles({ userId }) {
+  const rows = await listManagedLibraryFilesWithUserPreferences(userId);
   return rows.map((row) => ({
     path: row.file_path,
     originalName: row.original_name,
@@ -143,25 +174,34 @@ export async function listManagedLibraryFiles() {
     hash: row.file_hash,
     chunkCount: row.chunk_count,
     embedded: row.embedded,
+    enabled: row.enabled !== false,
+    canToggle: String(row.file_path || "").startsWith(`${LIBRARY_UPLOAD_SUBDIR}/`),
+    canDelete: Number(row.uploaded_by_user_id) === Number(userId),
     updatedAt: row.updated_at,
   }));
 }
 
-export async function toggleManagedLibraryFile(filePath, enabled) {
+export async function toggleManagedLibraryFile(filePath, enabled, { userId }) {
   const file = await getManagedLibraryFile(filePath);
   if (!file || file.upload_status === "deleted") {
     return { updated: false, reason: "not_found" };
   }
+  if (!String(file.file_path || "").startsWith(`${LIBRARY_UPLOAD_SUBDIR}/`)) {
+    return { updated: false, reason: "not_user_toggleable" };
+  }
 
-  const nextStatus = enabled ? "uploaded" : "removing";
-  const updated = await setManagedLibraryFileStatus(file.file_path, nextStatus);
+  const updated = await setManagedLibraryFileEnabledForUser({
+    userId,
+    filePath: file.file_path,
+    enabled,
+  });
   if (!updated) {
-    return { updated: false, reason: "not_found" };
+    return { updated: false, reason: "invalid_user_or_path" };
   }
 
   return {
     updated: true,
-    path: updated.file_path,
-    uploadStatus: updated.upload_status,
+    path: file.file_path,
+    enabled: updated.enabled !== false,
   };
 }

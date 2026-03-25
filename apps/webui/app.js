@@ -1157,7 +1157,7 @@ function App() {
       : fileDrafts.map((draft) => ({
         ok: false,
         fileName: draft.file.name,
-        error: payload?.error || "Upload failed",
+        error: payload?.details || payload?.error || "Upload failed",
       }));
 
     setPendingLibraryUploads((previous) => previous.map((row) => {
@@ -1183,9 +1183,10 @@ function App() {
     }));
 
     const failed = uploadResults.filter((result) => !result.ok).length;
+    const firstFailure = uploadResults.find((result) => !result.ok);
     setLibraryNotice(
       failed > 0
-        ? `${failed} upload${failed > 1 ? "s" : ""} failed.`
+        ? `${failed} upload${failed > 1 ? "s" : ""} failed.${firstFailure?.error ? ` ${firstFailure.error}` : ""}`
         : `Uploaded ${uploadResults.length} file${uploadResults.length > 1 ? "s" : ""}. Embedding started.`
     );
 
@@ -1243,6 +1244,17 @@ function App() {
     }
 
     try {
+      setLibraryManagedData((previous) => {
+        if (!previous?.files) return previous;
+        return {
+          ...previous,
+          files: previous.files.map((entry) => (
+            entry.path === target.path
+              ? { ...entry, uploadStatus: "removing" }
+              : entry
+          )),
+        };
+      });
       const response = await apiFetch(`/api/library/files?path=${encodeURIComponent(target.path)}`, {
         method: "DELETE",
       });
@@ -1263,7 +1275,7 @@ function App() {
       return;
     }
 
-    const pendingStatus = action === "disable" ? "removing" : "embedding";
+    const nextEnabled = action === "activate";
     setLibraryNotice(action === "disable" ? `Disabling ${file.path}...` : `Activating ${file.path}...`);
     setLibraryManagedData((previous) => {
       if (!previous?.files) return previous;
@@ -1271,7 +1283,7 @@ function App() {
         ...previous,
         files: previous.files.map((entry) => (
           entry.path === file.path
-            ? { ...entry, uploadStatus: pendingStatus, embedded: action === "activate" }
+            ? { ...entry, enabled: nextEnabled }
             : entry
         )),
       };
@@ -2156,13 +2168,15 @@ function App() {
     return {
       path: file.path,
       uploadStatus: managed?.uploadStatus || (file.embedded ? "ready" : "discovered"),
+      enabled: managed?.enabled !== false,
       sizeBytes: file.sizeBytes,
       chunkCount: file.chunkCount,
       extension: file.extension,
       embedded: Boolean(file.embedded),
       hash: file.hash,
       updatedAt: managed?.updatedAt || file.lastModified || null,
-      canDelete: Boolean(managed),
+      canDelete: Boolean(managed?.canDelete),
+      canToggle: Boolean(managed?.canToggle),
       lastError: managed?.lastError || null,
       tags: Array.isArray(file.tags) ? file.tags : [],
     };
@@ -2172,13 +2186,15 @@ function App() {
     .map((managed) => ({
       path: managed.path,
       uploadStatus: managed.uploadStatus || "uploaded",
+      enabled: managed.enabled !== false,
       sizeBytes: managed.sizeBytes,
       chunkCount: managed.chunkCount,
       extension: managed.extension || getFileExtension(managed.originalName),
       embedded: Boolean(managed.embedded),
       hash: managed.hash,
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
-      canDelete: true,
+      canDelete: Boolean(managed.canDelete),
+      canToggle: Boolean(managed.canToggle),
       lastError: managed.lastError || null,
       tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
@@ -3106,14 +3122,16 @@ function App() {
                     "span",
                     {
                       className: `status-badge ${
-                        ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
+                        file.enabled === false
+                          ? "pending"
+                          : ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
                           ? "active"
                           : file.uploadStatus === "error"
                             ? "error"
                             : "pending"
                       }`,
                     },
-                    file.uploadStatus || "unknown"
+                    file.enabled === false ? "disabled" : (file.uploadStatus || "unknown")
                   ),
                   file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
                 ),
@@ -3163,11 +3181,11 @@ function App() {
                     {
                       type: "button",
                       className: "library-toggle-button",
-                      "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
-                      onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
-                      disabled: !file.canDelete,
+                      "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
+                      onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
+                      disabled: !file.canToggle,
                     },
-                    icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                    icon(file.enabled === false ? eyeIconPath : eyeOffIconPath)
                   ),
                   React.createElement(
                     "button",
