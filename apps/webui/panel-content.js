@@ -138,6 +138,9 @@ export function renderPanelContent({
   toggleTagFilter,
   isTagFilterSaving = false,
   icon,
+  settingsTabError = "",
+  clearSettingsTabError = () => {},
+  settingsInputResetTokenByKey = {},
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
   const disabledAssistantModeSet = new Set(
@@ -194,6 +197,9 @@ export function renderPanelContent({
     return React.createElement(
       "div",
       { className: "config-sections" },
+      settingsTabError
+        ? React.createElement("p", { className: "config-settings-error", role: "alert" }, settingsTabError)
+        : null,
       React.createElement(
         "section",
         { className: "config-section config-table-card" },
@@ -206,7 +212,7 @@ export function renderPanelContent({
             { className: "config-table-head" },
             React.createElement("span", null, "Setting"),
             React.createElement("span", null, "Value"),
-            React.createElement("span", null, "Apply")
+            React.createElement("span", null, "Save")
           ),
           ...editableConfigRows.map((entry) => React.createElement(
             "div",
@@ -221,6 +227,7 @@ export function renderPanelContent({
               "form",
               {
                 className: "config-edit-form",
+                key: `config-form-${String(entry.key || "").trim().toLowerCase()}-${settingsInputResetTokenByKey[String(entry.key || "").trim().toLowerCase()] || 0}`,
                 onSubmit: async (event) => {
                   event.preventDefault();
                   const formData = new FormData(event.currentTarget);
@@ -232,8 +239,19 @@ export function renderPanelContent({
                 defaultValue: String(entry.value),
                 className: "config-input",
                 disabled: isSending || !isEmbeddingReady,
+                onChange: () => clearSettingsTabError(),
               }),
-              React.createElement("button", { type: "submit", disabled: isSending || !isEmbeddingReady }, "Apply")
+              React.createElement(
+                "button",
+                {
+                  type: "submit",
+                  className: "personalization-custom-save-button active config-apply-save-button",
+                  disabled: isSending || !isEmbeddingReady,
+                  "aria-label": `Save ${entry.key}`,
+                  title: `Save ${entry.key}`,
+                },
+                icon(saveIconPath)
+              )
             ),
             React.createElement("span", { className: "config-row-ready" }, "Live")
           ))

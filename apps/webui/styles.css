@@ -1790,6 +1790,15 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .config-table-row:not(.static),
 .config-table-head { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr) 80px; }
 .config-edit-form { display: flex; gap: 0.45rem; align-items: center; }
+.config-settings-error {
+  margin: 0;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.83rem;
+}
 .config-edit-form .config-input {
   border: 1px solid #d4dbe6;
   border-radius: 10px;
@@ -1812,6 +1821,14 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .config-edit-form button:hover:not(:disabled) {
   border-color: #bcc9db;
   background: #f8fafd;
+}
+.config-edit-form .config-apply-save-button {
+  position: static;
+  transform: none;
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  padding: 0;
 }
 .restart-button {
   border: 1px solid #cbd5e1;
