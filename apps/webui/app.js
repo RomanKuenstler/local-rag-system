@@ -323,6 +323,8 @@ function App() {
   const [dialogTabPanels, setDialogTabPanels] = useState({});
   const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
   const [dialogTabError, setDialogTabError] = useState("");
+  const [settingsTabError, setSettingsTabError] = useState("");
+  const [settingsInputResetTokenByKey, setSettingsInputResetTokenByKey] = useState({});
   const [activeView, setActiveView] = useState(getInitialView);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authenticatedUsername, setAuthenticatedUsername] = useState("");
@@ -434,6 +436,19 @@ function App() {
     if (window.location.hash !== LOGIN_PAGE_HASH) {
       window.location.hash = LOGIN_PAGE_HASH;
     }
+  }
+
+  function ensureAuthenticatedForPreferencesApi(featureLabel = "this preferences action") {
+    if (isAuthenticated && authSessionTokenRef.current) {
+      return;
+    }
+    clearAuthenticatedSessionState();
+    throw new Error(`Please sign in again to use ${featureLabel}.`);
+  }
+
+  async function apiFetchForPreferences(pathOrUrl, options = {}, featureLabel = "this preferences action") {
+    ensureAuthenticatedForPreferencesApi(featureLabel);
+    return apiFetch(pathOrUrl, options, { skipAuth: false });
   }
 
   async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
@@ -1511,9 +1526,13 @@ function App() {
     const existingPanel = dialogTabPanels[selectedTab.id];
     setActiveDialogTab(selectedTab.id);
     setDialogTabError("");
+    if (selectedTab.id === "settings") {
+      setSettingsTabError("");
+    }
     if (existingPanel && !forceReload) return;
 
     if (!isEmbeddingReady) return;
+    ensureAuthenticatedForPreferencesApi(`${selectedTab.label} preferences`);
     setIsSending(true);
     setIsDialogTabLoading(true);
 
@@ -1550,8 +1569,10 @@ function App() {
           configView: null,
         };
       } else if (selectedTab.id === "archive") {
-        const response = await apiFetch(
-          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`
+        const response = await apiFetchForPreferences(
+          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`,
+          {},
+          "Archive preferences"
         );
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -1623,7 +1644,7 @@ function App() {
     const currentlyEnabled = tagFilterEnabledByTag[normalizedTag] ?? true;
     try {
       setIsTagFilterSaving(true);
-      const response = await apiFetch(`/api/files/tag-filters`, {
+      const response = await apiFetchForPreferences(`/api/files/tag-filters`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1631,7 +1652,7 @@ function App() {
           tag: normalizedTag,
           enabled: !currentlyEnabled,
         }),
-      });
+      }, "Filter preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save tag filter");
@@ -1740,7 +1761,7 @@ function App() {
 
       setIsSending(true);
       try {
-        const response = await apiFetch(`/api/personalization`, {
+        const response = await apiFetchForPreferences(`/api/personalization`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -1749,7 +1770,7 @@ function App() {
             sessionId: sessionIdRef.current,
             [settingKey]: selectedId,
           }),
-        });
+        }, "Personalization preferences");
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(payload?.error || "Failed to save personalization setting");
@@ -1828,7 +1849,7 @@ function App() {
     if (isSending || !isEmbeddingReady || !isCustomInstructionsDirty) return;
     setIsSending(true);
     try {
-      const response = await apiFetch(`/api/personalization`, {
+      const response = await apiFetchForPreferences(`/api/personalization`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1837,7 +1858,7 @@ function App() {
           sessionId: sessionIdRef.current,
           customInstructions: customInstructionsDraft,
         }),
-      });
+      }, "Personalization preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save custom instructions");
@@ -1864,7 +1885,7 @@ function App() {
     if (isSending || !isEmbeddingReady) return;
     setIsSending(true);
     try {
-      const response = await apiFetch(`/api/personalization`, {
+      const response = await apiFetchForPreferences(`/api/personalization`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1873,7 +1894,7 @@ function App() {
           sessionId: sessionIdRef.current,
           [settingKey]: draftValue,
         }),
-      });
+      }, "Personalization preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save about-you setting");
@@ -1940,9 +1961,80 @@ function App() {
   }
 
   async function submitConfigChange(configName, rawValue) {
+    const normalizedName = String(configName || "").trim().toLowerCase();
     const value = String(rawValue || "").trim();
     if (!value) return;
-    await sendRawPrompt(`/config set '${configName}' ${value}`);
+
+    const getEditableConfigValue = (key) => {
+      const entry = editableConfigRows.find((row) => String(row?.key || "").trim().toLowerCase() === key);
+      return entry?.value;
+    };
+    const parseStrictInteger = (input) => (/^\d+$/.test(input) ? Number.parseInt(input, 10) : null);
+    const parseCosineInput = (input) => {
+      if (!/^0[.,]\d{2}$/.test(input)) return null;
+      const parsed = Number.parseFloat(input.replace(",", "."));
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    let validationError = "";
+    if (normalizedName === "history messages") {
+      const parsed = parseStrictInteger(value);
+      if (parsed === null || parsed < 1 || parsed > 5) {
+        validationError = "History messages must be an integer between 1 and 5.";
+      }
+    } else if (normalizedName === "min similarities") {
+      const parsed = parseStrictInteger(value);
+      const currentMax = Number(getEditableConfigValue("max similarities"));
+      if (parsed === null || parsed < 2 || parsed > 8) {
+        validationError = "Min similarities must be an integer between 2 and 8.";
+      } else if (Number.isFinite(currentMax) && parsed > currentMax) {
+        validationError = `Min similarities must be less than or equal to max similarities (${currentMax}).`;
+      }
+    } else if (normalizedName === "max similarities") {
+      const parsed = parseStrictInteger(value);
+      const currentMin = Number(getEditableConfigValue("min similarities"));
+      if (parsed === null || parsed < 2 || parsed > 8) {
+        validationError = "Max similarities must be an integer between 2 and 8.";
+      } else if (Number.isFinite(currentMin) && parsed < currentMin) {
+        validationError = `Max similarities must be greater than or equal to min similarities (${currentMin}).`;
+      }
+    } else if (normalizedName === "cosine limit") {
+      const parsed = parseCosineInput(value);
+      if (parsed === null || parsed < 0.45 || parsed > 0.85) {
+        validationError = "Cosine limit must be a decimal formatted as 0.xx (comma or point) between 0.45 and 0.85.";
+      }
+    }
+
+    if (validationError) {
+      setSettingsTabError(validationError);
+      setSettingsInputResetTokenByKey((previous) => ({
+        ...previous,
+        [normalizedName]: (previous[normalizedName] || 0) + 1,
+      }));
+      return;
+    }
+
+    setSettingsTabError("");
+    setIsSending(true);
+    try {
+      const payload = await fetchPanelCommand(`/config set '${configName}' ${value}`);
+      const nextPanel = buildPanelDataFromCommand("/config", payload);
+      if (nextPanel) {
+        setDialogTabPanels((previous) => ({ ...previous, settings: nextPanel }));
+        if (panelData?.command === "/config") {
+          setPanelData(nextPanel);
+        }
+      }
+      await refreshStatus();
+    } catch (error) {
+      setSettingsTabError(error.message || "Failed to apply setting.");
+      setSettingsInputResetTokenByKey((previous) => ({
+        ...previous,
+        [normalizedName]: (previous[normalizedName] || 0) + 1,
+      }));
+    } finally {
+      setIsSending(false);
+    }
   }
 
   const icon = (path) => React.createElement(
@@ -2187,17 +2279,20 @@ function App() {
   }
 
   async function downloadChat(chat) {
+    ensureAuthenticatedForPreferencesApi("Archive preferences");
     if (!chat?.id) return;
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
     }
-    let response = await apiFetch(
-      `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+    let response = await apiFetchForPreferences(
+      `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`,
+      {},
+      "Archive preferences"
     );
     if (!response.ok) {
       const [chatListResponse, messagesResponse] = await Promise.all([
-        apiFetch(`/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`),
-        apiFetch(`/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`),
+        apiFetchForPreferences(`/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`, {}, "Archive preferences"),
+        apiFetchForPreferences(`/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`, {}, "Archive preferences"),
       ]);
       const chatListPayload = await chatListResponse.json().catch(() => ({}));
       const messagesPayload = await messagesResponse.json().catch(() => ({}));
@@ -2251,7 +2346,7 @@ function App() {
 
     try {
       setIsChatFilterSaving(true);
-      const response = await apiFetch(`/api/chats/${encodeURIComponent(normalizedChatId)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(normalizedChatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2260,7 +2355,7 @@ function App() {
           tag: normalizedTag,
           enabled: nextEnabled,
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save chat filter");
@@ -2301,7 +2396,7 @@ function App() {
 
     setIsChatActionPending(true);
     try {
-      const response = await apiFetch(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2309,7 +2404,7 @@ function App() {
           action: "rename",
           name: nextName,
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to rename chat");
@@ -2339,14 +2434,14 @@ function App() {
     setIsChatActionPending(true);
     setOpenChatMenuId(null);
     try {
-      const response = await apiFetch(`/api/chats/${encodeURIComponent(chatId)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(chatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           action: "archive",
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to archive chat");
@@ -2376,11 +2471,11 @@ function App() {
     if (!targetChat || isChatActionPending) return;
     setIsChatActionPending(true);
     try {
-      const response = await apiFetch(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionIdRef.current }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to delete chat");
@@ -2412,14 +2507,14 @@ function App() {
     if (!chatId || isChatActionPending) return;
     setIsChatActionPending(true);
     try {
-      const response = await apiFetch(`/api/chats/${encodeURIComponent(chatId)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(chatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           action: "activate",
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to unarchive chat");
@@ -3853,6 +3948,9 @@ function App() {
                       toggleTagFilter,
                       isTagFilterSaving,
                       icon,
+                      settingsTabError,
+                      clearSettingsTabError: () => setSettingsTabError(""),
+                      settingsInputResetTokenByKey,
                     })
                     : React.createElement("p", null, "Select a section.")
             )
@@ -3942,6 +4040,9 @@ function App() {
               toggleTagFilter,
               isTagFilterSaving,
               icon,
+              settingsTabError,
+              clearSettingsTabError: () => setSettingsTabError(""),
+              settingsInputResetTokenByKey,
             })
           )
         )
