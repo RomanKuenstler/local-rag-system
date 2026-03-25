@@ -82,6 +82,8 @@ const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
 const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
 const LOGIN_PAGE_HASH = "#login";
+const LIBRARY_PAGE_HASH = "#library";
+const ADMIN_PAGE_HASH = "#admin";
 const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
@@ -92,6 +94,7 @@ const MENU_DIALOG_TABS = [
   { id: "help", label: "Help", command: "/help" },
 ];
 const DEFAULT_FILE_TAG_LABEL = "default";
+const ADMIN_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -290,7 +293,12 @@ marked.setOptions({
 });
 
 function App() {
-  const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
+  const getInitialView = () => {
+    const currentHash = String(window.location.hash || "").trim().toLowerCase();
+    if (currentHash === LIBRARY_PAGE_HASH) return "library";
+    if (currentHash === ADMIN_PAGE_HASH) return "admin";
+    return "chat";
+  };
   const buildEnabledTagMapFromDisabledTags = (disabledTags) => {
     const next = {};
     const disabled = Array.isArray(disabledTags) ? disabledTags : [];
@@ -312,10 +320,16 @@ function App() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [libraryManagedData, setLibraryManagedData] = useState(null);
   const [libraryNotice, setLibraryNotice] = useState("");
+  const [adminUsersData, setAdminUsersData] = useState([]);
+  const [adminUsersNotice, setAdminUsersNotice] = useState("");
+  const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
+  const [newUserDraft, setNewUserDraft] = useState({ username: "", displayName: "", role: "users" });
+  const [isCreateUserSubmitting, setIsCreateUserSubmitting] = useState(false);
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [libraryUploadDrafts, setLibraryUploadDrafts] = useState([]);
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
@@ -409,8 +423,8 @@ function App() {
 
   function clearAuthenticatedSessionState() {
     const currentHash = String(window.location.hash || "").trim().toLowerCase();
-    if (currentHash === "#library") {
-      postLoginHashRef.current = "#library";
+    if (currentHash === LIBRARY_PAGE_HASH || currentHash === ADMIN_PAGE_HASH) {
+      postLoginHashRef.current = currentHash;
     } else if (currentHash !== LOGIN_PAGE_HASH) {
       postLoginHashRef.current = "";
     }
@@ -426,6 +440,7 @@ function App() {
     setIsUnifiedDialogOpen(false);
     setPanelData(null);
     setDeleteConfirmFile(null);
+    setDeleteConfirmUser(null);
     setDeleteConfirmChat(null);
     setIsUploadDialogOpen(false);
     setLibraryUploadDrafts([]);
@@ -434,6 +449,11 @@ function App() {
     setOpenChatMenuId(null);
     setIsAuthenticated(false);
     setAuthenticatedRole("users");
+    setAdminUsersData([]);
+    setAdminUsersNotice("");
+    setIsCreateUserDialogOpen(false);
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+    setIsCreateUserSubmitting(false);
     setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
     if (window.location.hash !== LOGIN_PAGE_HASH) {
       window.location.hash = LOGIN_PAGE_HASH;
@@ -666,7 +686,9 @@ function App() {
       setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
       setIsAuthenticated(true);
       if (window.location.hash === LOGIN_PAGE_HASH) {
-        window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
+        window.location.hash = [LIBRARY_PAGE_HASH, ADMIN_PAGE_HASH].includes(postLoginHashRef.current)
+          ? postLoginHashRef.current
+          : "";
       }
       setLoginMode("signin");
       setLoginPassword("");
@@ -773,10 +795,19 @@ function App() {
         const knownPaths = new Set(Array.isArray(payload.files) ? payload.files.map((file) => file.path) : []);
         setPendingLibraryUploads((previous) => previous.filter((file) => !knownPaths.has(file.path)));
       }
+
+      if (authenticatedRole === "admin") {
+        const adminUsersRes = await apiFetch(`/api/admin/users`);
+        if (adminUsersRes.ok) {
+          const payload = await adminUsersRes.json().catch(() => ({}));
+          setAdminUsersData(Array.isArray(payload?.users) ? payload.users : []);
+        }
+      }
     } catch {
       setStatusData(null);
       setFilesData(null);
       setLibraryManagedData(null);
+      setAdminUsersData([]);
     } finally {
       setIsLoadingStatus(false);
     }
@@ -957,26 +988,33 @@ function App() {
   useEffect(() => {
     function syncViewFromHash() {
       const currentHash = String(window.location.hash || "").trim().toLowerCase();
+      const isAdmin = authenticatedRole === "admin";
       if (!isAuthenticated) {
         if (currentHash !== LOGIN_PAGE_HASH) {
-          if (currentHash === "#library") {
-            postLoginHashRef.current = "#library";
+          if (currentHash === LIBRARY_PAGE_HASH || currentHash === ADMIN_PAGE_HASH) {
+            postLoginHashRef.current = currentHash;
           }
           window.location.hash = LOGIN_PAGE_HASH;
         }
         return;
       }
       if (currentHash === LOGIN_PAGE_HASH) {
-        window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
+        window.location.hash = [LIBRARY_PAGE_HASH, ADMIN_PAGE_HASH].includes(postLoginHashRef.current)
+          ? postLoginHashRef.current
+          : "";
         return;
       }
-      setActiveView(currentHash === "#library" ? "library" : "chat");
+      if (currentHash === ADMIN_PAGE_HASH && !isAdmin) {
+        window.location.hash = "";
+        return;
+      }
+      setActiveView(currentHash === LIBRARY_PAGE_HASH ? "library" : currentHash === ADMIN_PAGE_HASH ? "admin" : "chat");
     }
 
     syncViewFromHash();
     window.addEventListener("hashchange", syncViewFromHash);
     return () => window.removeEventListener("hashchange", syncViewFromHash);
-  }, [isAuthenticated]);
+  }, [authenticatedRole, isAuthenticated]);
 
   useEffect(() => () => {
     if (sendingStatusPollRef.current) {
@@ -1313,6 +1351,98 @@ function App() {
       await refreshStatus();
     } catch (error) {
       setLibraryNotice(error.message || "File status update failed.");
+      await refreshStatus();
+    }
+  }
+
+  async function updateAdminUser(username, updates) {
+    const normalizedUsername = String(username || "").trim();
+    if (!normalizedUsername) return;
+    try {
+      const response = await apiFetch(`/api/admin/users/${encodeURIComponent(normalizedUsername)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "User update failed.");
+      }
+      const nextUser = payload?.user;
+      if (nextUser?.username) {
+        setAdminUsersData((previous) => previous.map((entry) => (
+          entry.username === nextUser.username ? nextUser : entry
+        )));
+      }
+      setAdminUsersNotice("");
+    } catch (error) {
+      setAdminUsersNotice(error.message || "User update failed.");
+      await refreshStatus();
+    }
+  }
+
+  function openCreateUserDialog() {
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+    setAdminUsersNotice("");
+    setIsCreateUserDialogOpen(true);
+  }
+
+  function closeCreateUserDialog() {
+    if (isCreateUserSubmitting) return;
+    setIsCreateUserDialogOpen(false);
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+  }
+
+  async function confirmCreateUser() {
+    if (isCreateUserSubmitting) return;
+    const username = String(newUserDraft.username || "").trim();
+    const displayName = String(newUserDraft.displayName || "").trim();
+    const role = String(newUserDraft.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users";
+    if (username.length < 4 || displayName.length < 2) {
+      setAdminUsersNotice("Please provide a valid username and display name.");
+      return;
+    }
+
+    setIsCreateUserSubmitting(true);
+    try {
+      const response = await apiFetch(`/api/admin/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, displayName, role }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "User creation failed.");
+      }
+      setAdminUsersNotice(`Created user ${username}.`);
+      setIsCreateUserDialogOpen(false);
+      setNewUserDraft({ username: "", displayName: "", role: "users" });
+      await refreshStatus();
+    } catch (error) {
+      setAdminUsersNotice(error.message || "User creation failed.");
+    } finally {
+      setIsCreateUserSubmitting(false);
+    }
+  }
+
+  async function confirmDeleteAdminUser() {
+    const target = deleteConfirmUser;
+    setDeleteConfirmUser(null);
+    const normalizedUsername = String(target?.username || "").trim();
+    if (!normalizedUsername) return;
+
+    try {
+      const response = await apiFetch(`/api/admin/users/${encodeURIComponent(normalizedUsername)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Delete failed.");
+      }
+      setAdminUsersData((previous) => previous.filter((entry) => entry.username !== normalizedUsername));
+      setAdminUsersNotice(`Deleted ${normalizedUsername}.`);
+    } catch (error) {
+      setAdminUsersNotice(error.message || "Delete failed.");
       await refreshStatus();
     }
   }
@@ -2065,6 +2195,7 @@ function App() {
     React.createElement("path", { d: path })
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
+  const adminIconPath = "M12 2 4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5zm0 8.3A2.7 2.7 0 1 1 12 5a2.7 2.7 0 0 1 0 5.3m0 8.7c-2.3-.7-4.1-2.4-5.1-4.7a6.8 6.8 0 0 1 10.2 0A8.6 8.6 0 0 1 12 19";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
   const plusChatIconPath = "M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1";
   const settingsIconPath = "M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5";
@@ -2215,6 +2346,9 @@ function App() {
     return b - a;
   });
   const libraryRows = pendingLibraryUploads.concat(dbRows);
+  const adminUserRows = Array.isArray(adminUsersData)
+    ? [...adminUsersData].sort((left, right) => String(left?.username || "").localeCompare(String(right?.username || "")))
+    : [];
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const isNavigationLocked = isSending;
@@ -2232,7 +2366,14 @@ function App() {
     setIsMenuOpen(false);
     setIsAssistantModeMenuOpen(false);
     setPanelData(null);
-    window.location.hash = "#library";
+    window.location.hash = LIBRARY_PAGE_HASH;
+  }
+
+  function openAdminPage() {
+    setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
+    setPanelData(null);
+    window.location.hash = ADMIN_PAGE_HASH;
   }
 
   function openChatPage() {
@@ -2749,11 +2890,11 @@ function App() {
       React.createElement(
         "div",
         { className: "quick-actions" },
-        activeView === "library"
+        activeView === "library" || activeView === "admin"
           ? React.createElement(
             React.Fragment,
             null,
-            React.createElement("h2", { className: "header-title" }, "Library")
+            React.createElement("h2", { className: "header-title" }, activeView === "admin" ? "ADMIN" : "LIBRARY")
           )
           : React.createElement(
             "div",
@@ -2816,12 +2957,36 @@ function App() {
           "button",
           {
             type: "button",
-            className: "side-nav-item",
-            onClick: activeView === "library" ? openChatPage : openLibraryPage,
+            className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
+            onClick: openChatPage,
             disabled: isNavigationLocked,
           },
-          icon(activeView === "library" ? chatIconPath : libraryIconPath),
-          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
+          icon(chatIconPath),
+          React.createElement("span", null, "Chat")
+        ),
+        isAdminUser
+          ? React.createElement(
+            "button",
+            {
+              type: "button",
+              className: `side-nav-item${activeView === "admin" ? " active" : ""}`,
+              onClick: openAdminPage,
+              disabled: isNavigationLocked,
+            },
+            icon(adminIconPath),
+            React.createElement("span", null, "Admin")
+          )
+          : null,
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${activeView === "library" ? " active" : ""}`,
+            onClick: openLibraryPage,
+            disabled: isNavigationLocked,
+          },
+          icon(libraryIconPath),
+          React.createElement("span", null, "Library")
         ),
         React.createElement(
           "button",
@@ -3214,7 +3379,91 @@ function App() {
             )
           )
         )
-        : React.createElement(
+        : activeView === "admin"
+          ? React.createElement(
+            "section",
+            { className: "chat-column library-column" },
+            React.createElement(
+              "section",
+              { className: "info-group-card library-table-card" },
+              React.createElement(
+                "div",
+                { className: "library-table-header" },
+                React.createElement("h4", null, "Users"),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "restart-button library-upload-button",
+                    onClick: openCreateUserDialog,
+                  },
+                  icon(plusChatIconPath),
+                  "New User"
+                )
+              ),
+              adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
+              React.createElement(
+                "div",
+                { className: "library-table", role: "table", "aria-label": "Users" },
+                React.createElement(
+                  "div",
+                  { className: "library-table-head", role: "row" },
+                  React.createElement("span", null, "Username"),
+                  React.createElement("span", null, "is_active"),
+                  React.createElement("span", null, "require_changepw"),
+                  React.createElement("span", null, "Action")
+                ),
+                ...(adminUserRows.length === 0
+                  ? [React.createElement("p", { key: "admin-empty", className: "archive-empty" }, "No users found.")]
+                  : adminUserRows.map((user) => {
+                    const isProtectedUser = user.username === authenticatedUsername || ADMIN_PROTECTED_USERNAMES.has(user.username);
+                    return React.createElement(
+                      "div",
+                      { key: user.username, className: "library-table-row", role: "row" },
+                      React.createElement("strong", { className: "library-path" }, user.username),
+                      React.createElement(
+                        "label",
+                        { className: "filter-switch", title: user.isActive ? "Deactivate user" : "Activate user" },
+                        React.createElement("input", {
+                          type: "checkbox",
+                          checked: Boolean(user.isActive),
+                          disabled: isProtectedUser,
+                          onChange: () => updateAdminUser(user.username, { isActive: !user.isActive }),
+                        }),
+                        React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                      ),
+                      React.createElement(
+                        "label",
+                        { className: "filter-switch", title: user.requireChangePw ? "Disable required password change" : "Require password change" },
+                        React.createElement("input", {
+                          type: "checkbox",
+                          checked: Boolean(user.requireChangePw),
+                          disabled: isProtectedUser,
+                          onChange: () => updateAdminUser(user.username, { requireChangePw: !user.requireChangePw }),
+                        }),
+                        React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                      ),
+                      React.createElement(
+                        "div",
+                        { className: "library-row-actions" },
+                        React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            className: "library-delete-button",
+                            "aria-label": `Delete ${user.username}`,
+                            onClick: () => setDeleteConfirmUser(user),
+                            disabled: isProtectedUser,
+                          },
+                          icon(trashIconPath)
+                        )
+                      )
+                    );
+                  }))
+              )
+            )
+          )
+          : React.createElement(
         "section",
         { className: "chat-column" },
         React.createElement(
@@ -3446,10 +3695,22 @@ function App() {
               "Chat"
             )
             : React.createElement(
-              "button",
-              { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
-              icon(libraryIconPath),
-              "Library"
+              React.Fragment,
+              null,
+              isAdminUser
+                ? React.createElement(
+                  "button",
+                  { type: "button", onClick: openAdminPage, disabled: isNavigationLocked },
+                  icon(adminIconPath),
+                  "Admin"
+                )
+                : null,
+              React.createElement(
+                "button",
+                { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
+                icon(libraryIconPath),
+                "Library"
+              )
             ),
           React.createElement(
             "button",
@@ -3473,7 +3734,7 @@ function App() {
         : null,
       null
     ),
-    activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
+    activeView !== "library" && activeView !== "admin" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
         "div",
         { className: "embedding-loading-overlay" },
@@ -3603,6 +3864,133 @@ function App() {
                 type: "button",
                 className: "library-delete-cancel",
                 onClick: () => setDeleteConfirmFile(null),
+              },
+              icon(keepIconPath),
+              "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    isCreateUserDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: closeCreateUserDialog,
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-upload-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Create user",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "New User"),
+          React.createElement("input", {
+            type: "text",
+            className: "library-upload-tags-input",
+            placeholder: "username",
+            value: newUserDraft.username,
+            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
+            disabled: isCreateUserSubmitting,
+          }),
+          React.createElement("input", {
+            type: "text",
+            className: "library-upload-tags-input",
+            placeholder: "display name",
+            value: newUserDraft.displayName,
+            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
+            disabled: isCreateUserSubmitting,
+          }),
+          React.createElement(
+            "label",
+            { className: "setting-input-wrap" },
+            React.createElement("span", { className: "setting-input-label" }, "Role"),
+            React.createElement(
+              "select",
+              {
+                className: "setting-input",
+                value: newUserDraft.role,
+                onChange: (event) => setNewUserDraft((previous) => ({ ...previous, role: event.target.value })),
+                disabled: isCreateUserSubmitting,
+              },
+              React.createElement("option", { value: "users" }, "user"),
+              React.createElement("option", { value: "admin" }, "admin")
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "library-upload-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-cancel",
+                onClick: closeCreateUserDialog,
+                disabled: isCreateUserSubmitting,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-confirm",
+                onClick: confirmCreateUser,
+                disabled: isCreateUserSubmitting || !String(newUserDraft.username || "").trim() || !String(newUserDraft.displayName || "").trim(),
+              },
+              icon(plusChatIconPath),
+              isCreateUserSubmitting ? "Adding..." : "Add User"
+            )
+          )
+        )
+      )
+      : null,
+    deleteConfirmUser
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setDeleteConfirmUser(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-delete-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Confirm user deletion",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Delete user?"),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you really want to delete this user?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmUser.username)
+          ),
+          React.createElement(
+            "div",
+            { className: "library-delete-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteAdminUser,
+              },
+              icon(trashIconPath),
+              "Delete"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-cancel",
+                onClick: () => setDeleteConfirmUser(null),
               },
               icon(keepIconPath),
               "Keep"
