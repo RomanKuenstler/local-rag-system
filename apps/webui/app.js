@@ -1157,7 +1157,7 @@ function App() {
       : fileDrafts.map((draft) => ({
         ok: false,
         fileName: draft.file.name,
-        error: payload?.error || "Upload failed",
+        error: payload?.details || payload?.error || "Upload failed",
       }));
 
     setPendingLibraryUploads((previous) => previous.map((row) => {
@@ -1183,9 +1183,10 @@ function App() {
     }));
 
     const failed = uploadResults.filter((result) => !result.ok).length;
+    const firstFailure = uploadResults.find((result) => !result.ok);
     setLibraryNotice(
       failed > 0
-        ? `${failed} upload${failed > 1 ? "s" : ""} failed.`
+        ? `${failed} upload${failed > 1 ? "s" : ""} failed.${firstFailure?.error ? ` ${firstFailure.error}` : ""}`
         : `Uploaded ${uploadResults.length} file${uploadResults.length > 1 ? "s" : ""}. Embedding started.`
     );
 
@@ -3121,14 +3122,16 @@ function App() {
                     "span",
                     {
                       className: `status-badge ${
-                        ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
+                        file.enabled === false
+                          ? "pending"
+                          : ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
                           ? "active"
                           : file.uploadStatus === "error"
                             ? "error"
                             : "pending"
                       }`,
                     },
-                    file.uploadStatus || "unknown"
+                    file.enabled === false ? "disabled" : (file.uploadStatus || "unknown")
                   ),
                   file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
                 ),

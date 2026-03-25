@@ -231,7 +231,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
   return {
     ok: true,
     session: {
-      userId: Number(session.user_id),
+      userId: Number.parseInt(String(session.user_id || ""), 10),
       sessionId: resolvedSessionId,
       username: session.username,
       displayName: session.display_name,
@@ -291,6 +291,10 @@ async function getDbHealth() {
 }
 
 async function handleLibraryUpload(req, res, session) {
+  if (!Number.isInteger(session?.userId) || session.userId <= 0) {
+    json(res, 401, { ok: false, error: "Invalid session user." });
+    return;
+  }
   const rawBody = await readBody(req);
   let body;
   try {

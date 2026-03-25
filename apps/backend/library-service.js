@@ -52,6 +52,7 @@ function ensurePathInsideContentRoot(relativePath) {
 }
 
 export async function saveManagedLibraryFile({ fileName, contentBase64, overwrite = false, tags = [], uploadedByUserId = null }) {
+  const normalizedUploadedByUserId = Number.parseInt(String(uploadedByUserId || ""), 10);
   const normalizedName = normalizeFilename(fileName);
   if (!normalizedName) {
     throw new Error("Missing file name.");
@@ -102,7 +103,9 @@ export async function saveManagedLibraryFile({ fileName, contentBase64, overwrit
     source: "webui",
     sizeBytes: fileBuffer.length,
     status: "uploaded",
-    uploadedByUserId,
+    uploadedByUserId: Number.isInteger(normalizedUploadedByUserId) && normalizedUploadedByUserId > 0
+      ? normalizedUploadedByUserId
+      : null,
   });
   const normalizedTags = normalizeTags(tags);
   await setFileTagsForPath(relativePath, normalizedTags.length > 0 ? normalizedTags : [DEFAULT_FILE_TAG]);
