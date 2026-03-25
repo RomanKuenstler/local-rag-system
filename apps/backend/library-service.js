@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { COLLECTION_NAME, CONTENT_PATH, DEFAULT_FILE_TAG, EMBEDDABLE_EXTENSIONS } from "../../shared/config/index.js";
+import { dbQuery } from "../../shared/db/index.js";
 import { createQdrantClient } from "../../shared/src/embedding-service.js";
 import {
   getManagedLibraryFile,
@@ -15,6 +16,8 @@ const LIBRARY_UPLOAD_SUBDIR = (process.env.LIBRARY_UPLOAD_SUBDIR || "_library").
 const MAX_LIBRARY_UPLOAD_BYTES = Number.parseInt(process.env.MAX_LIBRARY_UPLOAD_BYTES || String(15 * 1024 * 1024), 10);
 const EMBEDDABLE_EXTENSION_SET = new Set(EMBEDDABLE_EXTENSIONS.map((extension) => extension.toLowerCase()));
 const TAG_PATTERN = /^[a-z0-9][a-z0-9_\-:.]{0,63}$/;
+const VECTOR_DELETE_VERIFY_RETRIES = 12;
+const VECTOR_DELETE_VERIFY_DELAY_MS = 150;
 
 function normalizeTags(tags) {
   const input = Array.isArray(tags)
@@ -51,7 +54,14 @@ function ensurePathInsideContentRoot(relativePath) {
   return absoluteTarget;
 }
 
-export async function saveManagedLibraryFile({ fileName, contentBase64, overwrite = false, tags = [], uploadedByUserId = null }) {
+export async function saveManagedLibraryFile({
+  fileName,
+  contentBase64,
+  overwrite = false,
+  tags = [],
+  uploadedByUserId = null,
+  saveToRoot = false,
+}) {
   const normalizedUploadedByUserId = Number.parseInt(String(uploadedByUserId || ""), 10);
   const normalizedName = normalizeFilename(fileName);
   if (!normalizedName) {
@@ -81,7 +91,9 @@ export async function saveManagedLibraryFile({ fileName, contentBase64, overwrit
     throw new Error(`File too large. Max allowed size is ${MAX_LIBRARY_UPLOAD_BYTES} bytes.`);
   }
 
-  const relativePath = path.posix.join(LIBRARY_UPLOAD_SUBDIR, normalizedName);
+  const relativePath = saveToRoot
+    ? normalizedName
+    : path.posix.join(LIBRARY_UPLOAD_SUBDIR, normalizedName);
   const absolutePath = ensurePathInsideContentRoot(relativePath);
   await fs.mkdir(path.dirname(absolutePath), { recursive: true });
 
@@ -121,43 +133,92 @@ export async function saveManagedLibraryFile({ fileName, contentBase64, overwrit
 
 async function deletePointsBySource(relativePath) {
   const qdrant = createQdrantClient();
+  const sourceFilter = {
+    must: [
+      {
+        key: "source",
+        match: {
+          value: relativePath,
+        },
+      },
+    ],
+  };
+
+  let beforeCount = null;
+  try {
+    const before = await qdrant.count(COLLECTION_NAME, {
+      exact: true,
+      filter: sourceFilter,
+    });
+    if (Number.isFinite(before?.count)) {
+      beforeCount = Number(before.count);
+    }
+  } catch {
+    beforeCount = null;
+  }
+
   await qdrant.delete(COLLECTION_NAME, {
     wait: true,
-    filter: {
-      must: [
-        {
-          key: "source",
-          match: {
-            value: relativePath,
-          },
-        },
-      ],
-    },
+    filter: sourceFilter,
   });
+
+  for (let attempt = 0; attempt < VECTOR_DELETE_VERIFY_RETRIES; attempt++) {
+    const remaining = await qdrant.count(COLLECTION_NAME, {
+      exact: true,
+      filter: sourceFilter,
+    });
+    const remainingCount = Number(remaining?.count || 0);
+    if (remainingCount <= 0) {
+      return { removedVectors: beforeCount };
+    }
+    await new Promise((resolve) => setTimeout(resolve, VECTOR_DELETE_VERIFY_DELAY_MS));
+  }
+
+  throw new Error(`Vector deletion verification failed for '${relativePath}'.`);
 }
 
-export async function deleteManagedLibraryFileForUser(filePath, { userId }) {
-  const file = await getManagedLibraryFile(filePath);
-  if (!file) {
+export async function deleteManagedLibraryFileForUser(filePath, { userId, isAdmin = false }) {
+  const requestedPath = String(filePath || "").trim();
+  if (!requestedPath) {
     return { deleted: false, reason: "not_found" };
   }
-  if (!String(file.file_path || "").startsWith(`${LIBRARY_UPLOAD_SUBDIR}/`)) {
-    return { deleted: false, reason: "not_user_managed" };
-  }
-  if (!userId || Number(file.uploaded_by_user_id) !== Number(userId)) {
-    return { deleted: false, reason: "not_owner" };
+
+  const file = await getManagedLibraryFile(requestedPath);
+  const effectivePath = file?.file_path || requestedPath;
+
+  if (!isAdmin) {
+    if (!file) {
+      return { deleted: false, reason: "not_found" };
+    }
+    if (!String(file.file_path || "").startsWith(`${LIBRARY_UPLOAD_SUBDIR}/`)) {
+      return { deleted: false, reason: "not_user_managed" };
+    }
+    if (!userId || Number(file.uploaded_by_user_id) !== Number(userId)) {
+      return { deleted: false, reason: "not_owner" };
+    }
   }
 
-  const absolutePath = ensurePathInsideContentRoot(file.file_path);
+  const knownFileResult = await dbQuery(
+    `SELECT 1
+     FROM file_metadata
+     WHERE file_path = $1
+     LIMIT 1`,
+    [effectivePath]
+  );
+  if (!file && knownFileResult.rowCount === 0) {
+    return { deleted: false, reason: "not_found" };
+  }
+
+  const absolutePath = ensurePathInsideContentRoot(effectivePath);
   await fs.rm(absolutePath, { force: true });
-  await deletePointsBySource(file.file_path).catch((error) => {
+  const vectorDeletion = await deletePointsBySource(effectivePath).catch((error) => {
     throw new Error(`Failed deleting vector chunks: ${error.message}`);
   });
-  await hardDeleteManagedLibraryFile(file.file_path);
-  return { deleted: true, path: file.file_path };
+  await hardDeleteManagedLibraryFile(effectivePath);
+  return { deleted: true, path: effectivePath, removedVectors: vectorDeletion?.removedVectors ?? null };
 }
 
-export async function listManagedLibraryFiles({ userId }) {
+export async function listManagedLibraryFiles({ userId, isAdmin = false }) {
   const rows = await listManagedLibraryFilesWithUserPreferences(userId);
   return rows.map((row) => ({
     path: row.file_path,
@@ -176,7 +237,7 @@ export async function listManagedLibraryFiles({ userId }) {
     embedded: row.embedded,
     enabled: row.enabled !== false,
     canToggle: String(row.file_path || "").startsWith(`${LIBRARY_UPLOAD_SUBDIR}/`),
-    canDelete: Number(row.uploaded_by_user_id) === Number(userId),
+    canDelete: isAdmin || Number(row.uploaded_by_user_id) === Number(userId),
     updatedAt: row.updated_at,
   }));
 }

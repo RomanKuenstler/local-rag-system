@@ -174,7 +174,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
 
   const result = requestedSessionId
     ? await dbQuery(
-      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name, u.role
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.session_identifier = $1
@@ -182,7 +182,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
       [requestedSessionId]
     )
     : await dbQuery(
-      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name, u.role
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        WHERE s.session_token_hash = $1
@@ -235,6 +235,7 @@ async function validateAndRefreshSession({ req, url, body = null, refresh = true
       sessionId: resolvedSessionId,
       username: session.username,
       displayName: session.display_name,
+      role: session.role,
       createdAt: new Date(createdMs).toISOString(),
       expiresAt: nextExpiresAt,
       maxExpiresAt: new Date(maxExpiresMs).toISOString(),
@@ -295,6 +296,7 @@ async function handleLibraryUpload(req, res, session) {
     json(res, 401, { ok: false, error: "Invalid session user." });
     return;
   }
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
   const rawBody = await readBody(req);
   let body;
   try {
@@ -337,6 +339,7 @@ async function handleLibraryUpload(req, res, session) {
           overwrite: Boolean(entry?.overwrite),
           tags: entry?.tags,
           uploadedByUserId: session.userId,
+          saveToRoot: isAdmin,
         });
         return { ok: true, fileName: entry?.name, file };
       } catch (error) {
@@ -371,7 +374,8 @@ async function handleLibraryDelete(url, res, session) {
     return;
   }
 
-  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId });
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
+  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId, isAdmin });
   if (!result.deleted) {
     if (result.reason === "not_owner") {
       json(res, 403, { ok: false, error: "You can only delete files that you uploaded." });
@@ -381,7 +385,7 @@ async function handleLibraryDelete(url, res, session) {
     return;
   }
 
-  json(res, 200, { ok: true, path: result.path });
+  json(res, 200, { ok: true, path: result.path, removedVectors: result.removedVectors ?? null });
 }
 
 async function handleLibraryToggle(req, res, session) {
@@ -414,7 +418,8 @@ async function handleLibraryToggle(req, res, session) {
 }
 
 async function handleLibraryList(res, session) {
-  const files = await listManagedLibraryFiles({ userId: session.userId });
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
+  const files = await listManagedLibraryFiles({ userId: session.userId, isAdmin });
   json(res, 200, {
     ok: true,
     files,
@@ -448,7 +453,7 @@ async function handleLogin(req, res, url) {
   }
 
   const userResult = await dbQuery(
-    `SELECT id, username, display_name, password_hash, password_salt, is_active, require_changepw
+    `SELECT id, username, display_name, password_hash, password_salt, role, is_active, require_changepw
      FROM users
      WHERE username = $1
      LIMIT 1`,
@@ -478,6 +483,7 @@ async function handleLogin(req, res, url) {
         id: user.id,
         username: user.username,
         displayName: user.display_name,
+        role: user.role,
       },
     });
     return;
@@ -491,6 +497,7 @@ async function handleLogin(req, res, url) {
       id: user.id,
       username: user.username,
       displayName: user.display_name,
+      role: user.role,
     },
     session,
   });
@@ -525,7 +532,7 @@ async function handleChangePassword(req, res, url) {
   }
 
   const userResult = await dbQuery(
-    `SELECT id, username, display_name, password_hash, password_salt, is_active
+    `SELECT id, username, display_name, password_hash, password_salt, role, is_active
      FROM users
      WHERE username = $1
      LIMIT 1`,
@@ -567,6 +574,7 @@ async function handleChangePassword(req, res, url) {
       id: user.id,
       username: user.username,
       displayName: user.display_name,
+      role: user.role,
     },
     session,
   });
@@ -584,6 +592,7 @@ async function handleSession(req, res, url) {
     user: {
       username: validation.session.username,
       displayName: validation.session.displayName,
+      role: validation.session.role,
     },
     session: {
       sessionId: validation.session.sessionId,
