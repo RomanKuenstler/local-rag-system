@@ -73,6 +73,7 @@ import {
   listChatMessages,
   listRecentPromptHistory,
   listFileMetadata,
+  listDisabledManagedLibraryFilePathsForUser,
   listTagsForFilePathMap,
   updateFileTags,
   resolveSessionChatId,
@@ -855,7 +856,18 @@ async function searchKnowledgeBase(prompt, sessionId, chatId) {
     with_payload: true,
   });
 
-  const filteredResults = allCandidateResults
+  const userId = await getUserIdForSession(sessionId);
+  const allCandidateSourcePaths = [...new Set(
+    allCandidateResults
+      .map((result) => String(result?.payload?.source || "").trim())
+      .filter(Boolean)
+  )];
+  const disabledPaths = new Set(await listDisabledManagedLibraryFilePathsForUser(userId, allCandidateSourcePaths));
+  const userFilteredCandidates = disabledPaths.size === 0
+    ? allCandidateResults
+    : allCandidateResults.filter((result) => !disabledPaths.has(String(result?.payload?.source || "").trim()));
+
+  const filteredResults = userFilteredCandidates
     .filter((result) => result.score >= runtimeConfig.cosineLimit)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const resultSourcePaths = [...new Set(

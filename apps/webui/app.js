@@ -1263,7 +1263,7 @@ function App() {
       return;
     }
 
-    const pendingStatus = action === "disable" ? "removing" : "embedding";
+    const nextEnabled = action === "activate";
     setLibraryNotice(action === "disable" ? `Disabling ${file.path}...` : `Activating ${file.path}...`);
     setLibraryManagedData((previous) => {
       if (!previous?.files) return previous;
@@ -1271,7 +1271,7 @@ function App() {
         ...previous,
         files: previous.files.map((entry) => (
           entry.path === file.path
-            ? { ...entry, uploadStatus: pendingStatus, embedded: action === "activate" }
+            ? { ...entry, enabled: nextEnabled }
             : entry
         )),
       };
@@ -2156,6 +2156,7 @@ function App() {
     return {
       path: file.path,
       uploadStatus: managed?.uploadStatus || (file.embedded ? "ready" : "discovered"),
+      enabled: managed?.enabled !== false,
       sizeBytes: file.sizeBytes,
       chunkCount: file.chunkCount,
       extension: file.extension,
@@ -2172,6 +2173,7 @@ function App() {
     .map((managed) => ({
       path: managed.path,
       uploadStatus: managed.uploadStatus || "uploaded",
+      enabled: managed.enabled !== false,
       sizeBytes: managed.sizeBytes,
       chunkCount: managed.chunkCount,
       extension: managed.extension || getFileExtension(managed.originalName),
@@ -3163,11 +3165,11 @@ function App() {
                     {
                       type: "button",
                       className: "library-toggle-button",
-                      "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
-                      onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
+                      "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
+                      onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
                       disabled: !file.canDelete,
                     },
-                    icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                    icon(file.enabled === false ? eyeIconPath : eyeOffIconPath)
                   ),
                   React.createElement(
                     "button",
