@@ -80,6 +80,10 @@ const LIBRARY_UPLOAD_RULES = {
 };
 const SESSION_ID_STORAGE_KEY = "rag-session-id";
 const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
+const LOGIN_PAGE_HASH = "#login";
+const LIBRARY_PAGE_HASH = "#library";
+const ADMIN_PAGE_HASH = "#admin";
 const MENU_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
@@ -90,6 +94,7 @@ const MENU_DIALOG_TABS = [
   { id: "help", label: "Help", command: "/help" },
 ];
 const DEFAULT_FILE_TAG_LABEL = "default";
+const ADMIN_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -97,7 +102,10 @@ function buildChatNameFromId(chatId) {
 }
 
 function buildInitialChatList(activeChatId) {
-  const primaryId = String(activeChatId || "").trim() || `chat-${crypto.randomUUID()}`;
+  const primaryId = String(activeChatId || "").trim();
+  if (!primaryId) {
+    return [];
+  }
   return [{ id: primaryId, name: buildChatNameFromId(primaryId) }];
 }
 
@@ -285,7 +293,12 @@ marked.setOptions({
 });
 
 function App() {
-  const getInitialView = () => (window.location.hash === "#library" ? "library" : "chat");
+  const getInitialView = () => {
+    const currentHash = String(window.location.hash || "").trim().toLowerCase();
+    if (currentHash === LIBRARY_PAGE_HASH) return "library";
+    if (currentHash === ADMIN_PAGE_HASH) return "admin";
+    return "chat";
+  };
   const buildEnabledTagMapFromDisabledTags = (disabledTags) => {
     const next = {};
     const disabled = Array.isArray(disabledTags) ? disabledTags : [];
@@ -307,10 +320,16 @@ function App() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [libraryManagedData, setLibraryManagedData] = useState(null);
   const [libraryNotice, setLibraryNotice] = useState("");
+  const [adminUsersData, setAdminUsersData] = useState([]);
+  const [adminUsersNotice, setAdminUsersNotice] = useState("");
+  const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
+  const [newUserDraft, setNewUserDraft] = useState({ username: "", displayName: "", role: "users" });
+  const [isCreateUserSubmitting, setIsCreateUserSubmitting] = useState(false);
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [libraryUploadDrafts, setLibraryUploadDrafts] = useState([]);
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
@@ -318,11 +337,28 @@ function App() {
   const [dialogTabPanels, setDialogTabPanels] = useState({});
   const [isDialogTabLoading, setIsDialogTabLoading] = useState(false);
   const [dialogTabError, setDialogTabError] = useState("");
+  const [settingsTabError, setSettingsTabError] = useState("");
+  const [settingsInputResetTokenByKey, setSettingsInputResetTokenByKey] = useState({});
   const [activeView, setActiveView] = useState(getInitialView);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authenticatedUsername, setAuthenticatedUsername] = useState("");
+  const [authenticatedDisplayName, setAuthenticatedDisplayName] = useState("");
+  const [authenticatedRole, setAuthenticatedRole] = useState("users");
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginMode, setLoginMode] = useState("signin");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [isLoginPasswordVisible, setIsLoginPasswordVisible] = useState(false);
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [isLoginSubmitting, setIsLoginSubmitting] = useState(false);
   const sessionIdRef = useRef(getOrCreatePersistentId(SESSION_ID_STORAGE_KEY, "session"));
+  const authSessionTokenRef = useRef("");
   const chatIdRef = useRef(getOrCreatePersistentId(CHAT_ID_STORAGE_KEY, "chat"));
-  const [activeChatId, setActiveChatId] = useState(chatIdRef.current);
-  const [chatList, setChatList] = useState(() => buildInitialChatList(chatIdRef.current));
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [chatList, setChatList] = useState([]);
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [volatileChat, setVolatileChat] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
@@ -333,6 +369,7 @@ function App() {
   const [isChatFilterSaving, setIsChatFilterSaving] = useState(false);
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -355,8 +392,10 @@ function App() {
   const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
+  const userMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
+  const postLoginHashRef = useRef("");
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
@@ -371,6 +410,113 @@ function App() {
     : chatList;
   const activeChainProgress = statusData?.assistant?.chainProgress || null;
   const activeChainStage = String(activeChainProgress?.stage || "").toLowerCase();
+  const trimmedLoginUsername = loginUsername.trim();
+  const isChangePasswordMode = loginMode === "change-password";
+  const doNewPasswordsMatch = newPassword === confirmNewPassword;
+  const isLoginFormValid = isChangePasswordMode
+    ? trimmedLoginUsername.length >= 4
+      && loginPassword.length >= 8
+      && newPassword.length >= 8
+      && confirmNewPassword.length >= 8
+      && doNewPasswordsMatch
+    : trimmedLoginUsername.length >= 4 && loginPassword.length >= 8;
+
+  function clearAuthenticatedSessionState() {
+    const currentHash = String(window.location.hash || "").trim().toLowerCase();
+    if (currentHash === LIBRARY_PAGE_HASH || currentHash === ADMIN_PAGE_HASH) {
+      postLoginHashRef.current = currentHash;
+    } else if (currentHash !== LOGIN_PAGE_HASH) {
+      postLoginHashRef.current = "";
+    }
+    authSessionTokenRef.current = "";
+    try {
+      window.localStorage.removeItem(AUTH_SESSION_TOKEN_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+    setIsUserMenuOpen(false);
+    setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
+    setIsUnifiedDialogOpen(false);
+    setPanelData(null);
+    setDeleteConfirmFile(null);
+    setDeleteConfirmUser(null);
+    setDeleteConfirmChat(null);
+    setIsUploadDialogOpen(false);
+    setLibraryUploadDrafts([]);
+    setRenameDialogChat(null);
+    setChatFilterDialogChat(null);
+    setOpenChatMenuId(null);
+    setIsAuthenticated(false);
+    setAuthenticatedRole("users");
+    setAdminUsersData([]);
+    setAdminUsersNotice("");
+    setIsCreateUserDialogOpen(false);
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+    setIsCreateUserSubmitting(false);
+    setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
+    if (window.location.hash !== LOGIN_PAGE_HASH) {
+      window.location.hash = LOGIN_PAGE_HASH;
+    }
+  }
+
+  function ensureAuthenticatedForPreferencesApi(featureLabel = "this preferences action") {
+    if (isAuthenticated && authSessionTokenRef.current) {
+      return;
+    }
+    clearAuthenticatedSessionState();
+    throw new Error(`Please sign in again to use ${featureLabel}.`);
+  }
+
+  async function apiFetchForPreferences(pathOrUrl, options = {}, featureLabel = "this preferences action") {
+    ensureAuthenticatedForPreferencesApi(featureLabel);
+    return apiFetch(pathOrUrl, options, { skipAuth: false });
+  }
+
+  async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
+    const rawUrl = String(pathOrUrl || "");
+    const requestUrl = rawUrl.startsWith("http") ? rawUrl : `${API_BASE_URL}${rawUrl}`;
+    const headers = new Headers(options.headers || {});
+    if (!skipAuth && authSessionTokenRef.current) {
+      headers.set("X-Session-Token", authSessionTokenRef.current);
+    }
+
+    const response = await fetch(requestUrl, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401 && !skipAuth) {
+      clearAuthenticatedSessionState();
+    }
+    return response;
+  }
+
+  async function restoreActiveSession() {
+    let storedToken = "";
+    try {
+      storedToken = String(window.localStorage.getItem(AUTH_SESSION_TOKEN_STORAGE_KEY) || "");
+    } catch {
+      storedToken = "";
+    }
+    if (!storedToken) return false;
+
+    authSessionTokenRef.current = storedToken;
+    const sessionPath = `/api/auth/session?sessionId=${encodeURIComponent(sessionIdRef.current)}`;
+    const response = await apiFetch(sessionPath, {}, { skipAuth: false });
+    if (!response.ok) {
+      clearAuthenticatedSessionState();
+      return false;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const user = payload?.user || {};
+    setAuthenticatedUsername(String(user.username || ""));
+    setAuthenticatedDisplayName(String(user.displayName || user.username || ""));
+    setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
+    setIsAuthenticated(true);
+    return true;
+  }
 
   useEffect(() => {
     if (!isSending) {
@@ -478,12 +624,145 @@ function App() {
     return null;
   }
 
+  async function submitLogin(event) {
+    event?.preventDefault?.();
+    if (!isLoginFormValid || isLoginSubmitting) return;
+
+    if (isChangePasswordMode && !doNewPasswordsMatch) {
+      setLoginError("New password and confirmation must match.");
+      return;
+    }
+
+    setLoginError("");
+    setIsLoginSubmitting(true);
+    try {
+      const endpoint = isChangePasswordMode
+        ? `${API_BASE_URL}/api/auth/change-password`
+        : `${API_BASE_URL}/api/auth/login`;
+      const body = isChangePasswordMode
+        ? {
+          username: trimmedLoginUsername,
+          oldPassword: loginPassword,
+          newPassword,
+          confirmNewPassword,
+          sessionId: sessionIdRef.current,
+        }
+        : {
+          username: trimmedLoginUsername,
+          password: loginPassword,
+          sessionId: sessionIdRef.current,
+        };
+      const response = await apiFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }, { skipAuth: true });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
+      }
+
+      const user = payload?.user || {};
+      if (payload?.requirePasswordChange === true && !isChangePasswordMode) {
+        setLoginMode("change-password");
+        setLoginPassword("");
+        setNewPassword("");
+        setConfirmNewPassword("");
+        setLoginError("");
+        return;
+      }
+      const nextSessionToken = String(payload?.session?.sessionToken || "").trim();
+      if (!nextSessionToken) {
+        throw new Error("Session was not created.");
+      }
+      authSessionTokenRef.current = nextSessionToken;
+      try {
+        window.localStorage.setItem(AUTH_SESSION_TOKEN_STORAGE_KEY, nextSessionToken);
+      } catch {
+        // ignore storage errors
+      }
+      setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
+      setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
+      setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
+      setIsAuthenticated(true);
+      if (window.location.hash === LOGIN_PAGE_HASH) {
+        window.location.hash = [LIBRARY_PAGE_HASH, ADMIN_PAGE_HASH].includes(postLoginHashRef.current)
+          ? postLoginHashRef.current
+          : "";
+      }
+      setLoginMode("signin");
+      setLoginPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setLoginError("");
+    } catch (error) {
+      setLoginError(error.message || (isChangePasswordMode ? "Password change failed." : "Sign in failed."));
+    } finally {
+      setIsLoginSubmitting(false);
+    }
+  }
+
+  function handleLogout() {
+    apiFetch(`/api/auth/logout?sessionId=${encodeURIComponent(sessionIdRef.current)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: sessionIdRef.current }),
+    }).catch(() => null);
+    clearAuthenticatedSessionState();
+    setLoginMode("signin");
+    setLoginPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginError("");
+  }
+
+  function openChangePasswordFlow() {
+    const preferredUsername = authenticatedUsername || trimmedLoginUsername;
+    clearAuthenticatedSessionState();
+    setLoginMode("change-password");
+    setLoginUsername(preferredUsername);
+    setLoginPassword("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setLoginError("");
+  }
+
+  useEffect(() => {
+    restoreActiveSession().catch(() => {
+      clearAuthenticatedSessionState();
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
+    const pollSession = async () => {
+      try {
+        const response = await apiFetch(
+          `/api/auth/session?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+        );
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          const user = payload?.user || {};
+          setAuthenticatedUsername(String(user.username || ""));
+          setAuthenticatedDisplayName(String(user.displayName || user.username || ""));
+          setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
+        }
+      } catch {
+        clearAuthenticatedSessionState();
+      }
+    };
+
+    const timerId = window.setInterval(pollSession, 60_000);
+    return () => window.clearInterval(timerId);
+  }, [isAuthenticated]);
+
   async function refreshStatus() {
     try {
       const [statusRes, filesRes, libraryRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/status?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
-        fetch(`${API_BASE_URL}/api/files?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
-        fetch(`${API_BASE_URL}/api/library/files`),
+        apiFetch(`/api/status?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
+        apiFetch(`/api/files?sessionId=${encodeURIComponent(sessionIdRef.current)}`),
+        apiFetch(`/api/library/files`),
       ]);
 
       if (statusRes.ok) {
@@ -516,10 +795,19 @@ function App() {
         const knownPaths = new Set(Array.isArray(payload.files) ? payload.files.map((file) => file.path) : []);
         setPendingLibraryUploads((previous) => previous.filter((file) => !knownPaths.has(file.path)));
       }
+
+      if (authenticatedRole === "admin") {
+        const adminUsersRes = await apiFetch(`/api/admin/users`);
+        if (adminUsersRes.ok) {
+          const payload = await adminUsersRes.json().catch(() => ({}));
+          setAdminUsersData(Array.isArray(payload?.users) ? payload.users : []);
+        }
+      }
     } catch {
       setStatusData(null);
       setFilesData(null);
       setLibraryManagedData(null);
+      setAdminUsersData([]);
     } finally {
       setIsLoadingStatus(false);
     }
@@ -529,7 +817,7 @@ function App() {
     const sessionId = sessionIdRef.current;
     const chatId = explicitChatId || chatIdRef.current;
     const messageLoadLimit = 40;
-    const response = await fetch(
+    const response = await apiFetch(
       `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionId)}&chatId=${encodeURIComponent(chatId)}&limit=${messageLoadLimit}`
     );
     const payload = await response.json();
@@ -561,15 +849,15 @@ function App() {
     const sessionId = sessionIdRef.current;
     setIsLoadingChats(true);
     try {
-      const response = await fetch(
+      let response = await apiFetch(
         `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
       );
-      const payload = await response.json().catch(() => ({}));
+      let payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to load chats");
       }
 
-      const nextChats = Array.isArray(payload.chats)
+      let nextChats = Array.isArray(payload.chats)
         ? payload.chats.map((chat) => ({
           id: chat.id,
           name: chat.name || buildChatNameFromId(chat.id),
@@ -580,18 +868,50 @@ function App() {
         }))
         : [];
 
+      if (nextChats.length === 0) {
+        const createResponse = await apiFetch(`/api/chats`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        const createPayload = await createResponse.json().catch(() => ({}));
+        if (!createResponse.ok) {
+          throw new Error(createPayload?.error || "Failed to create initial chat");
+        }
+
+        response = await apiFetch(
+          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionId)}`
+        );
+        payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to load chats");
+        }
+        nextChats = Array.isArray(payload.chats)
+          ? payload.chats.map((chat) => ({
+            id: chat.id,
+            name: chat.name || buildChatNameFromId(chat.id),
+            status: chat.status || "active",
+            tagFilters: chat.tagFilters && typeof chat.tagFilters === "object"
+              ? chat.tagFilters
+              : { disabledTags: [] },
+          }))
+          : [];
+      }
+
       const fallbackChatId = preferredChatId || payload.activeChatId || chatIdRef.current;
       const nextActiveChat = nextChats.find((chat) => chat.id === fallbackChatId)
         ? fallbackChatId
-        : (payload.activeChatId || nextChats[0]?.id || chatIdRef.current);
+        : (payload.activeChatId || nextChats[0]?.id || null);
 
-      setChatList(nextChats.length > 0 ? nextChats : buildInitialChatList(nextActiveChat));
+      setChatList(nextChats);
       setActiveChatId(nextActiveChat);
-      chatIdRef.current = nextActiveChat;
-      try {
-        window.localStorage.setItem(CHAT_ID_STORAGE_KEY, nextActiveChat);
-      } catch {
-        // ignore storage write errors
+      chatIdRef.current = nextActiveChat || "";
+      if (nextActiveChat) {
+        try {
+          window.localStorage.setItem(CHAT_ID_STORAGE_KEY, nextActiveChat);
+        } catch {
+          // ignore storage write errors
+        }
       }
     } finally {
       setIsLoadingChats(false);
@@ -621,6 +941,10 @@ function App() {
   }
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined;
+    }
+
     async function poll() {
       await refreshStatus();
       const delay = previousEmbeddingReadyRef.current ? 8000 : 2000;
@@ -632,19 +956,22 @@ function App() {
     return () => {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
     };
-  }, [hasShownReadyGreeting]);
+  }, [hasShownReadyGreeting, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated || !activeChatId) return;
     loadMessagesFromDb(activeChatId).catch(() => {
       setMessages([]);
     });
-  }, [activeChatId]);
+  }, [activeChatId, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     refreshChats({ preferredChatId: chatIdRef.current }).catch(() => {
-      setChatList(buildInitialChatList(chatIdRef.current));
+      setChatList([]);
+      setActiveChatId(null);
     });
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (lastMessageRef.current) {
@@ -660,12 +987,34 @@ function App() {
 
   useEffect(() => {
     function syncViewFromHash() {
-      setActiveView(window.location.hash === "#library" ? "library" : "chat");
+      const currentHash = String(window.location.hash || "").trim().toLowerCase();
+      const isAdmin = authenticatedRole === "admin";
+      if (!isAuthenticated) {
+        if (currentHash !== LOGIN_PAGE_HASH) {
+          if (currentHash === LIBRARY_PAGE_HASH || currentHash === ADMIN_PAGE_HASH) {
+            postLoginHashRef.current = currentHash;
+          }
+          window.location.hash = LOGIN_PAGE_HASH;
+        }
+        return;
+      }
+      if (currentHash === LOGIN_PAGE_HASH) {
+        window.location.hash = [LIBRARY_PAGE_HASH, ADMIN_PAGE_HASH].includes(postLoginHashRef.current)
+          ? postLoginHashRef.current
+          : "";
+        return;
+      }
+      if (currentHash === ADMIN_PAGE_HASH && !isAdmin) {
+        window.location.hash = "";
+        return;
+      }
+      setActiveView(currentHash === LIBRARY_PAGE_HASH ? "library" : currentHash === ADMIN_PAGE_HASH ? "admin" : "chat");
     }
 
+    syncViewFromHash();
     window.addEventListener("hashchange", syncViewFromHash);
     return () => window.removeEventListener("hashchange", syncViewFromHash);
-  }, []);
+  }, [authenticatedRole, isAuthenticated]);
 
   useEffect(() => () => {
     if (sendingStatusPollRef.current) {
@@ -684,6 +1033,9 @@ function App() {
       }
       if (!event.target.closest(".chat-item-actions")) {
         setOpenChatMenuId(null);
+      }
+      if (!userMenuRef.current?.contains(event.target)) {
+        setIsUserMenuOpen(false);
       }
     }
 
@@ -810,13 +1162,14 @@ function App() {
   }
 
   async function uploadLibraryFiles(fileDrafts) {
+    const isAdminUser = authenticatedRole === "admin";
     const draftsWithTags = fileDrafts.map((draft) => ({
       ...draft,
       parsedTags: parseLibraryTagInput(draft.tagsInput),
     }));
     const queued = draftsWithTags.map((draft) => ({
       tempId: crypto.randomUUID(),
-      path: `_library/${draft.file.name}`,
+      path: isAdminUser ? draft.file.name : `_library/${draft.file.name}`,
       originalName: draft.file.name,
       uploadStatus: "uploading",
       embedded: false,
@@ -837,7 +1190,7 @@ function App() {
       tags: draft.parsedTags,
     })));
 
-    const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+    const response = await apiFetch(`/api/library/files`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ files: requestFiles }),
@@ -848,7 +1201,7 @@ function App() {
       : fileDrafts.map((draft) => ({
         ok: false,
         fileName: draft.file.name,
-        error: payload?.error || "Upload failed",
+        error: payload?.details || payload?.error || "Upload failed",
       }));
 
     setPendingLibraryUploads((previous) => previous.map((row) => {
@@ -874,9 +1227,10 @@ function App() {
     }));
 
     const failed = uploadResults.filter((result) => !result.ok).length;
+    const firstFailure = uploadResults.find((result) => !result.ok);
     setLibraryNotice(
       failed > 0
-        ? `${failed} upload${failed > 1 ? "s" : ""} failed.`
+        ? `${failed} upload${failed > 1 ? "s" : ""} failed.${firstFailure?.error ? ` ${firstFailure.error}` : ""}`
         : `Uploaded ${uploadResults.length} file${uploadResults.length > 1 ? "s" : ""}. Embedding started.`
     );
 
@@ -934,14 +1288,29 @@ function App() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/library/files?path=${encodeURIComponent(target.path)}`, {
+      setLibraryManagedData((previous) => {
+        if (!previous?.files) return previous;
+        return {
+          ...previous,
+          files: previous.files.map((entry) => (
+            entry.path === target.path
+              ? { ...entry, uploadStatus: "removing" }
+              : entry
+          )),
+        };
+      });
+      const response = await apiFetch(`/api/library/files?path=${encodeURIComponent(target.path)}`, {
         method: "DELETE",
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Delete failed.");
       }
-      setLibraryNotice(`Deleted ${target.path}.`);
+      const removedVectors = Number(payload?.removedVectors);
+      const removedSuffix = Number.isFinite(removedVectors) && removedVectors >= 0
+        ? ` Removed ${removedVectors} vector chunk${removedVectors === 1 ? "" : "s"}.`
+        : "";
+      setLibraryNotice(`Deleted ${target.path}.${removedSuffix}`);
       setPendingLibraryUploads((previous) => previous.filter((file) => file.path !== target.path));
       await refreshStatus();
     } catch (error) {
@@ -954,7 +1323,7 @@ function App() {
       return;
     }
 
-    const pendingStatus = action === "disable" ? "removing" : "embedding";
+    const nextEnabled = action === "activate";
     setLibraryNotice(action === "disable" ? `Disabling ${file.path}...` : `Activating ${file.path}...`);
     setLibraryManagedData((previous) => {
       if (!previous?.files) return previous;
@@ -962,14 +1331,14 @@ function App() {
         ...previous,
         files: previous.files.map((entry) => (
           entry.path === file.path
-            ? { ...entry, uploadStatus: pendingStatus, embedded: action === "activate" }
+            ? { ...entry, enabled: nextEnabled }
             : entry
         )),
       };
     });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/library/files`, {
+      const response = await apiFetch(`/api/library/files`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path: file.path, action }),
@@ -982,6 +1351,98 @@ function App() {
       await refreshStatus();
     } catch (error) {
       setLibraryNotice(error.message || "File status update failed.");
+      await refreshStatus();
+    }
+  }
+
+  async function updateAdminUser(username, updates) {
+    const normalizedUsername = String(username || "").trim();
+    if (!normalizedUsername) return;
+    try {
+      const response = await apiFetch(`/api/admin/users/${encodeURIComponent(normalizedUsername)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "User update failed.");
+      }
+      const nextUser = payload?.user;
+      if (nextUser?.username) {
+        setAdminUsersData((previous) => previous.map((entry) => (
+          entry.username === nextUser.username ? nextUser : entry
+        )));
+      }
+      setAdminUsersNotice("");
+    } catch (error) {
+      setAdminUsersNotice(error.message || "User update failed.");
+      await refreshStatus();
+    }
+  }
+
+  function openCreateUserDialog() {
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+    setAdminUsersNotice("");
+    setIsCreateUserDialogOpen(true);
+  }
+
+  function closeCreateUserDialog() {
+    if (isCreateUserSubmitting) return;
+    setIsCreateUserDialogOpen(false);
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+  }
+
+  async function confirmCreateUser() {
+    if (isCreateUserSubmitting) return;
+    const username = String(newUserDraft.username || "").trim();
+    const displayName = String(newUserDraft.displayName || "").trim();
+    const role = String(newUserDraft.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users";
+    if (username.length < 4 || displayName.length < 2) {
+      setAdminUsersNotice("Please provide a valid username and display name.");
+      return;
+    }
+
+    setIsCreateUserSubmitting(true);
+    try {
+      const response = await apiFetch(`/api/admin/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, displayName, role }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "User creation failed.");
+      }
+      setAdminUsersNotice(`Created user ${username}.`);
+      setIsCreateUserDialogOpen(false);
+      setNewUserDraft({ username: "", displayName: "", role: "users" });
+      await refreshStatus();
+    } catch (error) {
+      setAdminUsersNotice(error.message || "User creation failed.");
+    } finally {
+      setIsCreateUserSubmitting(false);
+    }
+  }
+
+  async function confirmDeleteAdminUser() {
+    const target = deleteConfirmUser;
+    setDeleteConfirmUser(null);
+    const normalizedUsername = String(target?.username || "").trim();
+    if (!normalizedUsername) return;
+
+    try {
+      const response = await apiFetch(`/api/admin/users/${encodeURIComponent(normalizedUsername)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Delete failed.");
+      }
+      setAdminUsersData((previous) => previous.filter((entry) => entry.username !== normalizedUsername));
+      setAdminUsersNotice(`Deleted ${normalizedUsername}.`);
+    } catch (error) {
+      setAdminUsersNotice(error.message || "Delete failed.");
       await refreshStatus();
     }
   }
@@ -1023,7 +1484,7 @@ function App() {
       try {
         if (!volatileChatCreatePromiseRef.current) {
           volatileChatCreatePromiseRef.current = (async () => {
-            const response = await fetch(`${API_BASE_URL}/api/chats`, {
+            const response = await apiFetch(`/api/chats`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1091,7 +1552,7 @@ function App() {
       }
 
       const uploadedFilesPayload = isPanelCommand ? [] : await buildUploadedFilesPayload(selectedPromptFiles);
-      const response = await fetch(`${API_BASE_URL}/api/prompt`, {
+      const response = await apiFetch(`/api/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1161,7 +1622,7 @@ function App() {
   }
 
   async function fetchPanelCommand(command) {
-    const response = await fetch(`${API_BASE_URL}/api/prompt`, {
+    const response = await apiFetch(`/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: command, sessionId: sessionIdRef.current, chatId: chatIdRef.current }),
@@ -1217,9 +1678,13 @@ function App() {
     const existingPanel = dialogTabPanels[selectedTab.id];
     setActiveDialogTab(selectedTab.id);
     setDialogTabError("");
+    if (selectedTab.id === "settings") {
+      setSettingsTabError("");
+    }
     if (existingPanel && !forceReload) return;
 
     if (!isEmbeddingReady) return;
+    ensureAuthenticatedForPreferencesApi(`${selectedTab.label} preferences`);
     setIsSending(true);
     setIsDialogTabLoading(true);
 
@@ -1256,8 +1721,10 @@ function App() {
           configView: null,
         };
       } else if (selectedTab.id === "archive") {
-        const response = await fetch(
-          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`
+        const response = await apiFetchForPreferences(
+          `${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`,
+          {},
+          "Archive preferences"
         );
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -1329,7 +1796,7 @@ function App() {
     const currentlyEnabled = tagFilterEnabledByTag[normalizedTag] ?? true;
     try {
       setIsTagFilterSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/files/tag-filters`, {
+      const response = await apiFetchForPreferences(`/api/files/tag-filters`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1337,7 +1804,7 @@ function App() {
           tag: normalizedTag,
           enabled: !currentlyEnabled,
         }),
-      });
+      }, "Filter preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save tag filter");
@@ -1446,7 +1913,7 @@ function App() {
 
       setIsSending(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+        const response = await apiFetchForPreferences(`/api/personalization`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
@@ -1455,7 +1922,7 @@ function App() {
             sessionId: sessionIdRef.current,
             [settingKey]: selectedId,
           }),
-        });
+        }, "Personalization preferences");
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(payload?.error || "Failed to save personalization setting");
@@ -1534,7 +2001,7 @@ function App() {
     if (isSending || !isEmbeddingReady || !isCustomInstructionsDirty) return;
     setIsSending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+      const response = await apiFetchForPreferences(`/api/personalization`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1543,7 +2010,7 @@ function App() {
           sessionId: sessionIdRef.current,
           customInstructions: customInstructionsDraft,
         }),
-      });
+      }, "Personalization preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save custom instructions");
@@ -1570,7 +2037,7 @@ function App() {
     if (isSending || !isEmbeddingReady) return;
     setIsSending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/personalization`, {
+      const response = await apiFetchForPreferences(`/api/personalization`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
@@ -1579,7 +2046,7 @@ function App() {
           sessionId: sessionIdRef.current,
           [settingKey]: draftValue,
         }),
-      });
+      }, "Personalization preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save about-you setting");
@@ -1646,9 +2113,80 @@ function App() {
   }
 
   async function submitConfigChange(configName, rawValue) {
+    const normalizedName = String(configName || "").trim().toLowerCase();
     const value = String(rawValue || "").trim();
     if (!value) return;
-    await sendRawPrompt(`/config set '${configName}' ${value}`);
+
+    const getEditableConfigValue = (key) => {
+      const entry = editableConfigRows.find((row) => String(row?.key || "").trim().toLowerCase() === key);
+      return entry?.value;
+    };
+    const parseStrictInteger = (input) => (/^\d+$/.test(input) ? Number.parseInt(input, 10) : null);
+    const parseCosineInput = (input) => {
+      if (!/^0[.,]\d{2}$/.test(input)) return null;
+      const parsed = Number.parseFloat(input.replace(",", "."));
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    let validationError = "";
+    if (normalizedName === "history messages") {
+      const parsed = parseStrictInteger(value);
+      if (parsed === null || parsed < 1 || parsed > 5) {
+        validationError = "History messages must be an integer between 1 and 5.";
+      }
+    } else if (normalizedName === "min similarities") {
+      const parsed = parseStrictInteger(value);
+      const currentMax = Number(getEditableConfigValue("max similarities"));
+      if (parsed === null || parsed < 2 || parsed > 8) {
+        validationError = "Min similarities must be an integer between 2 and 8.";
+      } else if (Number.isFinite(currentMax) && parsed > currentMax) {
+        validationError = `Min similarities must be less than or equal to max similarities (${currentMax}).`;
+      }
+    } else if (normalizedName === "max similarities") {
+      const parsed = parseStrictInteger(value);
+      const currentMin = Number(getEditableConfigValue("min similarities"));
+      if (parsed === null || parsed < 2 || parsed > 8) {
+        validationError = "Max similarities must be an integer between 2 and 8.";
+      } else if (Number.isFinite(currentMin) && parsed < currentMin) {
+        validationError = `Max similarities must be greater than or equal to min similarities (${currentMin}).`;
+      }
+    } else if (normalizedName === "cosine limit") {
+      const parsed = parseCosineInput(value);
+      if (parsed === null || parsed < 0.45 || parsed > 0.85) {
+        validationError = "Cosine limit must be a decimal formatted as 0.xx (comma or point) between 0.45 and 0.85.";
+      }
+    }
+
+    if (validationError) {
+      setSettingsTabError(validationError);
+      setSettingsInputResetTokenByKey((previous) => ({
+        ...previous,
+        [normalizedName]: (previous[normalizedName] || 0) + 1,
+      }));
+      return;
+    }
+
+    setSettingsTabError("");
+    setIsSending(true);
+    try {
+      const payload = await fetchPanelCommand(`/config set '${configName}' ${value}`);
+      const nextPanel = buildPanelDataFromCommand("/config", payload);
+      if (nextPanel) {
+        setDialogTabPanels((previous) => ({ ...previous, settings: nextPanel }));
+        if (panelData?.command === "/config") {
+          setPanelData(nextPanel);
+        }
+      }
+      await refreshStatus();
+    } catch (error) {
+      setSettingsTabError(error.message || "Failed to apply setting.");
+      setSettingsInputResetTokenByKey((previous) => ({
+        ...previous,
+        [normalizedName]: (previous[normalizedName] || 0) + 1,
+      }));
+    } finally {
+      setIsSending(false);
+    }
   }
 
   const icon = (path) => React.createElement(
@@ -1657,6 +2195,7 @@ function App() {
     React.createElement("path", { d: path })
   );
   const chatIconPath = "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-4.5 3V17H6a2 2 0 0 1-2-2zm4 2h8v2H8zm0 4h5v2H8z";
+  const adminIconPath = "M12 2 4 5v6c0 5.2 3.4 9.9 8 11 4.6-1.1 8-5.8 8-11V5zm0 8.3A2.7 2.7 0 1 1 12 5a2.7 2.7 0 0 1 0 5.3m0 8.7c-2.3-.7-4.1-2.4-5.1-4.7a6.8 6.8 0 0 1 10.2 0A8.6 8.6 0 0 1 12 19";
   const libraryIconPath = "M4 6a3 3 0 0 1 3-3h13v16H7a2 2 0 0 0-2 2H4zm2 0v11.2A4 4 0 0 1 7 17h11V5H7a1 1 0 0 0-1 1";
   const plusChatIconPath = "M12 4a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V5a1 1 0 0 1 1-1";
   const settingsIconPath = "M19.14 12.94a7.14 7.14 0 0 0 .05-.94 7.14 7.14 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.14 7.14 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54a7.14 7.14 0 0 0-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0-.05.94 7.14 7.14 0 0 0 .05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.71 1.63.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.59-.23 1.13-.55 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5";
@@ -1765,18 +2304,21 @@ function App() {
   }, [tagFilterRows, filesData]);
   const managedLibraryFiles = Array.isArray(libraryManagedData?.files) ? libraryManagedData.files : [];
   const managedByPath = new Map(managedLibraryFiles.map((file) => [file.path, file]));
+  const isAdminUser = authenticatedRole === "admin";
   const retrieverRows = libraryFiles.map((file) => {
     const managed = managedByPath.get(file.path);
     return {
       path: file.path,
       uploadStatus: managed?.uploadStatus || (file.embedded ? "ready" : "discovered"),
+      enabled: managed?.enabled !== false,
       sizeBytes: file.sizeBytes,
       chunkCount: file.chunkCount,
       extension: file.extension,
       embedded: Boolean(file.embedded),
       hash: file.hash,
       updatedAt: managed?.updatedAt || file.lastModified || null,
-      canDelete: Boolean(managed),
+      canDelete: isAdminUser || Boolean(managed?.canDelete),
+      canToggle: Boolean(managed?.canToggle),
       lastError: managed?.lastError || null,
       tags: Array.isArray(file.tags) ? file.tags : [],
     };
@@ -1786,13 +2328,15 @@ function App() {
     .map((managed) => ({
       path: managed.path,
       uploadStatus: managed.uploadStatus || "uploaded",
+      enabled: managed.enabled !== false,
       sizeBytes: managed.sizeBytes,
       chunkCount: managed.chunkCount,
       extension: managed.extension || getFileExtension(managed.originalName),
       embedded: Boolean(managed.embedded),
       hash: managed.hash,
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
-      canDelete: true,
+      canDelete: Boolean(managed.canDelete),
+      canToggle: Boolean(managed.canToggle),
       lastError: managed.lastError || null,
       tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
@@ -1802,6 +2346,9 @@ function App() {
     return b - a;
   });
   const libraryRows = pendingLibraryUploads.concat(dbRows);
+  const adminUserRows = Array.isArray(adminUsersData)
+    ? [...adminUsersData].sort((left, right) => String(left?.username || "").localeCompare(String(right?.username || "")))
+    : [];
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const isNavigationLocked = isSending;
@@ -1819,7 +2366,14 @@ function App() {
     setIsMenuOpen(false);
     setIsAssistantModeMenuOpen(false);
     setPanelData(null);
-    window.location.hash = "#library";
+    window.location.hash = LIBRARY_PAGE_HASH;
+  }
+
+  function openAdminPage() {
+    setIsMenuOpen(false);
+    setIsAssistantModeMenuOpen(false);
+    setPanelData(null);
+    window.location.hash = ADMIN_PAGE_HASH;
   }
 
   function openChatPage() {
@@ -1870,7 +2424,7 @@ function App() {
     setIsMenuOpen(false);
     window.location.hash = "";
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(selectedId)}`, {
+      const response = await apiFetch(`/api/chats/${encodeURIComponent(selectedId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, action: "switch" }),
@@ -1893,17 +2447,20 @@ function App() {
   }
 
   async function downloadChat(chat) {
+    ensureAuthenticatedForPreferencesApi("Archive preferences");
     if (!chat?.id) return;
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
     }
-    let response = await fetch(
-      `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`
+    let response = await apiFetchForPreferences(
+      `${API_BASE_URL}/api/chats/${encodeURIComponent(chat.id)}/download?sessionId=${encodeURIComponent(sessionIdRef.current)}`,
+      {},
+      "Archive preferences"
     );
     if (!response.ok) {
       const [chatListResponse, messagesResponse] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`),
-        fetch(`${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`),
+        apiFetchForPreferences(`/api/chats?sessionId=${encodeURIComponent(sessionIdRef.current)}&includeArchived=true`, {}, "Archive preferences"),
+        apiFetchForPreferences(`/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(chat.id)}&limit=4000`, {}, "Archive preferences"),
       ]);
       const chatListPayload = await chatListResponse.json().catch(() => ({}));
       const messagesPayload = await messagesResponse.json().catch(() => ({}));
@@ -1957,7 +2514,7 @@ function App() {
 
     try {
       setIsChatFilterSaving(true);
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(normalizedChatId)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(normalizedChatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1966,7 +2523,7 @@ function App() {
           tag: normalizedTag,
           enabled: nextEnabled,
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to save chat filter");
@@ -2007,7 +2564,7 @@ function App() {
 
     setIsChatActionPending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2015,7 +2572,7 @@ function App() {
           action: "rename",
           name: nextName,
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to rename chat");
@@ -2045,14 +2602,14 @@ function App() {
     setIsChatActionPending(true);
     setOpenChatMenuId(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(chatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           action: "archive",
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to archive chat");
@@ -2082,11 +2639,11 @@ function App() {
     if (!targetChat || isChatActionPending) return;
     setIsChatActionPending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(targetChat.id)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(targetChat.id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionIdRef.current }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to delete chat");
@@ -2118,14 +2675,14 @@ function App() {
     if (!chatId || isChatActionPending) return;
     setIsChatActionPending(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+      const response = await apiFetchForPreferences(`/api/chats/${encodeURIComponent(chatId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionIdRef.current,
           action: "activate",
         }),
-      });
+      }, "Archive preferences");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to unarchive chat");
@@ -2151,6 +2708,172 @@ function App() {
     await openUnifiedDialog("general");
   }
 
+  if (!isAuthenticated) {
+    return React.createElement(
+      "div",
+      { className: "page page-login" },
+      React.createElement(
+        "header",
+        { className: "topbar" },
+        React.createElement(
+          "div",
+          { className: "brand" },
+          React.createElement("h1", null, "RAG"),
+          React.createElement("span", { className: "brand-status-light", "aria-hidden": "true" })
+        ),
+        React.createElement("div", { className: "header-center-spacer", "aria-hidden": "true" }),
+        React.createElement("div", { className: "quick-actions", "aria-hidden": "true" })
+      ),
+      React.createElement(
+        "main",
+        { className: "login-page-content" },
+        React.createElement(
+          "form",
+          { className: "login-card", onSubmit: submitLogin },
+          React.createElement("h2", null, isChangePasswordMode ? "Please change your password" : "Sign In"),
+          React.createElement(
+            "label",
+            { className: "login-field-label", htmlFor: "login-username" },
+            "Username"
+          ),
+          React.createElement("input", {
+            id: "login-username",
+            className: "login-input",
+            type: "text",
+            value: loginUsername,
+            minLength: 4,
+            autoComplete: "username",
+            onChange: (event) => {
+              setLoginUsername(event.target.value);
+              if (loginError) setLoginError("");
+            },
+          }),
+          React.createElement(
+            "label",
+            { className: "login-field-label", htmlFor: "login-password" },
+            isChangePasswordMode ? "Old password" : "Password"
+          ),
+          React.createElement(
+            "div",
+            { className: "login-input-wrap" },
+            React.createElement("input", {
+              id: "login-password",
+              className: "login-input",
+              type: isLoginPasswordVisible ? "text" : "password",
+              value: loginPassword,
+              minLength: 8,
+              autoComplete: "current-password",
+              onChange: (event) => {
+                setLoginPassword(event.target.value);
+                if (loginError) setLoginError("");
+              },
+            }),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "login-password-visibility",
+                "aria-label": isLoginPasswordVisible ? "Hide password" : "Show password",
+                onClick: () => setIsLoginPasswordVisible((previous) => !previous),
+              },
+              icon(isLoginPasswordVisible ? eyeOffIconPath : eyeIconPath)
+            )
+          ),
+          isChangePasswordMode
+            ? React.createElement(
+              React.Fragment,
+              null,
+              React.createElement(
+                "label",
+                { className: "login-field-label", htmlFor: "login-new-password" },
+                "New password"
+              ),
+              React.createElement(
+                "div",
+                { className: "login-input-wrap" },
+                React.createElement("input", {
+                  id: "login-new-password",
+                  className: "login-input",
+                  type: isNewPasswordVisible ? "text" : "password",
+                  value: newPassword,
+                  minLength: 8,
+                  autoComplete: "new-password",
+                  onChange: (event) => {
+                    setNewPassword(event.target.value);
+                    if (loginError) setLoginError("");
+                  },
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "login-password-visibility",
+                    "aria-label": isNewPasswordVisible ? "Hide new password" : "Show new password",
+                    onClick: () => setIsNewPasswordVisible((previous) => !previous),
+                  },
+                  icon(isNewPasswordVisible ? eyeOffIconPath : eyeIconPath)
+                )
+              ),
+              React.createElement(
+                "label",
+                { className: "login-field-label", htmlFor: "login-confirm-password" },
+                "Confirm new password"
+              ),
+              React.createElement(
+                "div",
+                { className: "login-input-wrap" },
+                React.createElement("input", {
+                  id: "login-confirm-password",
+                  className: "login-input",
+                  type: isConfirmPasswordVisible ? "text" : "password",
+                  value: confirmNewPassword,
+                  minLength: 8,
+                  autoComplete: "new-password",
+                  onChange: (event) => {
+                    setConfirmNewPassword(event.target.value);
+                    if (loginError) setLoginError("");
+                  },
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "login-password-visibility",
+                    "aria-label": isConfirmPasswordVisible ? "Hide confirmed password" : "Show confirmed password",
+                    onClick: () => setIsConfirmPasswordVisible((previous) => !previous),
+                  },
+                  icon(isConfirmPasswordVisible ? eyeOffIconPath : eyeIconPath)
+                )
+              )
+            )
+            : null,
+          isChangePasswordMode && confirmNewPassword.length > 0 && !doNewPasswordsMatch
+            ? React.createElement("p", { className: "login-error", role: "alert" }, "New password and confirmation must match.")
+            : null,
+          loginError
+            ? React.createElement("p", { className: "login-error", role: "alert" }, loginError)
+            : null,
+          React.createElement(
+            "button",
+            {
+              type: "submit",
+              className: "restart-button login-submit-button",
+              disabled: !isLoginFormValid || isLoginSubmitting,
+            },
+            icon("M2 21l20-9L2 3v7l14 2-14 2z"),
+            React.createElement(
+              "span",
+              null,
+              isLoginSubmitting
+                ? (isChangePasswordMode ? "Changing password…" : "Signing In…")
+                : (isChangePasswordMode ? "Change password" : "Sign In")
+            )
+          )
+        )
+      )
+    );
+  }
+
   return React.createElement(
     "div",
     { className: `page${panelData || isUnifiedDialogOpen ? " modal-open" : ""}` },
@@ -2167,11 +2890,11 @@ function App() {
       React.createElement(
         "div",
         { className: "quick-actions" },
-        activeView === "library"
+        activeView === "library" || activeView === "admin"
           ? React.createElement(
             React.Fragment,
             null,
-            React.createElement("h2", { className: "header-title" }, "Library")
+            React.createElement("h2", { className: "header-title" }, activeView === "admin" ? "ADMIN" : "LIBRARY")
           )
           : React.createElement(
             "div",
@@ -2234,12 +2957,36 @@ function App() {
           "button",
           {
             type: "button",
-            className: "side-nav-item",
-            onClick: activeView === "library" ? openChatPage : openLibraryPage,
+            className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
+            onClick: openChatPage,
             disabled: isNavigationLocked,
           },
-          icon(activeView === "library" ? chatIconPath : libraryIconPath),
-          React.createElement("span", null, activeView === "library" ? "Chat" : "Library")
+          icon(chatIconPath),
+          React.createElement("span", null, "Chat")
+        ),
+        isAdminUser
+          ? React.createElement(
+            "button",
+            {
+              type: "button",
+              className: `side-nav-item${activeView === "admin" ? " active" : ""}`,
+              onClick: openAdminPage,
+              disabled: isNavigationLocked,
+            },
+            icon(adminIconPath),
+            React.createElement("span", null, "Admin")
+          )
+          : null,
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            className: `side-nav-item${activeView === "library" ? " active" : ""}`,
+            onClick: openLibraryPage,
+            disabled: isNavigationLocked,
+          },
+          icon(libraryIconPath),
+          React.createElement("span", null, "Library")
         ),
         React.createElement(
           "button",
@@ -2417,14 +3164,61 @@ function App() {
         { className: "side-nav-bottom" },
         React.createElement(
           "div",
-          { className: "side-nav-user" },
-          React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+          { className: `side-nav-user-wrap${isUserMenuOpen ? " menu-open" : ""}`, ref: userMenuRef },
           React.createElement(
-            "div",
-            { className: "side-nav-user-meta" },
-            React.createElement("strong", null, "Username"),
-            React.createElement("small", null, "Account placeholder")
-          )
+            "button",
+            {
+              type: "button",
+              className: "side-nav-user side-nav-user-button",
+              "aria-haspopup": "menu",
+              "aria-expanded": isUserMenuOpen ? "true" : "false",
+              onClick: () => setIsUserMenuOpen((previous) => !previous),
+            },
+            React.createElement("div", { className: "side-nav-avatar-placeholder", "aria-hidden": "true" }, "U"),
+            React.createElement(
+              "div",
+              { className: "side-nav-user-meta" },
+              React.createElement("strong", null, authenticatedDisplayName || "Signed in"),
+              React.createElement("small", null, authenticatedUsername || "Username")
+            ),
+            React.createElement("span", { className: "side-nav-user-menu-icon", "aria-hidden": "true" }, icon(dotsIconPath))
+          ),
+          isUserMenuOpen
+            ? React.createElement(
+              "ul",
+              { className: "side-nav-user-menu", role: "menu" },
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openChangePasswordFlow,
+                  },
+                  icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
+                  React.createElement("span", null, "Change password")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option delete",
+                    role: "menuitem",
+                    onClick: handleLogout,
+                  },
+                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
+                  React.createElement("span", null, "Logout")
+                )
+              )
+            )
+            : null
         )
       )
     ),
@@ -2504,14 +3298,16 @@ function App() {
                     "span",
                     {
                       className: `status-badge ${
-                        ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
+                        file.enabled === false
+                          ? "pending"
+                          : ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
                           ? "active"
                           : file.uploadStatus === "error"
                             ? "error"
                             : "pending"
                       }`,
                     },
-                    file.uploadStatus || "unknown"
+                    file.enabled === false ? "disabled" : (file.uploadStatus || "unknown")
                   ),
                   file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
                 ),
@@ -2561,11 +3357,11 @@ function App() {
                     {
                       type: "button",
                       className: "library-toggle-button",
-                      "aria-label": file.uploadStatus === "disabled" ? `Activate ${file.path}` : `Disable ${file.path}`,
-                      onClick: () => toggleLibraryFile(file, file.uploadStatus === "disabled" ? "activate" : "disable"),
-                      disabled: !file.canDelete,
+                      "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
+                      onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
+                      disabled: !file.canToggle,
                     },
-                    icon(file.uploadStatus === "disabled" ? eyeIconPath : eyeOffIconPath)
+                    icon(file.enabled === false ? eyeIconPath : eyeOffIconPath)
                   ),
                   React.createElement(
                     "button",
@@ -2583,7 +3379,91 @@ function App() {
             )
           )
         )
-        : React.createElement(
+        : activeView === "admin"
+          ? React.createElement(
+            "section",
+            { className: "chat-column library-column" },
+            React.createElement(
+              "section",
+              { className: "info-group-card library-table-card" },
+              React.createElement(
+                "div",
+                { className: "library-table-header" },
+                React.createElement("h4", null, "Users"),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "restart-button library-upload-button",
+                    onClick: openCreateUserDialog,
+                  },
+                  icon(plusChatIconPath),
+                  "New User"
+                )
+              ),
+              adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
+              React.createElement(
+                "div",
+                { className: "library-table", role: "table", "aria-label": "Users" },
+                React.createElement(
+                  "div",
+                  { className: "library-table-head", role: "row" },
+                  React.createElement("span", null, "Username"),
+                  React.createElement("span", null, "is_active"),
+                  React.createElement("span", null, "require_changepw"),
+                  React.createElement("span", null, "Action")
+                ),
+                ...(adminUserRows.length === 0
+                  ? [React.createElement("p", { key: "admin-empty", className: "archive-empty" }, "No users found.")]
+                  : adminUserRows.map((user) => {
+                    const isProtectedUser = user.username === authenticatedUsername || ADMIN_PROTECTED_USERNAMES.has(user.username);
+                    return React.createElement(
+                      "div",
+                      { key: user.username, className: "library-table-row", role: "row" },
+                      React.createElement("strong", { className: "library-path" }, user.username),
+                      React.createElement(
+                        "label",
+                        { className: "filter-switch", title: user.isActive ? "Deactivate user" : "Activate user" },
+                        React.createElement("input", {
+                          type: "checkbox",
+                          checked: Boolean(user.isActive),
+                          disabled: isProtectedUser,
+                          onChange: () => updateAdminUser(user.username, { isActive: !user.isActive }),
+                        }),
+                        React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                      ),
+                      React.createElement(
+                        "label",
+                        { className: "filter-switch", title: user.requireChangePw ? "Disable required password change" : "Require password change" },
+                        React.createElement("input", {
+                          type: "checkbox",
+                          checked: Boolean(user.requireChangePw),
+                          disabled: isProtectedUser,
+                          onChange: () => updateAdminUser(user.username, { requireChangePw: !user.requireChangePw }),
+                        }),
+                        React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                      ),
+                      React.createElement(
+                        "div",
+                        { className: "library-row-actions" },
+                        React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            className: "library-delete-button",
+                            "aria-label": `Delete ${user.username}`,
+                            onClick: () => setDeleteConfirmUser(user),
+                            disabled: isProtectedUser,
+                          },
+                          icon(trashIconPath)
+                        )
+                      )
+                    );
+                  }))
+              )
+            )
+          )
+          : React.createElement(
         "section",
         { className: "chat-column" },
         React.createElement(
@@ -2815,10 +3695,22 @@ function App() {
               "Chat"
             )
             : React.createElement(
-              "button",
-              { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
-              icon(libraryIconPath),
-              "Library"
+              React.Fragment,
+              null,
+              isAdminUser
+                ? React.createElement(
+                  "button",
+                  { type: "button", onClick: openAdminPage, disabled: isNavigationLocked },
+                  icon(adminIconPath),
+                  "Admin"
+                )
+                : null,
+              React.createElement(
+                "button",
+                { type: "button", onClick: openLibraryPage, disabled: isNavigationLocked },
+                icon(libraryIconPath),
+                "Library"
+              )
             ),
           React.createElement(
             "button",
@@ -2842,7 +3734,7 @@ function App() {
         : null,
       null
     ),
-    activeView !== "library" && !isEmbeddingReady && !isLoadingStatus
+    activeView !== "library" && activeView !== "admin" && !isEmbeddingReady && !isLoadingStatus
       ? React.createElement(
         "div",
         { className: "embedding-loading-overlay" },
@@ -2972,6 +3864,133 @@ function App() {
                 type: "button",
                 className: "library-delete-cancel",
                 onClick: () => setDeleteConfirmFile(null),
+              },
+              icon(keepIconPath),
+              "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    isCreateUserDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: closeCreateUserDialog,
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-upload-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Create user",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "New User"),
+          React.createElement("input", {
+            type: "text",
+            className: "library-upload-tags-input",
+            placeholder: "username",
+            value: newUserDraft.username,
+            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
+            disabled: isCreateUserSubmitting,
+          }),
+          React.createElement("input", {
+            type: "text",
+            className: "library-upload-tags-input",
+            placeholder: "display name",
+            value: newUserDraft.displayName,
+            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
+            disabled: isCreateUserSubmitting,
+          }),
+          React.createElement(
+            "label",
+            { className: "setting-input-wrap" },
+            React.createElement("span", { className: "setting-input-label" }, "Role"),
+            React.createElement(
+              "select",
+              {
+                className: "setting-input",
+                value: newUserDraft.role,
+                onChange: (event) => setNewUserDraft((previous) => ({ ...previous, role: event.target.value })),
+                disabled: isCreateUserSubmitting,
+              },
+              React.createElement("option", { value: "users" }, "user"),
+              React.createElement("option", { value: "admin" }, "admin")
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "library-upload-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-cancel",
+                onClick: closeCreateUserDialog,
+                disabled: isCreateUserSubmitting,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-confirm",
+                onClick: confirmCreateUser,
+                disabled: isCreateUserSubmitting || !String(newUserDraft.username || "").trim() || !String(newUserDraft.displayName || "").trim(),
+              },
+              icon(plusChatIconPath),
+              isCreateUserSubmitting ? "Adding..." : "Add User"
+            )
+          )
+        )
+      )
+      : null,
+    deleteConfirmUser
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setDeleteConfirmUser(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-delete-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Confirm user deletion",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Delete user?"),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you really want to delete this user?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmUser.username)
+          ),
+          React.createElement(
+            "div",
+            { className: "library-delete-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteAdminUser,
+              },
+              icon(trashIconPath),
+              "Delete"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-cancel",
+                onClick: () => setDeleteConfirmUser(null),
               },
               icon(keepIconPath),
               "Keep"
@@ -3346,6 +4365,9 @@ function App() {
                       toggleTagFilter,
                       isTagFilterSaving,
                       icon,
+                      settingsTabError,
+                      clearSettingsTabError: () => setSettingsTabError(""),
+                      settingsInputResetTokenByKey,
                     })
                     : React.createElement("p", null, "Select a section.")
             )
@@ -3435,6 +4457,9 @@ function App() {
               toggleTagFilter,
               isTagFilterSaving,
               icon,
+              settingsTabError,
+              clearSettingsTabError: () => setSettingsTabError(""),
+              settingsInputResetTokenByKey,
             })
           )
         )

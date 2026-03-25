@@ -1,0 +1,19 @@
+{
+  "users": [
+    {
+      "username": "test",
+      "display_name": "Test User",
+      "role": "users"
+    },
+    {
+      "username": "usera",
+      "display_name": "User Alpha",
+      "role": "users"
+    },
+    {
+      "username": "admi",
+      "display_name": "Test Admin",
+      "role": "admin"
+    }
+  ]
+}

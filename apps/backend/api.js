@@ -1,28 +1,72 @@
-import { ensureDatabaseReady, pingDatabase } from "../../shared/db/index.js";
+import { dbQuery, ensureDatabaseReady, pingDatabase } from "../../shared/db/index.js";
 import http from "http";
+import crypto from "crypto";
 import {
-  deleteManagedLibraryFile,
+  deleteManagedLibraryFileForUser,
   listManagedLibraryFiles,
   saveManagedLibraryFile,
   toggleManagedLibraryFile,
 } from "./library-service.js";
+import { syncUsersFromConfigFile } from "./user-bootstrap.js";
+import { getGlobalPasswordSalt, hashPasswordWithGlobalSalt, hashPasswordWithSalt } from "../../shared/src/auth.js";
 
 const MAX_LIBRARY_UPLOAD_FILES_PER_REQUEST = 5;
+const SESSION_INITIAL_TTL_MS = 2 * 60 * 60 * 1000;
+const SESSION_REFRESH_THRESHOLD_MS = SESSION_INITIAL_TTL_MS / 2;
+const SESSION_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
 const RETRIEVER_BASE_URL = process.env.RETRIEVER_BASE_URL || "http://retriever:3000";
 const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "http://embedder:3200";
 const MAX_API_BODY_BYTES = Number.parseInt(process.env.MAX_API_BODY_BYTES || String(25 * 1024 * 1024), 10);
+const ADMIN_EDIT_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
 function json(res, statusCode, payload) {
   res.writeHead(statusCode, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
   });
   res.end(JSON.stringify(payload));
+}
+
+function hashSessionToken(token) {
+  return crypto.createHash("sha256").update(`${getGlobalPasswordSalt()}:${String(token || "")}`).digest("hex");
+}
+
+function buildSessionWindow(now = new Date()) {
+  const createdAt = new Date(now);
+  const maxExpiresAt = new Date(createdAt.getTime() + SESSION_MAX_LIFETIME_MS);
+  const expiresAt = new Date(Math.min(createdAt.getTime() + SESSION_INITIAL_TTL_MS, maxExpiresAt.getTime()));
+  return { createdAt, expiresAt, maxExpiresAt };
+}
+
+async function createOrReplaceSession({ userId, sessionId }) {
+  const now = new Date();
+  const { createdAt, expiresAt, maxExpiresAt } = buildSessionWindow(now);
+  const sessionToken = crypto.randomUUID();
+  const sessionTokenHash = hashSessionToken(sessionToken);
+
+  await dbQuery(
+    `INSERT INTO sessions (user_id, session_identifier, session_token_hash, created_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (session_identifier) DO UPDATE
+       SET user_id = EXCLUDED.user_id,
+           session_token_hash = EXCLUDED.session_token_hash,
+           created_at = EXCLUDED.created_at,
+           expires_at = EXCLUDED.expires_at`,
+    [userId, sessionId, sessionTokenHash, createdAt.toISOString(), expiresAt.toISOString()]
+  );
+
+  return {
+    sessionId,
+    sessionToken,
+    createdAt: createdAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    maxExpiresAt: maxExpiresAt.toISOString(),
+  };
 }
 
 function readBody(req) {
@@ -45,26 +89,57 @@ function readBody(req) {
   });
 }
 
-async function proxyRetriever({ req, res, targetPath }) {
-  const method = req.method || "GET";
-  const body = ["POST", "PATCH", "DELETE"].includes(method) ? await readBody(req) : undefined;
+function isJsonContentType(contentType) {
+  return String(contentType || "").toLowerCase().includes("application/json");
+}
 
-  const upstreamResponse = await fetch(`${RETRIEVER_BASE_URL}${targetPath}`, {
+async function proxyRetriever({ req, res, targetPath, sessionId }) {
+  const method = req.method || "GET";
+  const targetUrl = new URL(`${RETRIEVER_BASE_URL}${targetPath}`);
+  if (sessionId) {
+    targetUrl.searchParams.set("sessionId", sessionId);
+  }
+  const contentType = String(req.headers["content-type"] || "application/json");
+  let body = undefined;
+  if (["POST", "PATCH", "DELETE"].includes(method)) {
+    const rawBody = await readBody(req);
+    if (sessionId && rawBody && isJsonContentType(contentType)) {
+      try {
+        const parsed = JSON.parse(rawBody);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          body = JSON.stringify({
+            ...parsed,
+            sessionId,
+          });
+        } else {
+          body = rawBody;
+        }
+      } catch {
+        body = rawBody;
+      }
+    } else if (sessionId && !rawBody && isJsonContentType(contentType)) {
+      body = JSON.stringify({ sessionId });
+    } else {
+      body = rawBody;
+    }
+  }
+
+  const upstreamResponse = await fetch(targetUrl, {
     method,
     headers: {
-      "content-type": req.headers["content-type"] || "application/json",
+      "content-type": contentType,
     },
     body,
   });
 
   const text = await upstreamResponse.text();
-  const contentType = upstreamResponse.headers.get("content-type") || "application/json";
+  const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json";
 
   res.writeHead(upstreamResponse.status, {
-    "Content-Type": contentType,
+    "Content-Type": upstreamContentType,
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
   });
   res.end(text);
 }
@@ -83,12 +158,94 @@ async function fetchJson(url) {
   }
 }
 
-async function handleStatus(req, res) {
-  const requestUrl = new URL(req.url || "/api/status", `http://${req.headers.host || "localhost"}`);
-  const sessionId = String(requestUrl.searchParams.get("sessionId") || "").trim();
-  const retrieverStatusUrl = sessionId
-    ? `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`
-    : `${RETRIEVER_BASE_URL}/internal/retriever/status`;
+function getSessionIdFromRequest(url, body = null) {
+  const fromQuery = String(url.searchParams.get("sessionId") || "").trim();
+  if (fromQuery) return fromQuery;
+  const fromBody = String(body?.sessionId || "").trim();
+  return fromBody;
+}
+
+async function validateAndRefreshSession({ req, url, body = null, refresh = true }) {
+  const requestedSessionId = getSessionIdFromRequest(url, body);
+  const sessionToken = String(req.headers["x-session-token"] || "").trim();
+  if (!sessionToken) {
+    return { ok: false, statusCode: 401, error: "Missing session token." };
+  }
+  const expectedTokenHash = hashSessionToken(sessionToken);
+
+  const result = requestedSessionId
+    ? await dbQuery(
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name, u.role
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.session_identifier = $1
+       LIMIT 1`,
+      [requestedSessionId]
+    )
+    : await dbQuery(
+      `SELECT s.user_id, s.session_identifier, s.session_token_hash, s.created_at, s.expires_at, u.username, u.display_name, u.role
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.session_token_hash = $1
+       LIMIT 1`,
+      [expectedTokenHash]
+    );
+  const session = result.rows[0];
+  if (!session || !session.session_token_hash) {
+    return { ok: false, statusCode: 401, error: "Session not found." };
+  }
+  const resolvedSessionId = String(session.session_identifier || "").trim();
+
+  if (expectedTokenHash !== session.session_token_hash) {
+    return { ok: false, statusCode: 401, error: "Session token is invalid." };
+  }
+
+  const nowMs = Date.now();
+  const createdMs = new Date(session.created_at).getTime();
+  const expiresMs = session.expires_at ? new Date(session.expires_at).getTime() : 0;
+  const maxExpiresMs = createdMs + SESSION_MAX_LIFETIME_MS;
+
+  if (nowMs >= maxExpiresMs) {
+    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [resolvedSessionId]);
+    return { ok: false, statusCode: 401, error: "Session reached its maximum lifetime. Please log in again." };
+  }
+
+  if (!expiresMs || nowMs >= expiresMs) {
+    await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [resolvedSessionId]);
+    return { ok: false, statusCode: 401, error: "Session expired. Please log in again." };
+  }
+
+  let nextExpiresAt = new Date(expiresMs).toISOString();
+  if (refresh && (expiresMs - nowMs) <= SESSION_REFRESH_THRESHOLD_MS) {
+    const refreshedMs = Math.min(nowMs + SESSION_INITIAL_TTL_MS, maxExpiresMs);
+    if (refreshedMs > expiresMs) {
+      nextExpiresAt = new Date(refreshedMs).toISOString();
+      await dbQuery(
+        `UPDATE sessions
+         SET expires_at = $2
+         WHERE session_identifier = $1`,
+        [resolvedSessionId, nextExpiresAt]
+      );
+    }
+  }
+
+  return {
+    ok: true,
+    session: {
+      userId: Number.parseInt(String(session.user_id || ""), 10),
+      sessionId: resolvedSessionId,
+      username: session.username,
+      displayName: session.display_name,
+      role: session.role,
+      createdAt: new Date(createdMs).toISOString(),
+      expiresAt: nextExpiresAt,
+      maxExpiresAt: new Date(maxExpiresMs).toISOString(),
+    },
+  };
+}
+
+async function handleStatus(req, res, sessionId) {
+  const retrieverStatusUrl = `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`;
   const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
 
@@ -135,13 +292,18 @@ async function getDbHealth() {
   }
 }
 
-async function handleLibraryUpload(req, res) {
+async function handleLibraryUpload(req, res, session) {
+  if (!Number.isInteger(session?.userId) || session.userId <= 0) {
+    json(res, 401, { ok: false, error: "Invalid session user." });
+    return;
+  }
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
   const rawBody = await readBody(req);
   let body;
   try {
     body = rawBody ? JSON.parse(rawBody) : {};
   } catch {
-    json(res, 400, { error: "Invalid JSON payload" });
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
     return;
   }
 
@@ -177,6 +339,8 @@ async function handleLibraryUpload(req, res) {
           contentBase64: entry?.contentBase64,
           overwrite: Boolean(entry?.overwrite),
           tags: entry?.tags,
+          uploadedByUserId: session.userId,
+          saveToRoot: isAdmin,
         });
         return { ok: true, fileName: entry?.name, file };
       } catch (error) {
@@ -204,23 +368,28 @@ async function handleLibraryUpload(req, res) {
   }
 }
 
-async function handleLibraryDelete(url, res) {
+async function handleLibraryDelete(url, res, session) {
   const filePath = String(url.searchParams.get("path") || "");
   if (!filePath) {
     json(res, 400, { ok: false, error: "Missing 'path' query parameter." });
     return;
   }
 
-  const result = await deleteManagedLibraryFile(filePath);
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
+  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId, isAdmin });
   if (!result.deleted) {
+    if (result.reason === "not_owner") {
+      json(res, 403, { ok: false, error: "You can only delete files that you uploaded." });
+      return;
+    }
     json(res, 404, { ok: false, error: "Managed file not found." });
     return;
   }
 
-  json(res, 200, { ok: true, path: result.path });
+  json(res, 200, { ok: true, path: result.path, removedVectors: result.removedVectors ?? null });
 }
 
-async function handleLibraryToggle(req, res) {
+async function handleLibraryToggle(req, res, session) {
   const rawBody = await readBody(req);
   let body;
   try {
@@ -241,16 +410,17 @@ async function handleLibraryToggle(req, res) {
     return;
   }
 
-  const result = await toggleManagedLibraryFile(filePath, action === "activate");
+  const result = await toggleManagedLibraryFile(filePath, action === "activate", { userId: session.userId });
   if (!result.updated) {
-    json(res, 404, { ok: false, error: "Managed file not found." });
+    json(res, 404, { ok: false, error: "Managed file not found for this user." });
     return;
   }
   json(res, 200, { ok: true, file: result });
 }
 
-async function handleLibraryList(res) {
-  const files = await listManagedLibraryFiles();
+async function handleLibraryList(res, session) {
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
+  const files = await listManagedLibraryFiles({ userId: session.userId, isAdmin });
   json(res, 200, {
     ok: true,
     files,
@@ -259,6 +429,368 @@ async function handleLibraryList(res) {
     embedding: files.filter((file) => file.uploadStatus === "embedding").length,
     error: files.filter((file) => file.uploadStatus === "error").length,
   });
+}
+
+async function handleLogin(req, res, url) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const username = String(body?.username || "").trim();
+  const password = String(body?.password || "");
+  const sessionId = getSessionIdFromRequest(url, body);
+  if (!username || !password) {
+    json(res, 400, { ok: false, error: "Username and password are required." });
+    return;
+  }
+  if (!sessionId) {
+    json(res, 400, { ok: false, error: "Session id is required." });
+    return;
+  }
+
+  const userResult = await dbQuery(
+    `SELECT id, username, display_name, password_hash, password_salt, role, is_active, require_changepw
+     FROM users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+  if (!user.is_active) {
+    json(res, 403, { ok: false, error: "User account is inactive." });
+    return;
+  }
+
+  const enteredPasswordHash = hashPasswordWithSalt(password, user.password_salt);
+  if (enteredPasswordHash !== user.password_hash) {
+    json(res, 401, { ok: false, error: "Invalid password." });
+    return;
+  }
+
+  if (user.require_changepw) {
+    json(res, 200, {
+      ok: true,
+      requirePasswordChange: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        displayName: user.display_name,
+        role: user.role,
+      },
+    });
+    return;
+  }
+
+  const session = await createOrReplaceSession({ userId: user.id, sessionId });
+  json(res, 200, {
+    ok: true,
+    requirePasswordChange: false,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+      role: user.role,
+    },
+    session,
+  });
+}
+
+async function handleChangePassword(req, res, url) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const username = String(body?.username || "").trim();
+  const oldPassword = String(body?.oldPassword || "");
+  const newPassword = String(body?.newPassword || "");
+  const confirmNewPassword = String(body?.confirmNewPassword || "");
+  const sessionId = getSessionIdFromRequest(url, body);
+  if (!username || !oldPassword || !newPassword || !confirmNewPassword) {
+    json(res, 400, { ok: false, error: "All fields are required." });
+    return;
+  }
+  if (!sessionId) {
+    json(res, 400, { ok: false, error: "Session id is required." });
+    return;
+  }
+  if (newPassword !== confirmNewPassword) {
+    json(res, 400, { ok: false, error: "New password and confirmation do not match." });
+    return;
+  }
+
+  const userResult = await dbQuery(
+    `SELECT id, username, display_name, password_hash, password_salt, role, is_active
+     FROM users
+     WHERE username = $1
+     LIMIT 1`,
+    [username]
+  );
+  const user = userResult.rows[0];
+  if (!user) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+  if (!user.is_active) {
+    json(res, 403, { ok: false, error: "User account is inactive." });
+    return;
+  }
+
+  const enteredOldPasswordHash = hashPasswordWithSalt(oldPassword, user.password_salt);
+  if (enteredOldPasswordHash !== user.password_hash) {
+    json(res, 401, { ok: false, error: "Old password is invalid." });
+    return;
+  }
+
+  const newPasswordHash = hashPasswordWithGlobalSalt(newPassword);
+  const globalSalt = getGlobalPasswordSalt();
+  await dbQuery(
+    `UPDATE users
+     SET password_hash = $1,
+         password_salt = $2,
+         require_changepw = FALSE,
+         updated_at = NOW()
+     WHERE id = $3`,
+    [newPasswordHash, globalSalt, user.id]
+  );
+
+  const session = await createOrReplaceSession({ userId: user.id, sessionId });
+  json(res, 200, {
+    ok: true,
+    requirePasswordChange: false,
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+      role: user.role,
+    },
+    session,
+  });
+}
+
+async function handleSession(req, res, url) {
+  const validation = await validateAndRefreshSession({ req, url, refresh: true });
+  if (!validation.ok) {
+    json(res, validation.statusCode || 401, { ok: false, error: validation.error });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    user: {
+      username: validation.session.username,
+      displayName: validation.session.displayName,
+      role: validation.session.role,
+    },
+    session: {
+      sessionId: validation.session.sessionId,
+      createdAt: validation.session.createdAt,
+      expiresAt: validation.session.expiresAt,
+      maxExpiresAt: validation.session.maxExpiresAt,
+    },
+  });
+}
+
+async function handleLogout(req, res, url) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const validation = await validateAndRefreshSession({ req, url, body, refresh: false });
+  if (!validation.ok) {
+    json(res, validation.statusCode || 401, { ok: false, error: validation.error });
+    return;
+  }
+
+  await dbQuery("DELETE FROM sessions WHERE session_identifier = $1", [validation.session.sessionId]);
+  json(res, 200, { ok: true, loggedOut: true });
+}
+
+function isAdminSession(session) {
+  return String(session?.role || "").trim().toLowerCase() === "admin";
+}
+
+function normalizeUserRole(input) {
+  return String(input || "").trim().toLowerCase() === "admin" ? "admin" : "users";
+}
+
+async function handleAdminUsersList(res) {
+  const result = await dbQuery(
+    `SELECT username, is_active, require_changepw
+     FROM users
+     ORDER BY username ASC`
+  );
+  const users = result.rows.map((row) => ({
+    username: row.username,
+    isActive: Boolean(row.is_active),
+    requireChangePw: Boolean(row.require_changepw),
+  }));
+  json(res, 200, { ok: true, users });
+}
+
+async function handleAdminUserCreate(req, res) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const username = String(body?.username || "").trim();
+  const displayName = String(body?.displayName || "").trim();
+  const role = normalizeUserRole(body?.role);
+  if (username.length < 4 || displayName.length < 2) {
+    json(res, 400, { ok: false, error: "Username or display name is too short." });
+    return;
+  }
+  if (ADMIN_EDIT_PROTECTED_USERNAMES.has(username)) {
+    json(res, 400, { ok: false, error: "This username is reserved." });
+    return;
+  }
+
+  const passwordHash = hashPasswordWithGlobalSalt(process.env.AUTH_INITIAL_PASSWORD || "Passw0rd!");
+  const passwordSalt = getGlobalPasswordSalt();
+  try {
+    const result = await dbQuery(
+      `INSERT INTO users (username, display_name, password_hash, password_salt, role, is_active, require_changepw, updated_at)
+       VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, NOW())
+       RETURNING username, display_name, role, is_active, require_changepw`,
+      [username, displayName, passwordHash, passwordSalt, role]
+    );
+    const created = result.rows[0];
+    json(res, 201, {
+      ok: true,
+      user: {
+        username: created.username,
+        displayName: created.display_name,
+        role: created.role,
+        isActive: Boolean(created.is_active),
+        requireChangePw: Boolean(created.require_changepw),
+      },
+    });
+  } catch (error) {
+    if (String(error?.message || "").toLowerCase().includes("duplicate key")) {
+      json(res, 409, { ok: false, error: "Username already exists." });
+      return;
+    }
+    throw error;
+  }
+}
+
+async function handleAdminUserUpdate(req, res, username, session) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const hasIsActive = typeof body?.isActive === "boolean";
+  const hasRequireChangePw = typeof body?.requireChangePw === "boolean";
+  if (!hasIsActive && !hasRequireChangePw) {
+    json(res, 400, { ok: false, error: "At least one update flag is required." });
+    return;
+  }
+  if (username === session.username && hasIsActive && body.isActive === false) {
+    json(res, 400, { ok: false, error: "You cannot deactivate your own account." });
+    return;
+  }
+  if (ADMIN_EDIT_PROTECTED_USERNAMES.has(username)) {
+    json(res, 400, { ok: false, error: "This user cannot be modified." });
+    return;
+  }
+
+  const updates = [];
+  const values = [];
+  if (hasIsActive) {
+    values.push(body.isActive);
+    updates.push(`is_active = $${values.length}`);
+  }
+  if (hasRequireChangePw) {
+    values.push(body.requireChangePw);
+    updates.push(`require_changepw = $${values.length}`);
+  }
+  values.push(username);
+
+  const result = await dbQuery(
+    `UPDATE users
+     SET ${updates.join(", ")},
+         updated_at = NOW()
+     WHERE username = $${values.length}
+     RETURNING username, is_active, require_changepw`,
+    values
+  );
+  const updatedUser = result.rows[0];
+  if (!updatedUser) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    user: {
+      username: updatedUser.username,
+      isActive: Boolean(updatedUser.is_active),
+      requireChangePw: Boolean(updatedUser.require_changepw),
+    },
+  });
+}
+
+async function handleAdminUserDelete(res, username, session) {
+  if (username === session.username) {
+    json(res, 400, { ok: false, error: "You cannot delete your own account." });
+    return;
+  }
+  if (ADMIN_EDIT_PROTECTED_USERNAMES.has(username)) {
+    json(res, 400, { ok: false, error: "This user cannot be deleted." });
+    return;
+  }
+
+  const result = await dbQuery(
+    `DELETE FROM users
+     WHERE username = $1
+     RETURNING id, username`,
+    [username]
+  );
+  const deletedUser = result.rows[0];
+  if (!deletedUser) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+
+  await dbQuery("DELETE FROM sessions WHERE user_id = $1", [deletedUser.id]);
+  json(res, 200, { ok: true, deleted: true, username: deletedUser.username });
+}
+
+async function requireValidatedSession(req, res, url, { body = null, refresh = true } = {}) {
+  const validatedSession = await validateAndRefreshSession({ req, url, body, refresh });
+  if (!validatedSession.ok) {
+    json(res, validatedSession.statusCode || 401, { ok: false, error: validatedSession.error });
+    return null;
+  }
+  return validatedSession.session;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -275,82 +807,65 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/status") {
-      await handleStatus(req, res);
+    if (req.method === "POST" && url.pathname === "/api/auth/login") {
+      await handleLogin(req, res, url);
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/files") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files") });
+    if (req.method === "POST" && url.pathname === "/api/auth/change-password") {
+      await handleChangePassword(req, res, url);
       return;
     }
 
-    if (req.method === "PATCH" && url.pathname === "/api/files/tags") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags" });
+    if (req.method === "GET" && url.pathname === "/api/auth/session") {
+      await handleSession(req, res, url);
       return;
     }
 
-
-    if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/files/tag-filters") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters") });
+    if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+      await handleLogout(req, res, url);
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/library/files") {
-      await handleLibraryList(res);
+    if (req.method === "GET" && url.pathname === "/api/admin/users") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      if (!isAdminSession(session)) {
+        json(res, 403, { ok: false, error: "Admin access required." });
+        return;
+      }
+      await handleAdminUsersList(res);
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/library/files") {
-      await handleLibraryUpload(req, res);
+    if (req.method === "POST" && url.pathname === "/api/admin/users") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      if (!isAdminSession(session)) {
+        json(res, 403, { ok: false, error: "Admin access required." });
+        return;
+      }
+      await handleAdminUserCreate(req, res);
       return;
     }
 
-    if (req.method === "DELETE" && url.pathname === "/api/library/files") {
-      await handleLibraryDelete(url, res);
-      return;
-    }
-
-    if (req.method === "PATCH" && url.pathname === "/api/library/files") {
-      await handleLibraryToggle(req, res);
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/messages") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages") });
-      return;
-    }
-
-    if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/personalization") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/personalization", "/internal/retriever/personalization") });
-      return;
-    }
-
-    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/chats") {
-      await proxyRetriever({ req, res, targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats") });
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname.startsWith("/api/chats/") && url.pathname.endsWith("/download")) {
-      await proxyRetriever({
-        req,
-        res,
-        targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
-      });
-      return;
-    }
-
-    if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/chats/")) {
-      await proxyRetriever({
-        req,
-        res,
-        targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
-      });
-      return;
-    }
-
-    if (req.method === "POST" && url.pathname === "/api/prompt") {
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt" });
+    if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/admin/users/")) {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      if (!isAdminSession(session)) {
+        json(res, 403, { ok: false, error: "Admin access required." });
+        return;
+      }
+      const username = decodeURIComponent(url.pathname.slice("/api/admin/users/".length)).trim();
+      if (!username) {
+        json(res, 400, { ok: false, error: "Username is required." });
+        return;
+      }
+      if (req.method === "PATCH") {
+        await handleAdminUserUpdate(req, res, username, session);
+        return;
+      }
+      await handleAdminUserDelete(res, username, session);
       return;
     }
 
@@ -363,6 +878,140 @@ const server = http.createServer(async (req, res) => {
         embedderBaseUrl: EMBEDDER_BASE_URL,
         postgres: db,
       });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/status") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await handleStatus(req, res, session.sessionId);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/files", "/internal/retriever/files"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/files/tags") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/files/tags", sessionId: session.sessionId });
+      return;
+    }
+
+
+    if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/files/tag-filters") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/files/tag-filters", "/internal/retriever/files/tag-filters"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await handleLibraryList(res, session);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await handleLibraryUpload(req, res, session);
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await handleLibraryDelete(url, res, session);
+      return;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/library/files") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await handleLibraryToggle(req, res, session);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/messages") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/messages", "/internal/retriever/messages"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/personalization") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/personalization", "/internal/retriever/personalization"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/chats") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats", "/internal/retriever/chats"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/api/chats/") && url.pathname.endsWith("/download")) {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/chats/")) {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({
+        req,
+        res,
+        targetPath: `${url.pathname}${url.search}`.replace("/api/chats/", "/internal/retriever/chats/"),
+        sessionId: session.sessionId,
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/prompt") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt", sessionId: session.sessionId });
       return;
     }
 
@@ -383,8 +1032,10 @@ const server = http.createServer(async (req, res) => {
 });
 
 await ensureDatabaseReady();
+const syncedUsers = await syncUsersFromConfigFile();
+console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${syncedUsers.configured})`);
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
