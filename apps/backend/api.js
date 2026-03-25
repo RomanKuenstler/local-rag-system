@@ -2,7 +2,7 @@ import { dbQuery, ensureDatabaseReady, pingDatabase } from "../../shared/db/inde
 import http from "http";
 import crypto from "crypto";
 import {
-  deleteManagedLibraryFile,
+  deleteManagedLibraryFileForUser,
   listManagedLibraryFiles,
   saveManagedLibraryFile,
   toggleManagedLibraryFile,
@@ -360,15 +360,19 @@ async function handleLibraryUpload(req, res, session) {
   }
 }
 
-async function handleLibraryDelete(url, res) {
+async function handleLibraryDelete(url, res, session) {
   const filePath = String(url.searchParams.get("path") || "");
   if (!filePath) {
     json(res, 400, { ok: false, error: "Missing 'path' query parameter." });
     return;
   }
 
-  const result = await deleteManagedLibraryFile(filePath);
+  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId });
   if (!result.deleted) {
+    if (result.reason === "not_owner") {
+      json(res, 403, { ok: false, error: "You can only delete files that you uploaded." });
+      return;
+    }
     json(res, 404, { ok: false, error: "Managed file not found." });
     return;
   }
@@ -717,7 +721,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "DELETE" && url.pathname === "/api/library/files") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return;
-      await handleLibraryDelete(url, res);
+      await handleLibraryDelete(url, res, session);
       return;
     }
 

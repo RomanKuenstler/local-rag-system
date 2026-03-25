@@ -1243,6 +1243,17 @@ function App() {
     }
 
     try {
+      setLibraryManagedData((previous) => {
+        if (!previous?.files) return previous;
+        return {
+          ...previous,
+          files: previous.files.map((entry) => (
+            entry.path === target.path
+              ? { ...entry, uploadStatus: "removing" }
+              : entry
+          )),
+        };
+      });
       const response = await apiFetch(`/api/library/files?path=${encodeURIComponent(target.path)}`, {
         method: "DELETE",
       });
@@ -2163,7 +2174,8 @@ function App() {
       embedded: Boolean(file.embedded),
       hash: file.hash,
       updatedAt: managed?.updatedAt || file.lastModified || null,
-      canDelete: Boolean(managed),
+      canDelete: Boolean(managed?.canDelete),
+      canToggle: Boolean(managed?.canToggle),
       lastError: managed?.lastError || null,
       tags: Array.isArray(file.tags) ? file.tags : [],
     };
@@ -2180,7 +2192,8 @@ function App() {
       embedded: Boolean(managed.embedded),
       hash: managed.hash,
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
-      canDelete: true,
+      canDelete: Boolean(managed.canDelete),
+      canToggle: Boolean(managed.canToggle),
       lastError: managed.lastError || null,
       tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
@@ -3167,7 +3180,7 @@ function App() {
                       className: "library-toggle-button",
                       "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
                       onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
-                      disabled: !file.canDelete,
+                      disabled: !file.canToggle,
                     },
                     icon(file.enabled === false ? eyeIconPath : eyeOffIconPath)
                   ),

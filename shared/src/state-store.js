@@ -865,6 +865,22 @@ export async function getManagedLibraryFile(filePath) {
   return result.rows[0] || null;
 }
 
+export async function hardDeleteManagedLibraryFile(filePath) {
+  const normalizedPath = String(filePath || "").trim();
+  if (!normalizedPath) {
+    return false;
+  }
+
+  await dbQuery("DELETE FROM file_tags WHERE file_path = $1", [normalizedPath]);
+  await dbQuery("DELETE FROM file_metadata WHERE file_path = $1", [normalizedPath]);
+  const result = await dbQuery(
+    `DELETE FROM library_managed_files
+     WHERE file_path = $1`,
+    [normalizedPath]
+  );
+  return result.rowCount > 0;
+}
+
 export async function listManagedLibraryFilesWithStatus() {
   const result = await dbQuery(
     `SELECT
