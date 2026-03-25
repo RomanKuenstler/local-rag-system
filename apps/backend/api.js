@@ -623,6 +623,103 @@ async function handleLogout(req, res, url) {
   json(res, 200, { ok: true, loggedOut: true });
 }
 
+function isAdminSession(session) {
+  return String(session?.role || "").trim().toLowerCase() === "admin";
+}
+
+async function handleAdminUsersList(res) {
+  const result = await dbQuery(
+    `SELECT username, is_active, require_changepw
+     FROM users
+     ORDER BY username ASC`
+  );
+  const users = result.rows.map((row) => ({
+    username: row.username,
+    isActive: Boolean(row.is_active),
+    requireChangePw: Boolean(row.require_changepw),
+  }));
+  json(res, 200, { ok: true, users });
+}
+
+async function handleAdminUserUpdate(req, res, username, session) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const hasIsActive = typeof body?.isActive === "boolean";
+  const hasRequireChangePw = typeof body?.requireChangePw === "boolean";
+  if (!hasIsActive && !hasRequireChangePw) {
+    json(res, 400, { ok: false, error: "At least one update flag is required." });
+    return;
+  }
+  if (username === session.username && hasIsActive && body.isActive === false) {
+    json(res, 400, { ok: false, error: "You cannot deactivate your own account." });
+    return;
+  }
+
+  const updates = [];
+  const values = [];
+  if (hasIsActive) {
+    values.push(body.isActive);
+    updates.push(`is_active = $${values.length}`);
+  }
+  if (hasRequireChangePw) {
+    values.push(body.requireChangePw);
+    updates.push(`require_changepw = $${values.length}`);
+  }
+  values.push(username);
+
+  const result = await dbQuery(
+    `UPDATE users
+     SET ${updates.join(", ")},
+         updated_at = NOW()
+     WHERE username = $${values.length}
+     RETURNING username, is_active, require_changepw`,
+    values
+  );
+  const updatedUser = result.rows[0];
+  if (!updatedUser) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+
+  json(res, 200, {
+    ok: true,
+    user: {
+      username: updatedUser.username,
+      isActive: Boolean(updatedUser.is_active),
+      requireChangePw: Boolean(updatedUser.require_changepw),
+    },
+  });
+}
+
+async function handleAdminUserDelete(res, username, session) {
+  if (username === session.username) {
+    json(res, 400, { ok: false, error: "You cannot delete your own account." });
+    return;
+  }
+
+  const result = await dbQuery(
+    `DELETE FROM users
+     WHERE username = $1
+     RETURNING id, username`,
+    [username]
+  );
+  const deletedUser = result.rows[0];
+  if (!deletedUser) {
+    json(res, 404, { ok: false, error: "User does not exist." });
+    return;
+  }
+
+  await dbQuery("DELETE FROM sessions WHERE user_id = $1", [deletedUser.id]);
+  json(res, 200, { ok: true, deleted: true, username: deletedUser.username });
+}
+
 async function requireValidatedSession(req, res, url, { body = null, refresh = true } = {}) {
   const validatedSession = await validateAndRefreshSession({ req, url, body, refresh });
   if (!validatedSession.ok) {
@@ -663,6 +760,37 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/auth/logout") {
       await handleLogout(req, res, url);
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/users") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      if (!isAdminSession(session)) {
+        json(res, 403, { ok: false, error: "Admin access required." });
+        return;
+      }
+      await handleAdminUsersList(res);
+      return;
+    }
+
+    if ((req.method === "PATCH" || req.method === "DELETE") && url.pathname.startsWith("/api/admin/users/")) {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return;
+      if (!isAdminSession(session)) {
+        json(res, 403, { ok: false, error: "Admin access required." });
+        return;
+      }
+      const username = decodeURIComponent(url.pathname.slice("/api/admin/users/".length)).trim();
+      if (!username) {
+        json(res, 400, { ok: false, error: "Username is required." });
+        return;
+      }
+      if (req.method === "PATCH") {
+        await handleAdminUserUpdate(req, res, username, session);
+        return;
+      }
+      await handleAdminUserDelete(res, username, session);
       return;
     }
 
@@ -834,5 +962,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });

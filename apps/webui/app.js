@@ -319,10 +319,13 @@ function App() {
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [libraryManagedData, setLibraryManagedData] = useState(null);
   const [libraryNotice, setLibraryNotice] = useState("");
+  const [adminUsersData, setAdminUsersData] = useState([]);
+  const [adminUsersNotice, setAdminUsersNotice] = useState("");
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [libraryUploadDrafts, setLibraryUploadDrafts] = useState([]);
   const [deleteConfirmFile, setDeleteConfirmFile] = useState(null);
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
   const [hasShownReadyGreeting, setHasShownReadyGreeting] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUnifiedDialogOpen, setIsUnifiedDialogOpen] = useState(false);
@@ -433,6 +436,7 @@ function App() {
     setIsUnifiedDialogOpen(false);
     setPanelData(null);
     setDeleteConfirmFile(null);
+    setDeleteConfirmUser(null);
     setDeleteConfirmChat(null);
     setIsUploadDialogOpen(false);
     setLibraryUploadDrafts([]);
@@ -441,6 +445,8 @@ function App() {
     setOpenChatMenuId(null);
     setIsAuthenticated(false);
     setAuthenticatedRole("users");
+    setAdminUsersData([]);
+    setAdminUsersNotice("");
     setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
     if (window.location.hash !== LOGIN_PAGE_HASH) {
       window.location.hash = LOGIN_PAGE_HASH;
@@ -782,10 +788,19 @@ function App() {
         const knownPaths = new Set(Array.isArray(payload.files) ? payload.files.map((file) => file.path) : []);
         setPendingLibraryUploads((previous) => previous.filter((file) => !knownPaths.has(file.path)));
       }
+
+      if (authenticatedRole === "admin") {
+        const adminUsersRes = await apiFetch(`/api/admin/users`);
+        if (adminUsersRes.ok) {
+          const payload = await adminUsersRes.json().catch(() => ({}));
+          setAdminUsersData(Array.isArray(payload?.users) ? payload.users : []);
+        }
+      }
     } catch {
       setStatusData(null);
       setFilesData(null);
       setLibraryManagedData(null);
+      setAdminUsersData([]);
     } finally {
       setIsLoadingStatus(false);
     }
@@ -1329,6 +1344,54 @@ function App() {
       await refreshStatus();
     } catch (error) {
       setLibraryNotice(error.message || "File status update failed.");
+      await refreshStatus();
+    }
+  }
+
+  async function updateAdminUser(username, updates) {
+    const normalizedUsername = String(username || "").trim();
+    if (!normalizedUsername) return;
+    try {
+      const response = await apiFetch(`/api/admin/users/${encodeURIComponent(normalizedUsername)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "User update failed.");
+      }
+      const nextUser = payload?.user;
+      if (nextUser?.username) {
+        setAdminUsersData((previous) => previous.map((entry) => (
+          entry.username === nextUser.username ? nextUser : entry
+        )));
+      }
+      setAdminUsersNotice("");
+    } catch (error) {
+      setAdminUsersNotice(error.message || "User update failed.");
+      await refreshStatus();
+    }
+  }
+
+  async function confirmDeleteAdminUser() {
+    const target = deleteConfirmUser;
+    setDeleteConfirmUser(null);
+    const normalizedUsername = String(target?.username || "").trim();
+    if (!normalizedUsername) return;
+
+    try {
+      const response = await apiFetch(`/api/admin/users/${encodeURIComponent(normalizedUsername)}`, {
+        method: "DELETE",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Delete failed.");
+      }
+      setAdminUsersData((previous) => previous.filter((entry) => entry.username !== normalizedUsername));
+      setAdminUsersNotice(`Deleted ${normalizedUsername}.`);
+    } catch (error) {
+      setAdminUsersNotice(error.message || "Delete failed.");
       await refreshStatus();
     }
   }
@@ -2232,6 +2295,9 @@ function App() {
     return b - a;
   });
   const libraryRows = pendingLibraryUploads.concat(dbRows);
+  const adminUserRows = Array.isArray(adminUsersData)
+    ? [...adminUsersData].sort((left, right) => String(left?.username || "").localeCompare(String(right?.username || "")))
+    : [];
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const isNavigationLocked = isSending;
@@ -3268,8 +3334,68 @@ function App() {
             { className: "chat-column library-column" },
             React.createElement(
               "section",
-              { className: "info-group-card library-summary-card" },
-              React.createElement("h4", null, "Admin")
+              { className: "info-group-card library-table-card" },
+              React.createElement(
+                "div",
+                { className: "library-table-header" },
+                React.createElement("h4", null, "Users")
+              ),
+              adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
+              React.createElement(
+                "div",
+                { className: "library-table", role: "table", "aria-label": "Users" },
+                React.createElement(
+                  "div",
+                  { className: "library-table-head", role: "row" },
+                  React.createElement("span", null, "Username"),
+                  React.createElement("span", null, "is_active"),
+                  React.createElement("span", null, "require_changepw"),
+                  React.createElement("span", null, "Action")
+                ),
+                ...(adminUserRows.length === 0
+                  ? [React.createElement("p", { key: "admin-empty", className: "archive-empty" }, "No users found.")]
+                  : adminUserRows.map((user) => React.createElement(
+                    "div",
+                    { key: user.username, className: "library-table-row", role: "row" },
+                    React.createElement("strong", { className: "library-path" }, user.username),
+                    React.createElement(
+                      "label",
+                      { className: "filter-switch", title: user.isActive ? "Deactivate user" : "Activate user" },
+                      React.createElement("input", {
+                        type: "checkbox",
+                        checked: Boolean(user.isActive),
+                        disabled: user.username === authenticatedUsername,
+                        onChange: () => updateAdminUser(user.username, { isActive: !user.isActive }),
+                      }),
+                      React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                    ),
+                    React.createElement(
+                      "label",
+                      { className: "filter-switch", title: user.requireChangePw ? "Disable required password change" : "Require password change" },
+                      React.createElement("input", {
+                        type: "checkbox",
+                        checked: Boolean(user.requireChangePw),
+                        onChange: () => updateAdminUser(user.username, { requireChangePw: !user.requireChangePw }),
+                      }),
+                      React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                    ),
+                    React.createElement(
+                      "div",
+                      { className: "library-row-actions" },
+                      React.createElement(
+                        "button",
+                        {
+                          type: "button",
+                          className: "library-delete-button",
+                          "aria-label": `Delete ${user.username}`,
+                          onClick: () => setDeleteConfirmUser(user),
+                          disabled: user.username === authenticatedUsername,
+                        },
+                        icon(trashIconPath)
+                      )
+                    )
+                  )))
+              )
             )
           )
           : React.createElement(
@@ -3673,6 +3799,56 @@ function App() {
                 type: "button",
                 className: "library-delete-cancel",
                 onClick: () => setDeleteConfirmFile(null),
+              },
+              icon(keepIconPath),
+              "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    deleteConfirmUser
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: () => setDeleteConfirmUser(null),
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-delete-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Confirm user deletion",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "Delete user?"),
+          React.createElement(
+            "p",
+            null,
+            "Are you sure you really want to delete this user?",
+            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmUser.username)
+          ),
+          React.createElement(
+            "div",
+            { className: "library-delete-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteAdminUser,
+              },
+              icon(trashIconPath),
+              "Delete"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-cancel",
+                onClick: () => setDeleteConfirmUser(null),
               },
               icon(keepIconPath),
               "Keep"
