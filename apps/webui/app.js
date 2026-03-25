@@ -329,6 +329,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authenticatedUsername, setAuthenticatedUsername] = useState("");
   const [authenticatedDisplayName, setAuthenticatedDisplayName] = useState("");
+  const [authenticatedRole, setAuthenticatedRole] = useState("users");
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginMode, setLoginMode] = useState("signin");
@@ -432,6 +433,7 @@ function App() {
     setChatFilterDialogChat(null);
     setOpenChatMenuId(null);
     setIsAuthenticated(false);
+    setAuthenticatedRole("users");
     setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
     if (window.location.hash !== LOGIN_PAGE_HASH) {
       window.location.hash = LOGIN_PAGE_HASH;
@@ -491,6 +493,7 @@ function App() {
     const user = payload?.user || {};
     setAuthenticatedUsername(String(user.username || ""));
     setAuthenticatedDisplayName(String(user.displayName || user.username || ""));
+    setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
     setIsAuthenticated(true);
     return true;
   }
@@ -660,6 +663,7 @@ function App() {
       }
       setAuthenticatedUsername(String(user.username || trimmedLoginUsername));
       setAuthenticatedDisplayName(String(user.displayName || user.username || trimmedLoginUsername));
+      setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
       setIsAuthenticated(true);
       if (window.location.hash === LOGIN_PAGE_HASH) {
         window.location.hash = postLoginHashRef.current === "#library" ? "#library" : "";
@@ -720,6 +724,7 @@ function App() {
           const user = payload?.user || {};
           setAuthenticatedUsername(String(user.username || ""));
           setAuthenticatedDisplayName(String(user.displayName || user.username || ""));
+          setAuthenticatedRole(String(user.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users");
         }
       } catch {
         clearAuthenticatedSessionState();
@@ -1119,13 +1124,14 @@ function App() {
   }
 
   async function uploadLibraryFiles(fileDrafts) {
+    const isAdminUser = authenticatedRole === "admin";
     const draftsWithTags = fileDrafts.map((draft) => ({
       ...draft,
       parsedTags: parseLibraryTagInput(draft.tagsInput),
     }));
     const queued = draftsWithTags.map((draft) => ({
       tempId: crypto.randomUUID(),
-      path: `_library/${draft.file.name}`,
+      path: isAdminUser ? draft.file.name : `_library/${draft.file.name}`,
       originalName: draft.file.name,
       uploadStatus: "uploading",
       embedded: false,
@@ -2163,6 +2169,7 @@ function App() {
   }, [tagFilterRows, filesData]);
   const managedLibraryFiles = Array.isArray(libraryManagedData?.files) ? libraryManagedData.files : [];
   const managedByPath = new Map(managedLibraryFiles.map((file) => [file.path, file]));
+  const isAdminUser = authenticatedRole === "admin";
   const retrieverRows = libraryFiles.map((file) => {
     const managed = managedByPath.get(file.path);
     return {
@@ -2175,7 +2182,7 @@ function App() {
       embedded: Boolean(file.embedded),
       hash: file.hash,
       updatedAt: managed?.updatedAt || file.lastModified || null,
-      canDelete: Boolean(managed?.canDelete),
+      canDelete: isAdminUser || Boolean(managed?.canDelete),
       canToggle: Boolean(managed?.canToggle),
       lastError: managed?.lastError || null,
       tags: Array.isArray(file.tags) ? file.tags : [],

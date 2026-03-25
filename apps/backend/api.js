@@ -296,6 +296,7 @@ async function handleLibraryUpload(req, res, session) {
     json(res, 401, { ok: false, error: "Invalid session user." });
     return;
   }
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
   const rawBody = await readBody(req);
   let body;
   try {
@@ -338,6 +339,7 @@ async function handleLibraryUpload(req, res, session) {
           overwrite: Boolean(entry?.overwrite),
           tags: entry?.tags,
           uploadedByUserId: session.userId,
+          saveToRoot: isAdmin,
         });
         return { ok: true, fileName: entry?.name, file };
       } catch (error) {
@@ -372,7 +374,8 @@ async function handleLibraryDelete(url, res, session) {
     return;
   }
 
-  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId });
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
+  const result = await deleteManagedLibraryFileForUser(filePath, { userId: session.userId, isAdmin });
   if (!result.deleted) {
     if (result.reason === "not_owner") {
       json(res, 403, { ok: false, error: "You can only delete files that you uploaded." });
@@ -415,7 +418,8 @@ async function handleLibraryToggle(req, res, session) {
 }
 
 async function handleLibraryList(res, session) {
-  const files = await listManagedLibraryFiles({ userId: session.userId });
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
+  const files = await listManagedLibraryFiles({ userId: session.userId, isAdmin });
   json(res, 200, {
     ok: true,
     files,
@@ -832,3 +836,4 @@ server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
   console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
+  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
