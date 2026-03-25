@@ -836,4 +836,3 @@ server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
   console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
-  const isAdmin = String(session?.role || "").trim().toLowerCase() === "admin";
