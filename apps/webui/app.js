@@ -94,6 +94,7 @@ const MENU_DIALOG_TABS = [
   { id: "help", label: "Help", command: "/help" },
 ];
 const DEFAULT_FILE_TAG_LABEL = "default";
+const ADMIN_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -321,6 +322,9 @@ function App() {
   const [libraryNotice, setLibraryNotice] = useState("");
   const [adminUsersData, setAdminUsersData] = useState([]);
   const [adminUsersNotice, setAdminUsersNotice] = useState("");
+  const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
+  const [newUserDraft, setNewUserDraft] = useState({ username: "", displayName: "", role: "users" });
+  const [isCreateUserSubmitting, setIsCreateUserSubmitting] = useState(false);
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [libraryUploadDrafts, setLibraryUploadDrafts] = useState([]);
@@ -447,6 +451,9 @@ function App() {
     setAuthenticatedRole("users");
     setAdminUsersData([]);
     setAdminUsersNotice("");
+    setIsCreateUserDialogOpen(false);
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+    setIsCreateUserSubmitting(false);
     setCurrentAssistantMode(ASSISTANT_MODE_OPTIONS[0].id);
     if (window.location.hash !== LOGIN_PAGE_HASH) {
       window.location.hash = LOGIN_PAGE_HASH;
@@ -1371,6 +1378,50 @@ function App() {
     } catch (error) {
       setAdminUsersNotice(error.message || "User update failed.");
       await refreshStatus();
+    }
+  }
+
+  function openCreateUserDialog() {
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+    setAdminUsersNotice("");
+    setIsCreateUserDialogOpen(true);
+  }
+
+  function closeCreateUserDialog() {
+    if (isCreateUserSubmitting) return;
+    setIsCreateUserDialogOpen(false);
+    setNewUserDraft({ username: "", displayName: "", role: "users" });
+  }
+
+  async function confirmCreateUser() {
+    if (isCreateUserSubmitting) return;
+    const username = String(newUserDraft.username || "").trim();
+    const displayName = String(newUserDraft.displayName || "").trim();
+    const role = String(newUserDraft.role || "users").trim().toLowerCase() === "admin" ? "admin" : "users";
+    if (username.length < 4 || displayName.length < 2) {
+      setAdminUsersNotice("Please provide a valid username and display name.");
+      return;
+    }
+
+    setIsCreateUserSubmitting(true);
+    try {
+      const response = await apiFetch(`/api/admin/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, displayName, role }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "User creation failed.");
+      }
+      setAdminUsersNotice(`Created user ${username}.`);
+      setIsCreateUserDialogOpen(false);
+      setNewUserDraft({ username: "", displayName: "", role: "users" });
+      await refreshStatus();
+    } catch (error) {
+      setAdminUsersNotice(error.message || "User creation failed.");
+    } finally {
+      setIsCreateUserSubmitting(false);
     }
   }
 
@@ -3338,7 +3389,17 @@ function App() {
               React.createElement(
                 "div",
                 { className: "library-table-header" },
-                React.createElement("h4", null, "Users")
+                React.createElement("h4", null, "Users"),
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "restart-button library-upload-button",
+                    onClick: openCreateUserDialog,
+                  },
+                  icon(plusChatIconPath),
+                  "New User"
+                )
               ),
               adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
               React.createElement(
@@ -3354,47 +3415,51 @@ function App() {
                 ),
                 ...(adminUserRows.length === 0
                   ? [React.createElement("p", { key: "admin-empty", className: "archive-empty" }, "No users found.")]
-                  : adminUserRows.map((user) => React.createElement(
-                    "div",
-                    { key: user.username, className: "library-table-row", role: "row" },
-                    React.createElement("strong", { className: "library-path" }, user.username),
-                    React.createElement(
-                      "label",
-                      { className: "filter-switch", title: user.isActive ? "Deactivate user" : "Activate user" },
-                      React.createElement("input", {
-                        type: "checkbox",
-                        checked: Boolean(user.isActive),
-                        disabled: user.username === authenticatedUsername,
-                        onChange: () => updateAdminUser(user.username, { isActive: !user.isActive }),
-                      }),
-                      React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
-                    ),
-                    React.createElement(
-                      "label",
-                      { className: "filter-switch", title: user.requireChangePw ? "Disable required password change" : "Require password change" },
-                      React.createElement("input", {
-                        type: "checkbox",
-                        checked: Boolean(user.requireChangePw),
-                        onChange: () => updateAdminUser(user.username, { requireChangePw: !user.requireChangePw }),
-                      }),
-                      React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
-                    ),
-                    React.createElement(
+                  : adminUserRows.map((user) => {
+                    const isProtectedUser = user.username === authenticatedUsername || ADMIN_PROTECTED_USERNAMES.has(user.username);
+                    return React.createElement(
                       "div",
-                      { className: "library-row-actions" },
+                      { key: user.username, className: "library-table-row", role: "row" },
+                      React.createElement("strong", { className: "library-path" }, user.username),
                       React.createElement(
-                        "button",
-                        {
-                          type: "button",
-                          className: "library-delete-button",
-                          "aria-label": `Delete ${user.username}`,
-                          onClick: () => setDeleteConfirmUser(user),
-                          disabled: user.username === authenticatedUsername,
-                        },
-                        icon(trashIconPath)
+                        "label",
+                        { className: "filter-switch", title: user.isActive ? "Deactivate user" : "Activate user" },
+                        React.createElement("input", {
+                          type: "checkbox",
+                          checked: Boolean(user.isActive),
+                          disabled: isProtectedUser,
+                          onChange: () => updateAdminUser(user.username, { isActive: !user.isActive }),
+                        }),
+                        React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                      ),
+                      React.createElement(
+                        "label",
+                        { className: "filter-switch", title: user.requireChangePw ? "Disable required password change" : "Require password change" },
+                        React.createElement("input", {
+                          type: "checkbox",
+                          checked: Boolean(user.requireChangePw),
+                          disabled: isProtectedUser,
+                          onChange: () => updateAdminUser(user.username, { requireChangePw: !user.requireChangePw }),
+                        }),
+                        React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+                      ),
+                      React.createElement(
+                        "div",
+                        { className: "library-row-actions" },
+                        React.createElement(
+                          "button",
+                          {
+                            type: "button",
+                            className: "library-delete-button",
+                            "aria-label": `Delete ${user.username}`,
+                            onClick: () => setDeleteConfirmUser(user),
+                            disabled: isProtectedUser,
+                          },
+                          icon(trashIconPath)
+                        )
                       )
-                    )
-                  )))
+                    );
+                  }))
               )
             )
           )
@@ -3802,6 +3867,83 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            )
+          )
+        )
+      )
+      : null,
+    isCreateUserDialogOpen
+      ? React.createElement(
+        "div",
+        {
+          className: "panel-modal-backdrop",
+          onClick: closeCreateUserDialog,
+        },
+        React.createElement(
+          "section",
+          {
+            className: "library-upload-modal",
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Create user",
+            onClick: (event) => event.stopPropagation(),
+          },
+          React.createElement("h4", null, "New User"),
+          React.createElement("input", {
+            type: "text",
+            className: "library-upload-tags-input",
+            placeholder: "username",
+            value: newUserDraft.username,
+            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
+            disabled: isCreateUserSubmitting,
+          }),
+          React.createElement("input", {
+            type: "text",
+            className: "library-upload-tags-input",
+            placeholder: "display name",
+            value: newUserDraft.displayName,
+            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
+            disabled: isCreateUserSubmitting,
+          }),
+          React.createElement(
+            "label",
+            { className: "setting-input-wrap" },
+            React.createElement("span", { className: "setting-input-label" }, "Role"),
+            React.createElement(
+              "select",
+              {
+                className: "setting-input",
+                value: newUserDraft.role,
+                onChange: (event) => setNewUserDraft((previous) => ({ ...previous, role: event.target.value })),
+                disabled: isCreateUserSubmitting,
+              },
+              React.createElement("option", { value: "users" }, "user"),
+              React.createElement("option", { value: "admin" }, "admin")
+            )
+          ),
+          React.createElement(
+            "div",
+            { className: "library-upload-actions" },
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-cancel",
+                onClick: closeCreateUserDialog,
+                disabled: isCreateUserSubmitting,
+              },
+              "Cancel"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-upload-confirm",
+                onClick: confirmCreateUser,
+                disabled: isCreateUserSubmitting || !String(newUserDraft.username || "").trim() || !String(newUserDraft.displayName || "").trim(),
+              },
+              icon(plusChatIconPath),
+              isCreateUserSubmitting ? "Adding..." : "Add User"
             )
           )
         )
