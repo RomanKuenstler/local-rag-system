@@ -3070,19 +3070,6 @@ function App() {
           icon(plusChatIconPath),
           React.createElement("span", null, "New chat")
         ),
-        activeView === "library"
-          ? null
-          : React.createElement(
-            "button",
-            {
-              type: "button",
-              className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
-              onClick: openChatPage,
-              disabled: isNavigationLocked,
-            },
-            icon(chatIconPath),
-            React.createElement("span", null, "Chat")
-          ),
         isAdminUser
           ? React.createElement(
             "button",
