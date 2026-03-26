@@ -547,7 +547,7 @@ body {
 }
 
 .chat-column {
-  width: min(100%, 860px);
+  width: min(calc(100% - 15.2rem), 940px);
   margin: 0 auto;
   min-width: 0;
   display: flex;
@@ -564,7 +564,7 @@ body {
   gap: 0.2rem;
 }
 .library-table-card { display: grid; gap: 0.65rem; }
-.admin-users-card {
+.info-group-card.admin-users-card {
   border: none;
   background: transparent;
   padding: 0;
