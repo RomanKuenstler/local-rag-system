@@ -355,6 +355,7 @@ function App() {
   const [adminUsersNotice, setAdminUsersNotice] = useState("");
   const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
   const [newUserDraft, setNewUserDraft] = useState({ username: "", displayName: "", role: "users" });
+  const [isCreateUserRoleDropdownOpen, setIsCreateUserRoleDropdownOpen] = useState(false);
   const [isCreateUserSubmitting, setIsCreateUserSubmitting] = useState(false);
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -426,6 +427,7 @@ function App() {
   const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
+  const createUserRoleDropdownRef = useRef(null);
   const userMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
@@ -1074,11 +1076,20 @@ function App() {
       if (!event.target.closest(".assistant-evidence-wrap")) {
         setOpenEvidenceMenuMessageId(null);
       }
+      if (!createUserRoleDropdownRef.current?.contains(event.target)) {
+        setIsCreateUserRoleDropdownOpen(false);
+      }
     }
 
     document.addEventListener("pointerdown", closeMenuOnOutside);
     return () => document.removeEventListener("pointerdown", closeMenuOnOutside);
   }, []);
+
+  useEffect(() => {
+    if (!isCreateUserDialogOpen) {
+      setIsCreateUserRoleDropdownOpen(false);
+    }
+  }, [isCreateUserDialogOpen]);
 
   useEffect(() => {
     function handleEscape(event) {
@@ -4044,18 +4055,60 @@ function App() {
           }),
           React.createElement(
             "label",
-            { className: "setting-input-wrap" },
-            React.createElement("span", { className: "setting-input-label" }, "Role"),
+            { className: "create-user-role-row" },
+            React.createElement("span", { className: "create-user-role-label" }, "Role"),
             React.createElement(
-              "select",
+              "details",
               {
-                className: "setting-input",
-                value: newUserDraft.role,
-                onChange: (event) => setNewUserDraft((previous) => ({ ...previous, role: event.target.value })),
-                disabled: isCreateUserSubmitting,
+                className: "general-dropdown create-user-role-dropdown",
+                open: isCreateUserRoleDropdownOpen,
+                ref: createUserRoleDropdownRef,
               },
-              React.createElement("option", { value: "users" }, "user"),
-              React.createElement("option", { value: "admin" }, "admin")
+              React.createElement(
+                "summary",
+                {
+                  className: "general-dropdown-trigger",
+                  onClick: (event) => {
+                    event.preventDefault();
+                    if (isCreateUserSubmitting) return;
+                    setIsCreateUserRoleDropdownOpen((previous) => !previous);
+                  },
+                },
+                React.createElement("span", { className: "general-dropdown-value" }, newUserDraft.role === "admin" ? "admin" : "user"),
+                React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, icon(chevronDownIconPath))
+              ),
+              React.createElement(
+                "div",
+                { className: "general-dropdown-menu", role: "menu", "aria-label": "Select role" },
+                ...[
+                  { value: "users", label: "user" },
+                  { value: "admin", label: "admin" },
+                ].map((roleOption) => {
+                  const active = newUserDraft.role === roleOption.value;
+                  return React.createElement(
+                    "button",
+                    {
+                      key: roleOption.value,
+                      type: "button",
+                      className: `general-dropdown-option${active ? " active" : ""}`,
+                      role: "menuitemradio",
+                      "aria-checked": active ? "true" : "false",
+                      disabled: isCreateUserSubmitting,
+                      onClick: (event) => {
+                        event.preventDefault();
+                        setNewUserDraft((previous) => ({ ...previous, role: roleOption.value }));
+                        setIsCreateUserRoleDropdownOpen(false);
+                      },
+                    },
+                    React.createElement(
+                      "span",
+                      { className: "general-dropdown-option-copy" },
+                      React.createElement("strong", null, roleOption.label)
+                    ),
+                    active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, icon(checkIconPath)) : null
+                  );
+                })
+              )
             )
           ),
           React.createElement(

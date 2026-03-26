@@ -785,6 +785,22 @@ body {
   border-color: #94a3b8;
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
 }
+.create-user-role-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.create-user-role-label {
+  color: #111827;
+  font-size: 0.94rem;
+  font-weight: 500;
+}
+.create-user-role-dropdown .general-dropdown-trigger {
+  min-width: 96px;
+}
+.create-user-role-dropdown .general-dropdown-menu {
+  min-width: 140px;
+}
 .library-upload-actions {
   display: flex;
   justify-content: flex-end;
