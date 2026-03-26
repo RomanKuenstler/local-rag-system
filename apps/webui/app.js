@@ -376,6 +376,7 @@ function App() {
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [openEvidenceMenuMessageId, setOpenEvidenceMenuMessageId] = useState(null);
+  const [openEvidenceMenuPlacement, setOpenEvidenceMenuPlacement] = useState("up");
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -1092,6 +1093,30 @@ function App() {
       name: file.name,
       contentBase64: await fileToBase64(file),
     })));
+  }
+
+  function resolveEvidenceMenuPlacement(triggerElement) {
+    if (!triggerElement || typeof window === "undefined") {
+      return "up";
+    }
+    const triggerRect = triggerElement.getBoundingClientRect();
+    const spaceAbove = triggerRect.top;
+    const spaceBelow = window.innerHeight - triggerRect.bottom;
+    const preferredMenuHeight = 320;
+    if (spaceAbove < preferredMenuHeight && spaceBelow > spaceAbove) {
+      return "down";
+    }
+    return "up";
+  }
+
+  function toggleEvidenceMenu(messageId, event) {
+    setOpenEvidenceMenuMessageId((current) => {
+      if (current === messageId) {
+        return null;
+      }
+      setOpenEvidenceMenuPlacement(resolveEvidenceMenuPlacement(event?.currentTarget));
+      return messageId;
+    });
   }
 
   function getFileExtension(filename) {
@@ -3535,7 +3560,7 @@ function App() {
                           className: `assistant-evidence-trigger${openEvidenceMenuMessageId === message.id ? " active" : ""}`,
                           "aria-expanded": openEvidenceMenuMessageId === message.id,
                           "aria-haspopup": "menu",
-                          onClick: () => setOpenEvidenceMenuMessageId((current) => (current === message.id ? null : message.id)),
+                          onClick: (event) => toggleEvidenceMenu(message.id, event),
                         },
                         React.createElement("span", { className: "assistant-evidence-trigger-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
                         React.createElement("small", null, "Sources")
@@ -3543,7 +3568,7 @@ function App() {
                       openEvidenceMenuMessageId === message.id
                         ? React.createElement(
                           "section",
-                          { className: "assistant-evidence-menu", role: "menu", "aria-label": "Evidence details" },
+                          { className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`, role: "menu", "aria-label": "Evidence details" },
                           React.createElement("h4", { className: "assistant-evidence-heading" }, "Sources"),
                           React.createElement(
                             "p",
