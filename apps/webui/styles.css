@@ -577,7 +577,7 @@ body {
 .library-table-header h4 { margin: 0; }
 .library-table {
   display: grid;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
 }
@@ -591,9 +591,9 @@ body {
   font-size: 0.8rem;
 }
 .library-table-head {
-  background: #f8fafc;
+  background: #e2e8f0;
   border-bottom: 1px solid #e5e7eb;
-  color: #475569;
+  color: #000000;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.7rem;
