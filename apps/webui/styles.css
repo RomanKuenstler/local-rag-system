@@ -722,7 +722,7 @@ body {
   line-height: 1.45;
 }
 .library-upload-modal {
-  width: min(94vw, 680px);
+  width: min(94vw, 560px);
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 14px;
@@ -785,21 +785,33 @@ body {
   border-color: #94a3b8;
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
 }
-.create-user-role-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
+.create-user-field-wrap {
+  display: grid;
+  gap: 0.3rem;
 }
-.create-user-role-label {
+.create-user-field-label {
   color: #111827;
-  font-size: 0.94rem;
+  font-size: 0.88rem;
   font-weight: 500;
 }
 .create-user-role-dropdown .general-dropdown-trigger {
-  min-width: 96px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  padding: 0.42rem 0.55rem;
+  background: #fff;
+}
+.create-user-role-dropdown[open] .general-dropdown-trigger {
+  background: #fff;
+  border-color: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.2);
 }
 .create-user-role-dropdown .general-dropdown-menu {
-  min-width: 140px;
+  left: 0;
+  right: auto;
+  width: 100%;
+  min-width: 0;
 }
 .library-upload-actions {
   display: flex;

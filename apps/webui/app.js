@@ -4037,26 +4037,36 @@ function App() {
             onClick: (event) => event.stopPropagation(),
           },
           React.createElement("h4", null, "New User"),
-          React.createElement("input", {
-            type: "text",
-            className: "library-upload-tags-input",
-            placeholder: "username",
-            value: newUserDraft.username,
-            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
-            disabled: isCreateUserSubmitting,
-          }),
-          React.createElement("input", {
-            type: "text",
-            className: "library-upload-tags-input",
-            placeholder: "display name",
-            value: newUserDraft.displayName,
-            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
-            disabled: isCreateUserSubmitting,
-          }),
           React.createElement(
             "label",
-            { className: "create-user-role-row" },
-            React.createElement("span", { className: "create-user-role-label" }, "Role"),
+            { className: "create-user-field-wrap" },
+            React.createElement("span", { className: "create-user-field-label" }, "Username"),
+            React.createElement("input", {
+              type: "text",
+              className: "library-upload-tags-input",
+              placeholder: "username",
+              value: newUserDraft.username,
+              onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
+              disabled: isCreateUserSubmitting,
+            })
+          ),
+          React.createElement(
+            "label",
+            { className: "create-user-field-wrap" },
+            React.createElement("span", { className: "create-user-field-label" }, "Display Name"),
+            React.createElement("input", {
+              type: "text",
+              className: "library-upload-tags-input",
+              placeholder: "display name",
+              value: newUserDraft.displayName,
+              onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
+              disabled: isCreateUserSubmitting,
+            })
+          ),
+          React.createElement(
+            "label",
+            { className: "create-user-field-wrap" },
+            React.createElement("span", { className: "create-user-field-label" }, "Role"),
             React.createElement(
               "details",
               {
