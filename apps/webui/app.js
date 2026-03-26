@@ -3113,7 +3113,7 @@ function App() {
             disabled: isNavigationLocked || !isEmbeddingReady,
           },
           icon(settingsIconPath),
-          React.createElement("span", null, "Settings")
+          React.createElement("span", null, "Preferences")
         )
       ),
       React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
