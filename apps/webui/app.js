@@ -2279,6 +2279,7 @@ function App() {
   const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
+  const userIconPath = "M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
   const renderAttachmentChip = ({ fileName, index, keyPrefix, removable = false, onRemove = null, className = "" }) => {
@@ -2516,7 +2517,19 @@ function App() {
 
   async function switchChat(chatId) {
     const selectedId = String(chatId || "").trim();
-    if (!selectedId || selectedId === activeChatId) {
+    if (!selectedId) {
+      return;
+    }
+    if (selectedId === activeChatId) {
+      setPanelData(null);
+      setIsMenuOpen(false);
+      setIsAssistantModeMenuOpen(false);
+      if (activeView !== "chat") {
+        window.location.hash = "";
+        await loadMessagesFromDb(selectedId).catch(() => {
+          setMessages([]);
+        });
+      }
       return;
     }
     if (volatileChat && selectedId !== volatileChat.id) {
@@ -3058,17 +3071,6 @@ function App() {
           icon(plusChatIconPath),
           React.createElement("span", null, "New chat")
         ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
-            onClick: openChatPage,
-            disabled: isNavigationLocked,
-          },
-          icon(chatIconPath),
-          React.createElement("span", null, "Chat")
-        ),
         isAdminUser
           ? React.createElement(
             "button",
@@ -3490,32 +3492,22 @@ function App() {
             { className: "chat-column library-column" },
             React.createElement(
               "section",
-              { className: "info-group-card library-table-card" },
+              { className: "info-group-card library-table-card admin-users-card" },
               React.createElement(
                 "div",
                 { className: "library-table-header" },
-                React.createElement("h4", null, "Users"),
-                React.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "restart-button library-upload-button",
-                    onClick: openCreateUserDialog,
-                  },
-                  icon(plusChatIconPath),
-                  "New User"
-                )
+                React.createElement("h4", null, "Users")
               ),
               adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
               React.createElement(
                 "div",
-                { className: "library-table", role: "table", "aria-label": "Users" },
+                { className: "library-table admin-users-table", role: "table", "aria-label": "Users" },
                 React.createElement(
                   "div",
                   { className: "library-table-head", role: "row" },
                   React.createElement("span", null, "Username"),
-                  React.createElement("span", null, "is_active"),
-                  React.createElement("span", null, "require_changepw"),
+                  React.createElement("span", null, "ACTIVE"),
+                  React.createElement("span", null, "CHANGE-PW"),
                   React.createElement("span", null, "Action")
                 ),
                 ...(adminUserRows.length === 0
@@ -3562,9 +3554,23 @@ function App() {
                           },
                           icon(trashIconPath)
                         )
-                      )
-                    );
+                        )
+                      );
                   }))
+              ),
+              React.createElement(
+                "div",
+                { className: "admin-user-actions" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "admin-new-user-button",
+                    onClick: openCreateUserDialog,
+                  },
+                  icon(userIconPath),
+                  "New User"
+                )
               )
             )
           )

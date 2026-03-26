@@ -547,7 +547,7 @@ body {
 }
 
 .chat-column {
-  width: min(100%, 860px);
+  width: min(calc(100% - 15.2rem), 940px);
   margin: 0 auto;
   min-width: 0;
   display: flex;
@@ -564,6 +564,11 @@ body {
   gap: 0.2rem;
 }
 .library-table-card { display: grid; gap: 0.65rem; }
+.info-group-card.admin-users-card {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
 .library-table-header {
   display: flex;
   align-items: center;
@@ -572,7 +577,7 @@ body {
 .library-table-header h4 { margin: 0; }
 .library-table {
   display: grid;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
 }
@@ -586,9 +591,9 @@ body {
   font-size: 0.8rem;
 }
 .library-table-head {
-  background: #f8fafc;
+  background: #e2e8f0;
   border-bottom: 1px solid #e5e7eb;
-  color: #475569;
+  color: #000000;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 0.7rem;
@@ -596,6 +601,15 @@ body {
 }
 .library-table-row {
   border-top: 1px solid #f1f5f9;
+}
+.admin-users-table .library-table-head,
+.admin-users-table .library-table-row {
+  grid-template-columns: minmax(170px, 2fr) 130px 130px 100px;
+  column-gap: 1.1rem;
+}
+.admin-users-table .library-table-head span:nth-child(n + 2),
+.admin-users-table .library-table-row > :nth-child(n + 2) {
+  justify-self: end;
 }
 .library-path {
   font-size: 0.82rem;
@@ -611,6 +625,28 @@ body {
 .library-upload-button {
   margin-left: auto;
   white-space: nowrap;
+}
+.admin-user-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.admin-new-user-button {
+  border: none;
+  outline: none;
+  background: #111827;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.admin-new-user-button .icon {
+  color: #ffffff;
+}
+.admin-new-user-button:hover {
+  background: #000000;
 }
 .library-notice {
   margin: 0;
