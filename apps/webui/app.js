@@ -3582,8 +3582,7 @@ function App() {
                                   : null,
                                 Array.isArray(match.tags) && match.tags.length > 0
                                   ? null
-                                  : React.createElement("p", { className: "assistant-evidence-tags assistant-evidence-tags-empty" }, "Tags none"),
-                                match.preview ? React.createElement("p", { className: "assistant-evidence-preview" }, match.preview) : null
+                                  : React.createElement("p", { className: "assistant-evidence-tags assistant-evidence-tags-empty" }, "Tags none")
                               ))
                             )
                             : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")

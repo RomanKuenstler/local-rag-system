@@ -1570,19 +1570,19 @@ body {
 }
 .assistant-evidence-trigger-icon .icon,
 .assistant-evidence-file-icon .icon {
-  width: 0.82rem;
-  height: 0.82rem;
+  width: 0.98rem;
+  height: 0.98rem;
 }
 .assistant-evidence-menu {
   position: absolute;
   left: 0;
   bottom: calc(100% + 0.38rem);
-  width: min(85vw, 36rem);
+  width: min(58vw, 25rem);
   max-height: min(55vh, 26rem);
   overflow: auto;
   border: 1px solid #d4d4d8;
   border-radius: 12px;
-  padding: 0.6rem 0.7rem;
+  padding: 0.68rem 1rem;
   background: #ffffff;
   box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
   z-index: 30;
@@ -1624,6 +1624,8 @@ body {
 }
 .assistant-evidence-file-name {
   color: #0f172a;
+  font-weight: 700;
+  font-size: 0.93rem;
   overflow-wrap: anywhere;
 }
 .assistant-evidence-tags {
@@ -1651,11 +1653,6 @@ body {
   font-weight: 400;
   color: #1e293b;
   margin: 0 0 0.08rem;
-}
-.assistant-evidence-preview {
-  margin: 0.08rem 0 0;
-  font-size: 0.78rem;
-  color: #475569;
 }
 .assistant-evidence-empty {
   margin: 0;
