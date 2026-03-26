@@ -617,6 +617,28 @@ body {
   margin-left: auto;
   white-space: nowrap;
 }
+.admin-user-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.admin-new-user-button {
+  border: none;
+  outline: none;
+  background: #111827;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.admin-new-user-button .icon {
+  color: #ffffff;
+}
+.admin-new-user-button:hover {
+  background: #000000;
+}
 .library-notice {
   margin: 0;
   font-size: 0.8rem;
