@@ -3351,10 +3351,24 @@ function App() {
             "section",
             { className: "info-group-card library-summary-card" },
             React.createElement("h4", null, "Library summary"),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "content path"), React.createElement("strong", null, filesData?.contentPath || "n/a")),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "files"), React.createElement("strong", null, String(filesData?.totalFiles ?? 0))),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "embedded files"), React.createElement("strong", null, String(filesData?.embeddedFiles ?? 0))),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "total chunks"), React.createElement("strong", null, String(libraryTotalChunks)))
+            React.createElement(
+              "div",
+              { className: "library-summary-table", role: "table", "aria-label": "Library summary" },
+              React.createElement(
+                "div",
+                { className: "library-summary-head", role: "row" },
+                React.createElement("span", { role: "columnheader" }, "files"),
+                React.createElement("span", { role: "columnheader" }, "embedded files"),
+                React.createElement("span", { role: "columnheader" }, "chunks")
+              ),
+              React.createElement(
+                "div",
+                { className: "library-summary-row", role: "row" },
+                React.createElement("strong", { role: "cell" }, String(filesData?.totalFiles ?? 0)),
+                React.createElement("strong", { role: "cell" }, String(filesData?.embeddedFiles ?? 0)),
+                React.createElement("strong", { role: "cell" }, String(libraryTotalChunks))
+              )
+            )
           ),
           React.createElement(
             "section",
