@@ -596,7 +596,13 @@ body {
   font-weight: 600;
   color: #111827;
 }
-.library-table-card { display: grid; gap: 0.65rem; }
+.library-table-card {
+  display: grid;
+  gap: 0.65rem;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
 .info-group-card.admin-users-card {
   border: none;
   background: transparent;

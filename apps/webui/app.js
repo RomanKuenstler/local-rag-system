@@ -3350,7 +3350,7 @@ function App() {
           React.createElement(
             "section",
             { className: "info-group-card library-summary-card" },
-            React.createElement("h4", null, "Library summary"),
+            React.createElement("h4", null, "Knowledge Base"),
             React.createElement(
               "div",
               { className: "library-summary-table", role: "table", "aria-label": "Library summary" },
@@ -3376,7 +3376,7 @@ function App() {
             React.createElement(
               "div",
               { className: "library-table-header" },
-              React.createElement("h4", null, "Embeddable files"),
+              React.createElement("h4", null, "Files"),
               React.createElement(
                 "button",
                 {
