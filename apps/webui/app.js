@@ -74,6 +74,19 @@ const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
 };
+const ATTACHMENT_EXTENSION_COLOR_CLASS = {
+  pdf: "is-red",
+  epub: "is-red",
+  md: "is-gray",
+  txt: "is-gray",
+  html: "is-blue",
+  htm: "is-blue",
+  png: "is-purple",
+  jpg: "is-purple",
+  jpeg: "is-purple",
+  webp: "is-purple",
+  csv: "is-green",
+};
 const LIBRARY_UPLOAD_RULES = {
   maxFiles: 5,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
@@ -131,6 +144,19 @@ function getScoreSeverity(score) {
 function formatScorePercent(score) {
   if (!Number.isFinite(score)) return "n/a";
   return `${(score * 100).toFixed(1).replace(".", ",")}%`;
+}
+
+function getFileExtensionFromName(fileName) {
+  const normalized = String(fileName || "").trim();
+  if (!normalized) return "";
+  const parts = normalized.split(".");
+  if (parts.length <= 1) return "";
+  return parts.pop().toLowerCase();
+}
+
+function getAttachmentColorClass(fileName) {
+  const extension = getFileExtensionFromName(fileName);
+  return ATTACHMENT_EXTENSION_COLOR_CLASS[extension] || "is-gray";
 }
 
 function getCurrentUiModeFromInfoText(infoText) {
@@ -1155,7 +1181,7 @@ function App() {
 
     return {
       validFiles: selectedFiles,
-      notice: `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected.`,
+      notice: "",
     };
   }
 
@@ -2150,6 +2176,11 @@ function App() {
     event.target.value = "";
   }
 
+  function removeAttachedPromptFile(targetIndex) {
+    setAttachedPromptFiles((previous) => previous.filter((_, index) => index !== targetIndex));
+    setAttachmentNotice("");
+  }
+
   async function submitConfigChange(configName, rawValue) {
     const normalizedName = String(configName || "").trim().toLowerCase();
     const value = String(rawValue || "").trim();
@@ -2250,6 +2281,41 @@ function App() {
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
+  const renderComposerAttachmentChip = (file, index) => {
+    const name = String(file?.name || "").trim() || `Attachment ${index + 1}`;
+    const extension = getFileExtensionFromName(name);
+    const iconColorClass = getAttachmentColorClass(name);
+    return React.createElement(
+      "div",
+      { className: "composer-attachment-chip", key: `composer-attachment-${name}-${index}` },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "composer-attachment-remove",
+          onClick: () => removeAttachedPromptFile(index),
+          "aria-label": `Remove ${name}`,
+          title: `Remove ${name}`,
+        },
+        "×"
+      ),
+      React.createElement(
+        "div",
+        { className: `composer-attachment-icon ${iconColorClass}`, "aria-hidden": "true" },
+        React.createElement(
+          "svg",
+          { viewBox: "0 0 24 24", className: "composer-attachment-icon-svg" },
+          React.createElement("path", { d: sourceFileIconPath })
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "composer-attachment-meta" },
+        React.createElement("p", { className: "composer-attachment-name", title: name }, name),
+        React.createElement("p", { className: "composer-attachment-ext" }, extension ? extension.toUpperCase() : "FILE")
+      )
+    );
+  };
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -2391,15 +2457,6 @@ function App() {
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const isNavigationLocked = isSending;
-  const sendButtonLabel = isSending
-    ? activeChainStage === "searching"
-      ? "Searching..."
-      : activeChainStage === "drafting"
-      ? "Drafting..."
-      : activeChainStage === "refining"
-        ? "Refining..."
-        : "Thinking..."
-    : "Send";
 
   function openLibraryPage() {
     setIsMenuOpen(false);
@@ -3670,57 +3727,60 @@ function App() {
               "aria-hidden": "true",
               tabIndex: -1,
             }),
+            attachedPromptFiles.length > 0
+              ? React.createElement(
+                "div",
+                { className: "composer-attachment-chip-list" },
+                ...attachedPromptFiles.map((file, index) => renderComposerAttachmentChip(file, index))
+              )
+              : null,
             React.createElement(
-              "button",
-              {
-                className: "composer-attach-button",
-                type: "button",
-                onClick: openPromptFilePicker,
-                disabled: isSending || !isEmbeddingReady,
-                "aria-label": "Attach files",
-                "data-testid": "composer-attach-button",
-                title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
-              },
-              icon("M8 7.5v8a4 4 0 0 0 8 0v-9a2.5 2.5 0 0 0-5 0V15a1 1 0 0 0 2 0V8.5h1.8V15a2.8 2.8 0 0 1-5.6 0V6.5a4.3 4.3 0 1 1 8.6 0v9a5.8 5.8 0 0 1-11.6 0v-8z")
-            ),
-            React.createElement("textarea", {
-              ref: composerInputRef,
-              value: inputValue,
-              onChange: (event) => {
-                setInputValue(event.target.value);
-                resizeComposerInput(event.target);
-              },
-              onInput: (event) => resizeComposerInput(event.target),
-              onKeyDown: (event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  if (inputValue.trim() && !isSending && isEmbeddingReady) {
-                    void sendRawPrompt(inputValue, attachedPromptFiles);
+              "div",
+              { className: "composer-entry-row" },
+              React.createElement(
+                "button",
+                {
+                  className: "composer-attach-button",
+                  type: "button",
+                  onClick: openPromptFilePicker,
+                  disabled: isSending || !isEmbeddingReady,
+                  "aria-label": "Attach files",
+                  "data-testid": "composer-attach-button",
+                  title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
+                },
+                icon("M12 5a1 1 0 0 1 1 1v5h5a1 1 0 1 1 0 2h-5v5a1 1 0 1 1-2 0v-5H6a1 1 0 1 1 0-2h5V6a1 1 0 0 1 1-1")
+              ),
+              React.createElement("textarea", {
+                ref: composerInputRef,
+                value: inputValue,
+                onChange: (event) => {
+                  setInputValue(event.target.value);
+                  resizeComposerInput(event.target);
+                },
+                onInput: (event) => resizeComposerInput(event.target),
+                onKeyDown: (event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (inputValue.trim() && !isSending && isEmbeddingReady) {
+                      void sendRawPrompt(inputValue, attachedPromptFiles);
+                    }
                   }
-                }
-              },
-              rows: 1,
-              placeholder: "Ask anything about your knowledge base...",
-              disabled: isSending || !isEmbeddingReady,
-            })
+                },
+                rows: 1,
+                placeholder: "Ask anything about your knowledge base...",
+                disabled: isSending || !isEmbeddingReady,
+              })
+            )
           ),
           React.createElement(
             "button",
             { className: "send", type: "submit", disabled: isSending || !isEmbeddingReady || !inputValue.trim() },
-            icon("M2 21l20-9L2 3v7l14 2-14 2z"),
-            React.createElement("span", null, sendButtonLabel)
+            icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
           ),
-          attachedPromptFiles.length > 0
-            ? React.createElement(
-              "p",
-              { className: "composer-attachment-list" },
-              `Attached: ${attachedPromptFiles.map((file) => file.name).join(", ")}`
-            )
-            : null,
           attachmentNotice
             ? React.createElement(
               "p",
-              { className: `composer-attachment-notice${attachedPromptFiles.length > 0 ? " valid" : " invalid"}` },
+              { className: "composer-attachment-notice invalid" },
               attachmentNotice
             )
             : null
