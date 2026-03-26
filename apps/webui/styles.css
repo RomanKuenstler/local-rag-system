@@ -1582,7 +1582,7 @@ body {
   overflow: auto;
   border: 1px solid #d4d4d8;
   border-radius: 12px;
-  padding: 0.68rem 1rem;
+  padding: 0.68rem 1.2rem;
   background: #ffffff;
   box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
   z-index: 30;
@@ -1593,7 +1593,7 @@ body {
 }
 .assistant-evidence-heading {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.91rem;
   font-weight: 600;
   color: #0f172a;
 }
@@ -1602,7 +1602,7 @@ body {
   padding-bottom: 0.44rem;
   border-bottom: 1px solid #e5e7eb;
   font-size: 0.82rem;
-  color: #334155;
+  color: #64748b;
 }
 .assistant-evidence-list {
   margin: 0;
@@ -1622,14 +1622,14 @@ body {
   display: flex;
   align-items: center;
   gap: 0.34rem;
-  font-size: 0.81rem;
+  font-size: 0.79rem;
   color: #334155;
   margin-bottom: 0.16rem;
 }
 .assistant-evidence-file-name {
   color: #0f172a;
   font-weight: 700;
-  font-size: 0.93rem;
+  font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
 .assistant-evidence-tags {
