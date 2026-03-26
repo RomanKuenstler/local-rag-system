@@ -1430,7 +1430,20 @@ body {
 @keyframes typingDots { from { width: 0; } to { width: 1em; } }
 
 .msg { max-width: min(82%, 700px); border-radius: 16px; padding: 0.8rem 0.95rem; scroll-margin-top: 6rem; border: none; }
-.msg.user { align-self: flex-end; background: #f3f5f9; }
+.msg.user {
+  align-self: flex-end;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
+.msg.user .msg-header {
+  width: 100%;
+  justify-content: flex-start;
+  margin-bottom: 0;
+}
 .msg.assistant {
   align-self: stretch;
   max-width: 100%;
@@ -1447,32 +1460,14 @@ body {
 .msg-command { border: 1px solid #e5e7eb; background: #ffffff; border-radius: 12px; padding: 0.6rem 0.7rem; }
 .msg-command pre { margin: 0; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size: .82rem; line-height: 1.45; white-space: pre-wrap; }
 .msg p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
-.user-message-content { display: grid; gap: 0.55rem; }
-.user-attachment-box {
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  border-radius: 10px;
-  background: rgba(253, 253, 253, 0.75);
-  padding: 0.5rem 0.6rem;
-}
-.user-attachment-label {
-  display: block;
-  color: #64748b;
-  font-weight: 600;
-  margin-bottom: 0.22rem;
-  font-size: 0.76rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.user-attachment-list {
-  margin: 0;
-  padding-left: 1rem;
-  color: #334155;
-  font-size: 0.82rem;
-  line-height: 1.35;
-}
-.user-attachment-list li {
-  margin: 0.08rem 0;
-  color: #1e293b;
+.user-message-content {
+  display: grid;
+  gap: 0.55rem;
+  background: #f3f5f9;
+  border-radius: 16px;
+  border-bottom-right-radius: 0;
+  padding: 0.8rem 0.95rem;
+  max-width: 100%;
 }
 .assistant-markdown > :first-child { margin-top: 0; }
 .assistant-markdown > :last-child { margin-bottom: 0; }
@@ -1758,6 +1753,21 @@ body {
   display: flex;
   align-items: center;
   gap: 0.58rem;
+}
+.composer-attachment-chip-list.user-message-attachment-chip-list {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0;
+  width: 100%;
+  justify-items: end;
+}
+.composer-attachment-chip.user-message-attachment-chip {
+  width: min(100%, 320px);
+  max-width: 100%;
+  min-width: 0;
+  flex: none;
+  background: rgba(255, 255, 255, 0.9);
+  border-color: #dbe2ea;
 }
 .composer-attachment-remove {
   position: absolute;
