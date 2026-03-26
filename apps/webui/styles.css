@@ -602,6 +602,14 @@ body {
 .library-table-row {
   border-top: 1px solid #f1f5f9;
 }
+.admin-users-table .library-table-head,
+.admin-users-table .library-table-row {
+  grid-template-columns: minmax(170px, 2fr) 0.9fr 1fr 0.9fr;
+}
+.admin-users-table .library-table-head span:last-child,
+.admin-users-table .library-table-row > :last-child {
+  padding-left: 0.9rem;
+}
 .library-path {
   font-size: 0.82rem;
   color: #111827;

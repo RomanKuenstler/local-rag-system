@@ -3501,13 +3501,13 @@ function App() {
               adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
               React.createElement(
                 "div",
-                { className: "library-table", role: "table", "aria-label": "Users" },
+                { className: "library-table admin-users-table", role: "table", "aria-label": "Users" },
                 React.createElement(
                   "div",
                   { className: "library-table-head", role: "row" },
                   React.createElement("span", null, "Username"),
-                  React.createElement("span", null, "is_active"),
-                  React.createElement("span", null, "require_changepw"),
+                  React.createElement("span", null, "ACTIVE"),
+                  React.createElement("span", null, "CHANGE-PW"),
                   React.createElement("span", null, "Action")
                 ),
                 ...(adminUserRows.length === 0
