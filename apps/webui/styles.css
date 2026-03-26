@@ -1702,6 +1702,13 @@ body {
 .composer-input-shell {
   min-width: 0;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+.composer-entry-row {
+  min-width: 0;
+  display: flex;
   align-items: center;
   gap: 0.45rem;
 }
@@ -1729,6 +1736,62 @@ body {
   width: 1.18rem;
   height: 1.18rem;
 }
+.composer-attachment-chip-list {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding: 0.08rem 0.08rem 0.12rem;
+}
+.composer-attachment-chip {
+  min-width: 0;
+  flex: 0 0 clamp(210px, 29vw, 300px);
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 14px;
+  padding: 0.46rem 0.6rem;
+  display: flex;
+  align-items: center;
+  gap: 0.58rem;
+}
+.composer-attachment-icon {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.composer-attachment-icon-svg {
+  width: 1.3rem;
+  height: 1.3rem;
+  fill: #fff;
+}
+.composer-attachment-icon.is-red { background: #ef4444; }
+.composer-attachment-icon.is-gray { background: #6b7280; }
+.composer-attachment-icon.is-blue { background: #2563eb; }
+.composer-attachment-icon.is-purple { background: #8b5cf6; }
+.composer-attachment-icon.is-green { background: #16a34a; }
+.composer-attachment-meta {
+  min-width: 0;
+  display: grid;
+  gap: 0.12rem;
+}
+.composer-attachment-name {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-attachment-ext {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6b7280;
+  text-transform: uppercase;
+}
 
 input, textarea, button { font: inherit; }
 textarea {
@@ -1751,13 +1814,6 @@ textarea:focus { outline: none; }
   padding: 0 0.5rem 0.1rem;
   font-size: 0.74rem;
   color: #b45309;
-}
-.composer-attachment-list {
-  grid-column: 1 / -1;
-  margin: -0.15rem 0 0;
-  padding: 0 0.5rem 0;
-  font-size: 0.74rem;
-  color: #334155;
 }
 .composer-attachment-notice.valid { color: #166534; }
 .composer-attachment-notice.invalid { color: #b91c1c; }
