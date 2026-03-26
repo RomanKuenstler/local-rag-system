@@ -1448,19 +1448,6 @@ body {
 .msg-command pre { margin: 0; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size: .82rem; line-height: 1.45; white-space: pre-wrap; }
 .msg p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
 .user-message-content { display: grid; gap: 0.55rem; }
-.user-message-attachment-chip-list {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0;
-}
-.user-message-attachment-chip {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  flex: none;
-  background: rgba(255, 255, 255, 0.9);
-  border-color: #dbe2ea;
-}
 .assistant-markdown > :first-child { margin-top: 0; }
 .assistant-markdown > :last-child { margin-bottom: 0; }
 .assistant-markdown p { margin: 0.45rem 0; line-height: 1.55; }
@@ -1745,6 +1732,19 @@ body {
   display: flex;
   align-items: center;
   gap: 0.58rem;
+}
+.composer-attachment-chip-list.user-message-attachment-chip-list {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0 0 0.35rem;
+}
+.composer-attachment-chip.user-message-attachment-chip {
+  width: min(100%, 320px);
+  max-width: 100%;
+  min-width: 0;
+  flex: none;
+  background: rgba(255, 255, 255, 0.9);
+  border-color: #dbe2ea;
 }
 .composer-attachment-remove {
   position: absolute;

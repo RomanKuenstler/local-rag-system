@@ -3697,8 +3697,8 @@ function App() {
                         : renderAssistantMarkdown(message.text)
                     )
                     : React.createElement(
-                      "div",
-                      { className: "user-message-content" },
+                      React.Fragment,
+                      null,
                       Array.isArray(message.attachedFiles) && message.attachedFiles.length > 0
                         ? React.createElement(
                           "div",
@@ -3711,7 +3711,11 @@ function App() {
                           }))
                         )
                         : null,
-                      React.createElement("p", null, message.text),
+                      React.createElement(
+                        "div",
+                        { className: "user-message-content" },
+                        React.createElement("p", null, message.text),
+                      )
                     )
               );
             })
