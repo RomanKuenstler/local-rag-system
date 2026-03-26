@@ -1719,7 +1719,8 @@ body {
 .composer-attach-button {
   border: none;
   background: transparent;
-  padding: 0.2rem 0.3rem;
+  height: 2.3rem;
+  width: 2.3rem;
   color: #334155;
   cursor: pointer;
   display: inline-flex;
@@ -1727,15 +1728,15 @@ body {
   justify-content: center;
   flex-shrink: 0;
   align-self: center;
-  border-radius: 8px;
+  border-radius: 2rem;
 }
 .composer-attach-button:hover:not(:disabled) {
   color: #0f172a;
   background: rgba(148, 163, 184, 0.12);
 }
 .composer-attach-button .icon {
-  width: 1.38rem;
-  height: 1.38rem;
+  width: 2rem;
+  height: 2rem;
 }
 .composer-attachment-chip-list {
   display: flex;
@@ -1849,8 +1850,8 @@ button.send {
   color: #fff;
   border: none;
   border-radius: 999px;
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 2.3rem;
+  height: 2.3rem;
   padding: 0;
   cursor: pointer;
   display: inline-flex;
@@ -1859,8 +1860,8 @@ button.send {
   align-self: end;
 }
 button.send .icon {
-  width: 1.28rem;
-  height: 1.28rem;
+  width: 1.7rem;
+  height: 1.7rem;
 }
 
 button:disabled { opacity: .5; cursor: not-allowed; }
