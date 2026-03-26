@@ -3517,13 +3517,11 @@ function App() {
                       && !file.embedded
                       && file.uploadStatus === "removing";
                     const showProgress = embeddingInProgress || removingInProgress;
-                    const embeddedClassName = file.enabled === false
-                      ? "pending"
-                      : file.embedded
-                        ? "active"
-                        : file.uploadStatus === "error"
-                          ? "error"
-                          : "pending";
+                    const embeddedClassName = file.embedded
+                      ? "active"
+                      : file.uploadStatus === "error"
+                        ? "error"
+                        : "pending";
                     return React.createElement(
                       "span",
                       {
@@ -3532,7 +3530,7 @@ function App() {
                       },
                       showProgress
                         ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
-                        : icon(file.uploadStatus === "error" && !file.embedded ? xIconPath : (file.enabled === false ? disableFileIconPath : (file.embedded ? enableFileIconPath : disableFileIconPath)))
+                        : icon(file.uploadStatus === "error" && !file.embedded ? xIconPath : (file.embedded ? enableFileIconPath : disableFileIconPath))
                     );
                   })(),
                   (() => {

@@ -622,7 +622,7 @@ body {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
-  max-height: min(58vh, 680px);
+  max-height: calc(100vh - 220px);
 }
 .library-table-head,
 .library-table-row {
@@ -642,6 +642,12 @@ body {
 .library-table-head > :nth-child(9),
 .library-table-row > :nth-child(9) {
   justify-self: center;
+}
+.library-table-head > :nth-child(4),
+.library-table-head > :nth-child(5),
+.library-table-head > :nth-child(8) {
+  justify-self: end;
+  text-align: right;
 }
 .library-table-head {
   background: #e2e8f0;
