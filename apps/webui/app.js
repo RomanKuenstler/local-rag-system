@@ -2516,7 +2516,19 @@ function App() {
 
   async function switchChat(chatId) {
     const selectedId = String(chatId || "").trim();
-    if (!selectedId || selectedId === activeChatId) {
+    if (!selectedId) {
+      return;
+    }
+    if (selectedId === activeChatId) {
+      setPanelData(null);
+      setIsMenuOpen(false);
+      setIsAssistantModeMenuOpen(false);
+      if (activeView !== "chat") {
+        window.location.hash = "";
+        await loadMessagesFromDb(selectedId).catch(() => {
+          setMessages([]);
+        });
+      }
       return;
     }
     if (volatileChat && selectedId !== volatileChat.id) {
@@ -3058,17 +3070,19 @@ function App() {
           icon(plusChatIconPath),
           React.createElement("span", null, "New chat")
         ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
-            onClick: openChatPage,
-            disabled: isNavigationLocked,
-          },
-          icon(chatIconPath),
-          React.createElement("span", null, "Chat")
-        ),
+        activeView === "library"
+          ? null
+          : React.createElement(
+            "button",
+            {
+              type: "button",
+              className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
+              onClick: openChatPage,
+              disabled: isNavigationLocked,
+            },
+            icon(chatIconPath),
+            React.createElement("span", null, "Chat")
+          ),
         isAdminUser
           ? React.createElement(
             "button",
