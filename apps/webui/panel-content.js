@@ -363,8 +363,6 @@ export function renderPanelContent({
   }
 
   if (panelData.command === "/general" && panelData.content) {
-    const uiModes = panelData.content.ui?.modes || [];
-    const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
     const currentAssistantMode = panelData.content.assistant?.currentMode || null;
     return React.createElement(
@@ -373,13 +371,6 @@ export function renderPanelContent({
       React.createElement(
         "section",
         { className: "info-group-card general-settings-card" },
-        renderModeDropdown({
-          label: "UI-Mode",
-          currentId: currentUiMode,
-          options: uiModes,
-          kind: "ui",
-          isOptionDisabled: null,
-        }),
         renderModeDropdown({
           label: "Assistant mode",
           currentId: currentAssistantMode,

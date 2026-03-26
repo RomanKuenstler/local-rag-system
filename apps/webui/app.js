@@ -3113,7 +3113,7 @@ function App() {
             disabled: isNavigationLocked || !isEmbeddingReady,
           },
           icon(settingsIconPath),
-          React.createElement("span", null, "Settings")
+          React.createElement("span", null, "Preferences")
         )
       ),
       React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
@@ -3604,8 +3604,6 @@ function App() {
                   React.createElement("pre", null, message.text)
                 )
                 : message.role === "assistant"
-                  && isRagMode
-                  && message.retrieval
                   && message.interaction?.type !== "weak_confirmation"
                   && message.evidenceSeverity !== "source_attached"
                   && !(message.upload?.uploadedCount > 0)
@@ -3648,9 +3646,9 @@ function App() {
                           React.createElement(
                             "p",
                             { className: "assistant-evidence-summary" },
-                            `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
+                            `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval?.matches?.length || 0} • Cosine limit: ${message.retrieval?.cosineLimit ?? "n/a"}`
                           ),
-                          Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
+                          Array.isArray(message.retrieval?.matches) && message.retrieval.matches.length > 0
                             ? React.createElement(
                               "ul",
                               { className: "assistant-evidence-list" },
