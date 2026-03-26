@@ -1734,8 +1734,8 @@ body {
   background: rgba(148, 163, 184, 0.12);
 }
 .composer-attach-button .icon {
-  width: 1.18rem;
-  height: 1.18rem;
+  width: 1.38rem;
+  height: 1.38rem;
 }
 .composer-attachment-chip-list {
   display: flex;
@@ -1747,7 +1747,9 @@ body {
 .composer-attachment-chip {
   position: relative;
   min-width: 0;
-  flex: 0 1 clamp(148px, 20vw, 210px);
+  flex: 1 1 28%;
+  max-width: 28%;
+  min-width: 170px;
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   border-radius: 14px;
@@ -1857,8 +1859,8 @@ button.send {
   align-self: end;
 }
 button.send .icon {
-  width: 1rem;
-  height: 1rem;
+  width: 1.28rem;
+  height: 1.28rem;
 }
 
 button:disabled { opacity: .5; cursor: not-allowed; }

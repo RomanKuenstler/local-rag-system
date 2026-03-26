@@ -3748,7 +3748,7 @@ function App() {
                   "data-testid": "composer-attach-button",
                   title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
                 },
-                icon("M8 7.5v8a4 4 0 0 0 8 0v-9a2.5 2.5 0 0 0-5 0V15a1 1 0 0 0 2 0V8.5h1.8V15a2.8 2.8 0 0 1-5.6 0V6.5a4.3 4.3 0 1 1 8.6 0v9a5.8 5.8 0 0 1-11.6 0v-8z")
+                icon("M12 5a1 1 0 0 1 1 1v5h5a1 1 0 1 1 0 2h-5v5a1 1 0 1 1-2 0v-5H6a1 1 0 1 1 0-2h5V6a1 1 0 0 1 1-1")
               ),
               React.createElement("textarea", {
                 ref: composerInputRef,
