@@ -630,6 +630,20 @@ body {
   padding: 0.55rem 0.7rem;
   font-size: 0.8rem;
 }
+.library-table-head > :nth-child(2),
+.library-table-row > :nth-child(2),
+.library-table-head > :nth-child(4),
+.library-table-row > :nth-child(4),
+.library-table-head > :nth-child(5),
+.library-table-row > :nth-child(5),
+.library-table-head > :nth-child(6),
+.library-table-row > :nth-child(6),
+.library-table-head > :nth-child(7),
+.library-table-row > :nth-child(7),
+.library-table-head > :nth-child(9),
+.library-table-row > :nth-child(9) {
+  justify-self: center;
+}
 .library-table-head {
   background: #e2e8f0;
   border-bottom: 1px solid #e5e7eb;
@@ -696,6 +710,7 @@ body {
 .library-status-cell {
   display: grid;
   gap: 0.2rem;
+  justify-items: center;
 }
 .library-tags-cell {
   display: grid;
@@ -720,6 +735,28 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+}
+.library-extension-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.6rem;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  font-size: 0.69rem;
+  text-transform: uppercase;
+}
+.library-extension-chip.is-red { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
+.library-extension-chip.is-gray { background: rgba(107, 114, 128, 0.12); color: #374151; }
+.library-extension-chip.is-blue { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+.library-extension-chip.is-purple { background: rgba(139, 92, 246, 0.12); color: #7c3aed; }
+.library-extension-chip.is-green { background: rgba(22, 163, 74, 0.12); color: #15803d; }
+.library-updated-cell {
+  display: grid;
+  gap: 0.05rem;
+  line-height: 1.2;
 }
 .library-toggle-button,
 .library-delete-button {
@@ -1068,6 +1105,15 @@ body {
 }
 .status-badge.with-spinner {
   gap: 0.35rem;
+}
+.status-badge.status-badge-icon {
+  min-width: 1.8rem;
+  min-height: 1.35rem;
+  padding: 0.1rem 0.38rem;
+}
+.status-badge.status-badge-icon .icon {
+  width: 0.88rem;
+  height: 0.88rem;
 }
 .spinner-inline {
   width: 0.72rem;

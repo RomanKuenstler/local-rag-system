@@ -108,6 +108,18 @@ const MENU_DIALOG_TABS = [
 ];
 const DEFAULT_FILE_TAG_LABEL = "default";
 const ADMIN_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
+const BERLIN_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
+  timeZone: "Europe/Berlin",
+  day: "2-digit",
+  month: "2-digit",
+  year: "2-digit",
+});
+const BERLIN_TIME_FORMATTER = new Intl.DateTimeFormat("de-DE", {
+  timeZone: "Europe/Berlin",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 function buildChatNameFromId(chatId) {
   const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
@@ -157,6 +169,24 @@ function getFileExtensionFromName(fileName) {
 function getAttachmentColorClass(fileName) {
   const extension = getFileExtensionFromName(fileName);
   return ATTACHMENT_EXTENSION_COLOR_CLASS[extension] || "is-gray";
+}
+
+function normalizeLibraryPathDisplay(pathValue) {
+  return String(pathValue || "").replace(/^_library\//, "");
+}
+
+function formatLibraryUpdatedAt(value) {
+  if (!value) {
+    return { date: "n/a", time: "" };
+  }
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return { date: "n/a", time: "" };
+  }
+  return {
+    date: BERLIN_DATE_FORMATTER.format(parsedDate),
+    time: BERLIN_TIME_FORMATTER.format(parsedDate),
+  };
 }
 
 function getCurrentUiModeFromInfoText(infoText) {
@@ -2295,6 +2325,7 @@ function App() {
   const userIconPath = "M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
+  const xIconPath = "M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z";
   const renderAttachmentChip = ({ fileName, index, keyPrefix, removable = false, onRemove = null, className = "" }) => {
     const name = String(fileName || "").trim() || `Attachment ${index + 1}`;
     const extension = getFileExtensionFromName(name);
@@ -3424,7 +3455,6 @@ function App() {
                 tabIndex: -1,
               })
             ),
-            libraryNotice ? React.createElement("p", { className: "library-notice" }, libraryNotice) : null,
             React.createElement(
               "div",
               { className: "library-table", role: "table", "aria-label": "Library files" },
@@ -3448,25 +3478,33 @@ function App() {
                   className: "library-table-row",
                   role: "row",
                 },
-                React.createElement("strong", { className: "library-path" }, file.path),
+                React.createElement("strong", { className: "library-path" }, normalizeLibraryPathDisplay(file.path)),
                 React.createElement(
                   "span",
                   { className: "library-status-cell" },
-                  React.createElement(
-                    "span",
-                    {
-                      className: `status-badge ${
-                        file.enabled === false
+                  (() => {
+                    const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
+                    const isDisabled = file.enabled === false;
+                    const isLoadingStatus = !isDisabled && ["uploading", "uploaded", "embedding", "discovered", "removing", "deleted"].includes(normalizedStatus);
+                    const isErrorStatus = normalizedStatus === "error";
+                    const statusClassName = isDisabled
+                      ? "pending"
+                      : isErrorStatus
+                        ? "error"
+                        : isLoadingStatus
                           ? "pending"
-                          : ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
-                          ? "active"
-                          : file.uploadStatus === "error"
-                            ? "error"
-                            : "pending"
-                      }`,
-                    },
-                    file.enabled === false ? "disabled" : (file.uploadStatus || "unknown")
-                  ),
+                          : "active";
+                    return React.createElement(
+                      "span",
+                      {
+                        className: `status-badge status-badge-icon ${statusClassName}${isLoadingStatus ? " with-spinner" : ""}`,
+                        "aria-label": isDisabled ? "disabled" : (normalizedStatus || "ready"),
+                      },
+                      isLoadingStatus
+                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                        : icon(isDisabled ? disableFileIconPath : (isErrorStatus ? xIconPath : enableFileIconPath))
+                    );
+                  })(),
                   file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
                 ),
                 React.createElement(
@@ -3482,31 +3520,48 @@ function App() {
                 ),
                 React.createElement("span", null, formatBytes(file.sizeBytes)),
                 React.createElement("span", null, String(file.chunkCount ?? "0")),
-                React.createElement("span", null, file.extension || "n/a"),
+                React.createElement(
+                  "span",
+                  { className: `library-extension-chip ${getAttachmentColorClass(file.path || file.extension || "")}` },
+                  (file.extension || "n/a").toUpperCase()
+                ),
                 (() => {
-                  const embeddingInProgress = ["uploading", "uploaded", "embedding"].includes(String(file.uploadStatus));
-                  const removingInProgress = file.uploadStatus === "removing"
-                    || (file.uploadStatus === "deleted" && Boolean(file.embedded));
+                  const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
+                  const embeddingInProgress = file.enabled !== false && ["uploading", "uploaded", "embedding", "discovered"].includes(normalizedStatus);
+                  const removingInProgress = file.enabled !== false && (
+                    file.uploadStatus === "removing"
+                    || (file.uploadStatus === "deleted" && Boolean(file.embedded))
+                  );
                   const showProgress = embeddingInProgress || removingInProgress;
-                  const embeddedLabel = embeddingInProgress
-                    ? "embedding"
-                    : removingInProgress
-                      ? "removing"
-                      : file.embedded ? "yes" : "no";
+                  const embeddedClassName = file.enabled === false
+                    ? "pending"
+                    : file.uploadStatus === "error"
+                      ? "error"
+                      : file.embedded ? "active" : "pending";
                   return React.createElement(
                     "span",
                     null,
                     React.createElement(
                       "span",
-                      { className: `status-badge ${file.embedded ? "active" : "pending"} ${showProgress ? "with-spinner" : ""}` },
+                      {
+                        className: `status-badge status-badge-icon ${embeddedClassName} ${showProgress ? "with-spinner" : ""}`,
+                        "aria-label": showProgress ? "embedding" : (file.embedded ? "embedded" : "not embedded"),
+                      },
                       showProgress
                         ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
-                        : null,
-                      embeddedLabel
+                        : icon(file.uploadStatus === "error" ? xIconPath : (file.enabled === false ? disableFileIconPath : (file.embedded ? enableFileIconPath : disableFileIconPath)))
                     )
                   );
                 })(),
-                React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
+                (() => {
+                  const updated = formatLibraryUpdatedAt(file.updatedAt);
+                  return React.createElement(
+                    "span",
+                    { className: "library-updated-cell" },
+                    React.createElement("span", null, updated.date),
+                    updated.time ? React.createElement("span", null, updated.time) : null
+                  );
+                })(),
                 React.createElement(
                   "div",
                   { className: "library-row-actions" },
