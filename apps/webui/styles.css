@@ -1430,7 +1430,20 @@ body {
 @keyframes typingDots { from { width: 0; } to { width: 1em; } }
 
 .msg { max-width: min(82%, 700px); border-radius: 16px; padding: 0.8rem 0.95rem; scroll-margin-top: 6rem; border: none; }
-.msg.user { align-self: flex-end; background: #f3f5f9; }
+.msg.user {
+  align-self: flex-end;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
+.msg.user .msg-header {
+  width: 100%;
+  justify-content: flex-start;
+  margin-bottom: 0;
+}
 .msg.assistant {
   align-self: stretch;
   max-width: 100%;
@@ -1447,7 +1460,14 @@ body {
 .msg-command { border: 1px solid #e5e7eb; background: #ffffff; border-radius: 12px; padding: 0.6rem 0.7rem; }
 .msg-command pre { margin: 0; font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; font-size: .82rem; line-height: 1.45; white-space: pre-wrap; }
 .msg p { margin: 0; white-space: pre-wrap; line-height: 1.55; }
-.user-message-content { display: grid; gap: 0.55rem; }
+.user-message-content {
+  display: grid;
+  gap: 0.55rem;
+  background: #f3f5f9;
+  border-radius: 16px;
+  padding: 0.8rem 0.95rem;
+  max-width: 100%;
+}
 .assistant-markdown > :first-child { margin-top: 0; }
 .assistant-markdown > :last-child { margin-bottom: 0; }
 .assistant-markdown p { margin: 0.45rem 0; line-height: 1.55; }
@@ -1736,7 +1756,9 @@ body {
 .composer-attachment-chip-list.user-message-attachment-chip-list {
   display: grid;
   gap: 0.45rem;
-  padding: 0 0 0.35rem;
+  padding: 0;
+  width: 100%;
+  justify-items: end;
 }
 .composer-attachment-chip.user-message-attachment-chip {
   width: min(100%, 320px);
