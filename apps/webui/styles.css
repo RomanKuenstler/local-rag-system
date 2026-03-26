@@ -562,8 +562,48 @@ body {
 .library-summary-card {
   display: grid;
   gap: 0.2rem;
+  border: none;
+  background: transparent;
+  padding: 0;
 }
-.library-table-card { display: grid; gap: 0.65rem; }
+.library-summary-table {
+  display: grid;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.library-summary-head,
+.library-summary-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.55rem 0.7rem;
+}
+.library-summary-head {
+  background: #e2e8f0;
+  border-bottom: 1px solid #e5e7eb;
+  color: #000000;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.library-summary-row {
+  font-size: 0.9rem;
+}
+.library-summary-row strong {
+  font-weight: 600;
+  color: #111827;
+}
+.library-table-card {
+  border: none;
+  display: grid;
+  gap: 0.65rem;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
 .info-group-card.admin-users-card {
   border: none;
   background: transparent;
@@ -1240,7 +1280,7 @@ body {
 .info-group-card,
 .assistant-mode-card {
   background: #ffffff;
-  border: 1px solid #e5e7eb;
+  border: none;
   border-radius: 12px;
   padding: 0.7rem 0.8rem;
 }
@@ -1962,7 +2002,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 .config-table-card { display: grid; gap: 0.5rem; }
 .config-table {
-  border: 1px solid #e4e9f2;
+  border: none;
   border-radius: 10px;
   background: #fff;
   overflow: hidden;
