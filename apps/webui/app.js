@@ -2281,24 +2281,26 @@ function App() {
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
-  const renderComposerAttachmentChip = (file, index) => {
-    const name = String(file?.name || "").trim() || `Attachment ${index + 1}`;
+  const renderAttachmentChip = ({ fileName, index, keyPrefix, removable = false, onRemove = null, className = "" }) => {
+    const name = String(fileName || "").trim() || `Attachment ${index + 1}`;
     const extension = getFileExtensionFromName(name);
     const iconColorClass = getAttachmentColorClass(name);
     return React.createElement(
       "div",
-      { className: "composer-attachment-chip", key: `composer-attachment-${name}-${index}` },
-      React.createElement(
-        "button",
-        {
-          type: "button",
-          className: "composer-attachment-remove",
-          onClick: () => removeAttachedPromptFile(index),
-          "aria-label": `Remove ${name}`,
-          title: `Remove ${name}`,
-        },
-        "×"
-      ),
+      { className: `composer-attachment-chip ${className}`.trim(), key: `${keyPrefix}-${name}-${index}` },
+      removable
+        ? React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "composer-attachment-remove",
+            onClick: () => onRemove?.(index),
+            "aria-label": `Remove ${name}`,
+            title: `Remove ${name}`,
+          },
+          "×"
+        )
+        : null,
       React.createElement(
         "div",
         { className: `composer-attachment-icon ${iconColorClass}`, "aria-hidden": "true" },
@@ -2316,6 +2318,13 @@ function App() {
       )
     );
   };
+  const renderComposerAttachmentChip = (file, index) => renderAttachmentChip({
+    fileName: file?.name,
+    index,
+    keyPrefix: "composer-attachment",
+    removable: true,
+    onRemove: removeAttachedPromptFile,
+  });
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -3690,23 +3699,19 @@ function App() {
                     : React.createElement(
                       "div",
                       { className: "user-message-content" },
-                      React.createElement("p", null, message.text),
                       Array.isArray(message.attachedFiles) && message.attachedFiles.length > 0
                         ? React.createElement(
                           "div",
-                          { className: "user-attachment-box" },
-                          React.createElement(
-                            "small",
-                            { className: "user-attachment-label" },
-                            `Attached file${message.attachedFiles.length > 1 ? "s" : ""}`
-                          ),
-                          React.createElement(
-                            "ul",
-                            { className: "user-attachment-list" },
-                            ...message.attachedFiles.map((fileName) => React.createElement("li", { key: `${message.id}-${fileName}` }, fileName))
-                          )
+                          { className: "composer-attachment-chip-list user-message-attachment-chip-list" },
+                          ...message.attachedFiles.map((fileName, fileIndex) => renderAttachmentChip({
+                            fileName,
+                            index: fileIndex,
+                            keyPrefix: `message-attachment-${message.id}`,
+                            className: "user-message-attachment-chip",
+                          }))
                         )
-                        : null
+                        : null,
+                      React.createElement("p", null, message.text),
                     )
               );
             })
