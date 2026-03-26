@@ -3433,7 +3433,150 @@ function App() {
             React.createElement(
               "div",
               { className: "library-table-header" },
-              React.createElement("h4", null, "Files"),
+              React.createElement("h4", null, "Files")
+            ),
+            React.createElement(
+              "div",
+              { className: "library-table", role: "table", "aria-label": "Library files" },
+              React.createElement(
+                "div",
+                { className: "library-table-head", role: "row" },
+                React.createElement("span", null, "File"),
+                React.createElement("span", null, "Status"),
+                React.createElement("span", null, "Tags"),
+                React.createElement("span", null, "Size"),
+                React.createElement("span", null, "Chunks"),
+                React.createElement("span", null, "Extension"),
+                React.createElement("span", null, "Embedded"),
+                React.createElement("span", null, "Updated"),
+                React.createElement("span", null, "Action")
+              ),
+              React.createElement(
+                "div",
+                { className: "library-table-body", role: "rowgroup" },
+                ...libraryRows.map((file) => React.createElement(
+                  "div",
+                  {
+                    key: `${file.path}-${file.uploadStatus}-${file.updatedAt || "n/a"}-${file.isVolatile ? "volatile" : "db"}`,
+                    className: "library-table-row",
+                    role: "row",
+                  },
+                  React.createElement("strong", { className: "library-path" }, normalizeLibraryPathDisplay(file.path)),
+                  React.createElement(
+                    "span",
+                    { className: "library-status-cell" },
+                    (() => {
+                      const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
+                      const isDisabled = file.enabled === false;
+                      const isLoadingStatus = !isDisabled && ["uploading", "uploaded", "embedding", "discovered", "removing", "deleted"].includes(normalizedStatus);
+                      const isErrorStatus = normalizedStatus === "error";
+                      const statusClassName = isDisabled
+                        ? "pending"
+                        : isErrorStatus
+                          ? "error"
+                          : isLoadingStatus
+                            ? "pending"
+                            : "active";
+                      return React.createElement(
+                        "span",
+                        {
+                          className: `status-badge status-badge-icon ${statusClassName}${isLoadingStatus ? " with-spinner" : ""}`,
+                          "aria-label": isDisabled ? "disabled" : (normalizedStatus || "ready"),
+                        },
+                        isLoadingStatus
+                          ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                          : icon(isDisabled ? disableFileIconPath : (isErrorStatus ? xIconPath : enableFileIconPath))
+                      );
+                    })(),
+                    file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
+                  ),
+                  React.createElement(
+                    "span",
+                    { className: "library-tags-cell" },
+                    Array.isArray(file.tags) && file.tags.length > 0
+                      ? file.tags.map((tag) => React.createElement(
+                        "span",
+                        { key: `${file.path}-tag-${tag}`, className: "library-tag-line" },
+                        tag
+                      ))
+                      : React.createElement("span", { className: "library-tag-line muted" }, "—")
+                  ),
+                  React.createElement("span", null, formatBytes(file.sizeBytes)),
+                  React.createElement("span", null, String(file.chunkCount ?? "0")),
+                  React.createElement(
+                    "span",
+                    { className: `library-extension-chip ${getAttachmentColorClass(file.path || file.extension || "")}` },
+                    (file.extension || "n/a").toUpperCase()
+                  ),
+                  (() => {
+                    const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
+                    const embeddingInProgress = file.enabled !== false
+                      && !file.embedded
+                      && ["uploading", "uploaded", "embedding", "discovered"].includes(normalizedStatus);
+                    const removingInProgress = file.enabled !== false
+                      && !file.embedded
+                      && file.uploadStatus === "removing";
+                    const showProgress = embeddingInProgress || removingInProgress;
+                    const embeddedClassName = file.enabled === false
+                      ? "pending"
+                      : file.embedded
+                        ? "active"
+                        : file.uploadStatus === "error"
+                          ? "error"
+                          : "pending";
+                    return React.createElement(
+                      "span",
+                      {
+                        className: `status-badge status-badge-icon ${embeddedClassName} ${showProgress ? "with-spinner" : ""}`,
+                        "aria-label": showProgress ? "embedding" : (file.embedded ? "embedded" : "not embedded"),
+                      },
+                      showProgress
+                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                        : icon(file.uploadStatus === "error" && !file.embedded ? xIconPath : (file.enabled === false ? disableFileIconPath : (file.embedded ? enableFileIconPath : disableFileIconPath)))
+                    );
+                  })(),
+                  (() => {
+                    const updated = formatLibraryUpdatedAt(file.updatedAt);
+                    return React.createElement(
+                      "span",
+                      { className: "library-updated-cell" },
+                      React.createElement("span", null, updated.date),
+                      updated.time ? React.createElement("span", null, updated.time) : null
+                    );
+                  })(),
+                  React.createElement(
+                    "div",
+                    { className: "library-row-actions" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "library-toggle-button",
+                        "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
+                        onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
+                        disabled: !file.canToggle,
+                      },
+                      icon(file.enabled === false ? enableFileIconPath : disableFileIconPath)
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "library-delete-button",
+                        "aria-label": `Delete ${file.path}`,
+                        onClick: () => setDeleteConfirmFile(file),
+                        disabled: !file.canDelete,
+                      },
+                      icon(trashIconPath)
+                    )
+                  )
+                ))
+              )
+            ),
+            libraryNotice ? React.createElement("p", { className: "library-notice library-notice-below-table" }, libraryNotice) : null,
+            React.createElement(
+              "div",
+              { className: "library-table-footer" },
               React.createElement(
                 "button",
                 {
@@ -3454,141 +3597,6 @@ function App() {
                 "aria-hidden": "true",
                 tabIndex: -1,
               })
-            ),
-            React.createElement(
-              "div",
-              { className: "library-table", role: "table", "aria-label": "Library files" },
-              React.createElement(
-                "div",
-                { className: "library-table-head", role: "row" },
-                React.createElement("span", null, "File"),
-                React.createElement("span", null, "Status"),
-                React.createElement("span", null, "Tags"),
-                React.createElement("span", null, "Size"),
-                React.createElement("span", null, "Chunks"),
-                React.createElement("span", null, "Extension"),
-                React.createElement("span", null, "Embedded"),
-                React.createElement("span", null, "Updated"),
-                React.createElement("span", null, "Action")
-              ),
-              ...libraryRows.map((file) => React.createElement(
-                "div",
-                {
-                  key: `${file.path}-${file.uploadStatus}-${file.updatedAt || "n/a"}-${file.isVolatile ? "volatile" : "db"}`,
-                  className: "library-table-row",
-                  role: "row",
-                },
-                React.createElement("strong", { className: "library-path" }, normalizeLibraryPathDisplay(file.path)),
-                React.createElement(
-                  "span",
-                  { className: "library-status-cell" },
-                  (() => {
-                    const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
-                    const isDisabled = file.enabled === false;
-                    const isLoadingStatus = !isDisabled && ["uploading", "uploaded", "embedding", "discovered", "removing", "deleted"].includes(normalizedStatus);
-                    const isErrorStatus = normalizedStatus === "error";
-                    const statusClassName = isDisabled
-                      ? "pending"
-                      : isErrorStatus
-                        ? "error"
-                        : isLoadingStatus
-                          ? "pending"
-                          : "active";
-                    return React.createElement(
-                      "span",
-                      {
-                        className: `status-badge status-badge-icon ${statusClassName}${isLoadingStatus ? " with-spinner" : ""}`,
-                        "aria-label": isDisabled ? "disabled" : (normalizedStatus || "ready"),
-                      },
-                      isLoadingStatus
-                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
-                        : icon(isDisabled ? disableFileIconPath : (isErrorStatus ? xIconPath : enableFileIconPath))
-                    );
-                  })(),
-                  file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
-                ),
-                React.createElement(
-                  "span",
-                  { className: "library-tags-cell" },
-                  Array.isArray(file.tags) && file.tags.length > 0
-                    ? file.tags.map((tag) => React.createElement(
-                      "span",
-                      { key: `${file.path}-tag-${tag}`, className: "library-tag-line" },
-                      tag
-                    ))
-                    : React.createElement("span", { className: "library-tag-line muted" }, "—")
-                ),
-                React.createElement("span", null, formatBytes(file.sizeBytes)),
-                React.createElement("span", null, String(file.chunkCount ?? "0")),
-                React.createElement(
-                  "span",
-                  { className: `library-extension-chip ${getAttachmentColorClass(file.path || file.extension || "")}` },
-                  (file.extension || "n/a").toUpperCase()
-                ),
-                (() => {
-                  const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
-                  const embeddingInProgress = file.enabled !== false && ["uploading", "uploaded", "embedding", "discovered"].includes(normalizedStatus);
-                  const removingInProgress = file.enabled !== false && (
-                    file.uploadStatus === "removing"
-                    || (file.uploadStatus === "deleted" && Boolean(file.embedded))
-                  );
-                  const showProgress = embeddingInProgress || removingInProgress;
-                  const embeddedClassName = file.enabled === false
-                    ? "pending"
-                    : file.uploadStatus === "error"
-                      ? "error"
-                      : file.embedded ? "active" : "pending";
-                  return React.createElement(
-                    "span",
-                    null,
-                    React.createElement(
-                      "span",
-                      {
-                        className: `status-badge status-badge-icon ${embeddedClassName} ${showProgress ? "with-spinner" : ""}`,
-                        "aria-label": showProgress ? "embedding" : (file.embedded ? "embedded" : "not embedded"),
-                      },
-                      showProgress
-                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
-                        : icon(file.uploadStatus === "error" ? xIconPath : (file.enabled === false ? disableFileIconPath : (file.embedded ? enableFileIconPath : disableFileIconPath)))
-                    )
-                  );
-                })(),
-                (() => {
-                  const updated = formatLibraryUpdatedAt(file.updatedAt);
-                  return React.createElement(
-                    "span",
-                    { className: "library-updated-cell" },
-                    React.createElement("span", null, updated.date),
-                    updated.time ? React.createElement("span", null, updated.time) : null
-                  );
-                })(),
-                React.createElement(
-                  "div",
-                  { className: "library-row-actions" },
-                  React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "library-toggle-button",
-                      "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
-                      onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
-                      disabled: !file.canToggle,
-                    },
-                    icon(file.enabled === false ? enableFileIconPath : disableFileIconPath)
-                  ),
-                  React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "library-delete-button",
-                      "aria-label": `Delete ${file.path}`,
-                      onClick: () => setDeleteConfirmFile(file),
-                      disabled: !file.canDelete,
-                    },
-                    icon(trashIconPath)
-                  )
-                )
-              ))
             )
           )
         )

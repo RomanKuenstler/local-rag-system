@@ -556,6 +556,7 @@ body {
   padding-bottom: 0.4rem;
 }
 .library-column {
+  width: min(calc(100% - 8rem), 1220px);
   gap: 0.85rem;
   padding-top: 0.2rem;
 }
@@ -617,9 +618,11 @@ body {
 .library-table-header h4 { margin: 0; }
 .library-table {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   overflow: hidden;
+  max-height: min(58vh, 680px);
 }
 .library-table-head,
 .library-table-row {
@@ -632,10 +635,6 @@ body {
 }
 .library-table-head > :nth-child(2),
 .library-table-row > :nth-child(2),
-.library-table-head > :nth-child(4),
-.library-table-row > :nth-child(4),
-.library-table-head > :nth-child(5),
-.library-table-row > :nth-child(5),
 .library-table-head > :nth-child(6),
 .library-table-row > :nth-child(6),
 .library-table-head > :nth-child(7),
@@ -653,8 +652,17 @@ body {
   font-size: 0.7rem;
   font-weight: 600;
 }
+.library-table-body {
+  overflow-y: auto;
+}
 .library-table-row {
   border-top: 1px solid #f1f5f9;
+}
+.library-table-row > :nth-child(4),
+.library-table-row > :nth-child(5),
+.library-table-row > :nth-child(8) {
+  justify-self: end;
+  text-align: right;
 }
 .admin-users-table .library-table-head,
 .admin-users-table .library-table-row {
@@ -677,8 +685,14 @@ body {
   overflow-wrap: anywhere;
 }
 .library-upload-button {
-  margin-left: auto;
   white-space: nowrap;
+}
+.library-table-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+.library-notice-below-table {
+  margin-top: -0.15rem;
 }
 .admin-user-actions {
   display: flex;
@@ -757,6 +771,8 @@ body {
   display: grid;
   gap: 0.05rem;
   line-height: 1.2;
+  justify-items: end;
+  text-align: right;
 }
 .library-toggle-button,
 .library-delete-button {
