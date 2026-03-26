@@ -370,6 +370,7 @@ function App() {
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [openEvidenceMenuMessageId, setOpenEvidenceMenuMessageId] = useState(null);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -1036,6 +1037,9 @@ function App() {
       }
       if (!userMenuRef.current?.contains(event.target)) {
         setIsUserMenuOpen(false);
+      }
+      if (!event.target.closest(".assistant-evidence-wrap")) {
+        setOpenEvidenceMenuMessageId(null);
       }
     }
 
@@ -3516,48 +3520,60 @@ function App() {
                         : renderAssistantMarkdown(message.text)
                     ),
                     React.createElement(
-                      "details",
-                      { className: "assistant-evidence-block" },
-                      React.createElement("summary", null, React.createElement("small", null, "Evidence details")),
+                      "div",
+                      { className: "assistant-evidence-wrap" },
                       React.createElement(
-                        "div",
-                        { className: "assistant-evidence-content" },
-                        React.createElement(
-                          "p",
-                          { className: "assistant-evidence-summary" },
-                          `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
-                        ),
-                        Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
-                          ? React.createElement(
-                            "ul",
-                            { className: "assistant-evidence-list" },
-                            ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
-                              "li",
-                              { key: `${message.id}-${match.rank}-${match.source}` },
-                              React.createElement(
-                                "div",
-                                { className: "assistant-evidence-meta" },
-                                React.createElement("strong", null, `#${match.rank}`),
+                        "button",
+                        {
+                          type: "button",
+                          className: `assistant-evidence-trigger${openEvidenceMenuMessageId === message.id ? " active" : ""}`,
+                          "aria-expanded": openEvidenceMenuMessageId === message.id,
+                          "aria-haspopup": "menu",
+                          onClick: () => setOpenEvidenceMenuMessageId((current) => (current === message.id ? null : message.id)),
+                        },
+                        React.createElement("small", null, "Sources")
+                      ),
+                      openEvidenceMenuMessageId === message.id
+                        ? React.createElement(
+                          "section",
+                          { className: "assistant-evidence-menu", role: "menu", "aria-label": "Evidence details" },
+                          React.createElement(
+                            "p",
+                            { className: "assistant-evidence-summary" },
+                            `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
+                          ),
+                          Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
+                            ? React.createElement(
+                              "ul",
+                              { className: "assistant-evidence-list" },
+                              ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
+                                "li",
+                                { key: `${message.id}-${match.rank}-${match.source}` },
                                 React.createElement(
-                                  "span",
-                                  { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
-                                  `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`
+                                  "div",
+                                  { className: "assistant-evidence-meta" },
+                                  React.createElement("strong", null, `#${match.rank}`),
+                                  React.createElement(
+                                    "span",
+                                    { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
+                                    `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`
+                                  ),
+                                  React.createElement("span", null, match.source || "unknown source")
                                 ),
-                                React.createElement("span", null, match.source || "unknown source")
-                              ),
-                              Array.isArray(match.tags) && match.tags.length > 0
-                                ? React.createElement(
-                                  "p",
-                                  { className: "assistant-evidence-tags" },
-                                  `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
-                                )
-                                : null,
-                              match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
-                              match.preview ? React.createElement("p", null, match.preview) : null
-                            ))
-                          )
-                          : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
-                      )
+                                Array.isArray(match.tags) && match.tags.length > 0
+                                  ? React.createElement(
+                                    "p",
+                                    { className: "assistant-evidence-tags" },
+                                    `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
+                                  )
+                                  : null,
+                                match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
+                                match.preview ? React.createElement("p", null, match.preview) : null
+                              ))
+                            )
+                            : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                        )
+                        : null
                     )
                   )
                   : message.role === "assistant"
