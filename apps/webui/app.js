@@ -2457,15 +2457,6 @@ function App() {
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const isNavigationLocked = isSending;
-  const sendButtonLabel = isSending
-    ? activeChainStage === "searching"
-      ? "Searching..."
-      : activeChainStage === "drafting"
-      ? "Drafting..."
-      : activeChainStage === "refining"
-        ? "Refining..."
-        : "Thinking..."
-    : "Send";
 
   function openLibraryPage() {
     setIsMenuOpen(false);
@@ -3784,8 +3775,7 @@ function App() {
           React.createElement(
             "button",
             { className: "send", type: "submit", disabled: isSending || !isEmbeddingReady || !inputValue.trim() },
-            icon("M2 21l20-9L2 3v7l14 2-14 2z"),
-            React.createElement("span", null, sendButtonLabel)
+            icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
           ),
           attachmentNotice
             ? React.createElement(
