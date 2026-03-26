@@ -3491,7 +3491,7 @@ function App() {
             { className: "chat-column library-column" },
             React.createElement(
               "section",
-              { className: "info-group-card library-table-card" },
+              { className: "info-group-card library-table-card admin-users-card" },
               React.createElement(
                 "div",
                 { className: "library-table-header" },

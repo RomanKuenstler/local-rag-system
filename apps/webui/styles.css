@@ -564,6 +564,11 @@ body {
   gap: 0.2rem;
 }
 .library-table-card { display: grid; gap: 0.65rem; }
+.admin-users-card {
+  border: none;
+  background: transparent;
+  padding: 0;
+}
 .library-table-header {
   display: flex;
   align-items: center;
