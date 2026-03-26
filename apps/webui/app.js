@@ -128,6 +128,11 @@ function getScoreSeverity(score) {
   return "low";
 }
 
+function formatScorePercent(score) {
+  if (!Number.isFinite(score)) return "n/a";
+  return `${(score * 100).toFixed(1).replace(".", ",")}%`;
+}
+
 function getCurrentUiModeFromInfoText(infoText) {
   const parsedGroups = parseSystemInfoContent(infoText || "");
   const appGroup = parsedGroups.find((group) => group.title === "App");
@@ -370,6 +375,9 @@ function App() {
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [openEvidenceMenuMessageId, setOpenEvidenceMenuMessageId] = useState(null);
+  const [openEvidenceMenuPlacement, setOpenEvidenceMenuPlacement] = useState("up");
+  const [openEvidenceMenuMaxHeight, setOpenEvidenceMenuMaxHeight] = useState(320);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -1037,6 +1045,9 @@ function App() {
       if (!userMenuRef.current?.contains(event.target)) {
         setIsUserMenuOpen(false);
       }
+      if (!event.target.closest(".assistant-evidence-wrap")) {
+        setOpenEvidenceMenuMessageId(null);
+      }
     }
 
     document.addEventListener("pointerdown", closeMenuOnOutside);
@@ -1083,6 +1094,33 @@ function App() {
       name: file.name,
       contentBase64: await fileToBase64(file),
     })));
+  }
+
+  function resolveEvidenceMenuLayout(triggerElement) {
+    if (!triggerElement || typeof window === "undefined") {
+      return { placement: "up", maxHeight: 320 };
+    }
+    const triggerRect = triggerElement.getBoundingClientRect();
+    const viewportPadding = 12;
+    const spaceAbove = Math.max(120, triggerRect.top - viewportPadding);
+    const spaceBelow = Math.max(120, window.innerHeight - triggerRect.bottom - viewportPadding);
+    const minimumComfortableDownwardSpace = 220;
+    const placement = spaceBelow >= minimumComfortableDownwardSpace || spaceBelow > spaceAbove ? "down" : "up";
+    const availableSpace = placement === "down" ? spaceBelow : spaceAbove;
+    const maxHeight = Math.max(160, Math.min(420, Math.floor(availableSpace)));
+    return { placement, maxHeight };
+  }
+
+  function toggleEvidenceMenu(messageId, event) {
+    setOpenEvidenceMenuMessageId((current) => {
+      if (current === messageId) {
+        return null;
+      }
+      const { placement, maxHeight } = resolveEvidenceMenuLayout(event?.currentTarget);
+      setOpenEvidenceMenuPlacement(placement);
+      setOpenEvidenceMenuMaxHeight(maxHeight);
+      return messageId;
+    });
   }
 
   function getFileExtension(filename) {
@@ -2209,6 +2247,7 @@ function App() {
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
   const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
+  const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
   const renderAssistantMarkdown = (text) => {
@@ -3516,48 +3555,73 @@ function App() {
                         : renderAssistantMarkdown(message.text)
                     ),
                     React.createElement(
-                      "details",
-                      { className: "assistant-evidence-block" },
-                      React.createElement("summary", null, React.createElement("small", null, "Evidence details")),
+                      "div",
+                      { className: "assistant-evidence-wrap" },
                       React.createElement(
-                        "div",
-                        { className: "assistant-evidence-content" },
-                        React.createElement(
-                          "p",
-                          { className: "assistant-evidence-summary" },
-                          `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
-                        ),
-                        Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
-                          ? React.createElement(
-                            "ul",
-                            { className: "assistant-evidence-list" },
-                            ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
-                              "li",
-                              { key: `${message.id}-${match.rank}-${match.source}` },
-                              React.createElement(
-                                "div",
-                                { className: "assistant-evidence-meta" },
-                                React.createElement("strong", null, `#${match.rank}`),
+                        "button",
+                        {
+                          type: "button",
+                          className: `assistant-evidence-trigger${openEvidenceMenuMessageId === message.id ? " active" : ""}`,
+                          "aria-expanded": openEvidenceMenuMessageId === message.id,
+                          "aria-haspopup": "menu",
+                          onClick: (event) => toggleEvidenceMenu(message.id, event),
+                        },
+                        React.createElement("span", { className: "assistant-evidence-trigger-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                        React.createElement("small", null, "Sources")
+                      ),
+                      openEvidenceMenuMessageId === message.id
+                        ? React.createElement(
+                          "section",
+                          {
+                            className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`,
+                            role: "menu",
+                            "aria-label": "Evidence details",
+                            style: { maxHeight: `${openEvidenceMenuMaxHeight}px` },
+                          },
+                          React.createElement("h4", { className: "assistant-evidence-heading" }, "Sources"),
+                          React.createElement(
+                            "p",
+                            { className: "assistant-evidence-summary" },
+                            `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
+                          ),
+                          Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
+                            ? React.createElement(
+                              "ul",
+                              { className: "assistant-evidence-list" },
+                              ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
+                                "li",
+                                { key: `${message.id}-${match.rank}-${match.source}` },
                                 React.createElement(
-                                  "span",
-                                  { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
-                                  `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`
+                                  "div",
+                                  { className: "assistant-evidence-meta" },
+                                  React.createElement("span", { className: "assistant-evidence-file-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                                  React.createElement(
+                                    "span",
+                                    { className: "assistant-evidence-file-name" },
+                                    String(match.source || "unknown source").replace(/^_library\//, "")
+                                  ),
                                 ),
-                                React.createElement("span", null, match.source || "unknown source")
-                              ),
-                              Array.isArray(match.tags) && match.tags.length > 0
-                                ? React.createElement(
+                                React.createElement(
                                   "p",
-                                  { className: "assistant-evidence-tags" },
-                                  `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
-                                )
-                                : null,
-                              match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
-                              match.preview ? React.createElement("p", null, match.preview) : null
-                            ))
-                          )
-                          : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
-                      )
+                                  { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
+                                  `Score ${formatScorePercent(match.score)}`
+                                ),
+                                match.title ? React.createElement("p", { className: "assistant-evidence-title" }, match.title) : null,
+                                Array.isArray(match.tags) && match.tags.length > 0
+                                  ? React.createElement(
+                                    "p",
+                                    { className: "assistant-evidence-tags" },
+                                    `Tags ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
+                                  )
+                                  : null,
+                                Array.isArray(match.tags) && match.tags.length > 0
+                                  ? null
+                                  : React.createElement("p", { className: "assistant-evidence-tags assistant-evidence-tags-empty" }, "Tags none")
+                              ))
+                            )
+                            : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                        )
+                        : null
                     )
                   )
                   : message.role === "assistant"
