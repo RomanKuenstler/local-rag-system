@@ -2283,6 +2283,8 @@ function App() {
   const trashIconPath = "M9 3h6l1.4 2H20a1 1 0 1 1 0 2h-1v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4a1 1 0 1 1 0-2h3.6zM7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7zm3 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1m4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1";
   const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
   const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
+  const disableFileIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 2a8 8 0 0 1 6.2 13L7 5.8A8 8 0 0 1 12 4m-6.2 3L17 18.2A8 8 0 0 1 5.8 7";
+  const enableFileIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m-1.1 14.6L6.7 12.4l1.4-1.4 2.8 2.8 5.8-5.8 1.4 1.4z";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
   const downloadIconPath = "M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4 2.3 2.3V4a1 1 0 0 1 1-1M4 17h16v4H4z";
   const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
@@ -2442,6 +2444,7 @@ function App() {
       extension: file.extension,
       embedded: Boolean(file.embedded),
       hash: file.hash,
+      embeddedAt: managed?.embeddedAt || null,
       updatedAt: managed?.updatedAt || file.lastModified || null,
       canDelete: isAdminUser || Boolean(managed?.canDelete),
       canToggle: Boolean(managed?.canToggle),
@@ -2460,17 +2463,40 @@ function App() {
       extension: managed.extension || getFileExtension(managed.originalName),
       embedded: Boolean(managed.embedded),
       hash: managed.hash,
+      embeddedAt: managed.embeddedAt || null,
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
       canDelete: Boolean(managed.canDelete),
       canToggle: Boolean(managed.canToggle),
       lastError: managed.lastError || null,
       tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
-  const dbRows = retrieverRows.concat(managedOnlyRows).sort((left, right) => {
-    const a = Date.parse(String(left.updatedAt || 0));
-    const b = Date.parse(String(right.updatedAt || 0));
-    return b - a;
-  });
+  const parseSortDate = (value) => {
+    const parsed = Date.parse(String(value || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const sortRowsByEmbeddingDateDesc = (left, right) => {
+    const leftEmbeddedAt = parseSortDate(left.embeddedAt);
+    const rightEmbeddedAt = parseSortDate(right.embeddedAt);
+    if (rightEmbeddedAt !== leftEmbeddedAt) {
+      return rightEmbeddedAt - leftEmbeddedAt;
+    }
+
+    const leftUpdatedAt = parseSortDate(left.updatedAt);
+    const rightUpdatedAt = parseSortDate(right.updatedAt);
+    if (rightUpdatedAt !== leftUpdatedAt) {
+      return rightUpdatedAt - leftUpdatedAt;
+    }
+
+    return String(left.path || "").localeCompare(String(right.path || ""));
+  };
+  const allDbRows = retrieverRows.concat(managedOnlyRows);
+  const userLibraryRows = allDbRows
+    .filter((row) => String(row.path || "").startsWith("_library/"))
+    .sort(sortRowsByEmbeddingDateDesc);
+  const rootLibraryRows = allDbRows
+    .filter((row) => !String(row.path || "").startsWith("_library/"))
+    .sort(sortRowsByEmbeddingDateDesc);
+  const dbRows = userLibraryRows.concat(rootLibraryRows);
   const libraryRows = pendingLibraryUploads.concat(dbRows);
   const adminUserRows = Array.isArray(adminUsersData)
     ? [...adminUsersData].sort((left, right) => String(left?.username || "").localeCompare(String(right?.username || "")))
@@ -3493,7 +3519,7 @@ function App() {
                       onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
                       disabled: !file.canToggle,
                     },
-                    icon(file.enabled === false ? eyeIconPath : eyeOffIconPath)
+                    icon(file.enabled === false ? enableFileIconPath : disableFileIconPath)
                   ),
                   React.createElement(
                     "button",
