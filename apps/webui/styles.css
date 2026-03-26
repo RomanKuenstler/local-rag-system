@@ -1696,7 +1696,7 @@ body {
   bottom: 0.8rem;
   transform: translateX(-50%);
   z-index: 50;
-  width: min(calc(100% - 16.7rem), 860px);
+  width: min(calc(100% - 15.2rem), 940px);
   margin: 0;
 }
 .composer-input-shell {
@@ -1738,13 +1738,15 @@ body {
 }
 .composer-attachment-chip-list {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
-  overflow-x: auto;
+  overflow-x: hidden;
   padding: 0.08rem 0.08rem 0.12rem;
 }
 .composer-attachment-chip {
+  position: relative;
   min-width: 0;
-  flex: 0 0 clamp(210px, 29vw, 300px);
+  flex: 0 1 clamp(148px, 20vw, 210px);
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   border-radius: 14px;
@@ -1752,6 +1754,27 @@ body {
   display: flex;
   align-items: center;
   gap: 0.58rem;
+}
+.composer-attachment-remove {
+  position: absolute;
+  top: 0.24rem;
+  right: 0.24rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: none;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+.composer-attachment-remove:hover {
+  background: #cbd5e1;
+  color: #1e293b;
 }
 .composer-attachment-icon {
   width: 2.2rem;
@@ -1823,7 +1846,8 @@ button.send {
   color: #fff;
   border: none;
   border-radius: 999px;
-  padding: 0.6rem 1rem;
+  min-height: 3rem;
+  padding: 0.72rem 1rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;

@@ -1181,7 +1181,7 @@ function App() {
 
     return {
       validFiles: selectedFiles,
-      notice: `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected.`,
+      notice: "",
     };
   }
 
@@ -2176,6 +2176,11 @@ function App() {
     event.target.value = "";
   }
 
+  function removeAttachedPromptFile(targetIndex) {
+    setAttachedPromptFiles((previous) => previous.filter((_, index) => index !== targetIndex));
+    setAttachmentNotice("");
+  }
+
   async function submitConfigChange(configName, rawValue) {
     const normalizedName = String(configName || "").trim().toLowerCase();
     const value = String(rawValue || "").trim();
@@ -2283,6 +2288,17 @@ function App() {
     return React.createElement(
       "div",
       { className: "composer-attachment-chip", key: `composer-attachment-${name}-${index}` },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "composer-attachment-remove",
+          onClick: () => removeAttachedPromptFile(index),
+          "aria-label": `Remove ${name}`,
+          title: `Remove ${name}`,
+        },
+        "×"
+      ),
       React.createElement(
         "div",
         { className: `composer-attachment-icon ${iconColorClass}`, "aria-hidden": "true" },
@@ -3774,7 +3790,7 @@ function App() {
           attachmentNotice
             ? React.createElement(
               "p",
-              { className: `composer-attachment-notice${attachedPromptFiles.length > 0 ? " valid" : " invalid"}` },
+              { className: "composer-attachment-notice invalid" },
               attachmentNotice
             )
             : null
