@@ -377,6 +377,7 @@ function App() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [openEvidenceMenuMessageId, setOpenEvidenceMenuMessageId] = useState(null);
   const [openEvidenceMenuPlacement, setOpenEvidenceMenuPlacement] = useState("up");
+  const [openEvidenceMenuMaxHeight, setOpenEvidenceMenuMaxHeight] = useState(320);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -1095,18 +1096,19 @@ function App() {
     })));
   }
 
-  function resolveEvidenceMenuPlacement(triggerElement) {
+  function resolveEvidenceMenuLayout(triggerElement) {
     if (!triggerElement || typeof window === "undefined") {
-      return "up";
+      return { placement: "up", maxHeight: 320 };
     }
     const triggerRect = triggerElement.getBoundingClientRect();
-    const spaceAbove = triggerRect.top;
-    const spaceBelow = window.innerHeight - triggerRect.bottom;
-    const preferredMenuHeight = 320;
-    if (spaceAbove < preferredMenuHeight && spaceBelow > spaceAbove) {
-      return "down";
-    }
-    return "up";
+    const viewportPadding = 12;
+    const spaceAbove = Math.max(120, triggerRect.top - viewportPadding);
+    const spaceBelow = Math.max(120, window.innerHeight - triggerRect.bottom - viewportPadding);
+    const minimumComfortableDownwardSpace = 220;
+    const placement = spaceBelow >= minimumComfortableDownwardSpace || spaceBelow > spaceAbove ? "down" : "up";
+    const availableSpace = placement === "down" ? spaceBelow : spaceAbove;
+    const maxHeight = Math.max(160, Math.min(420, Math.floor(availableSpace)));
+    return { placement, maxHeight };
   }
 
   function toggleEvidenceMenu(messageId, event) {
@@ -1114,7 +1116,9 @@ function App() {
       if (current === messageId) {
         return null;
       }
-      setOpenEvidenceMenuPlacement(resolveEvidenceMenuPlacement(event?.currentTarget));
+      const { placement, maxHeight } = resolveEvidenceMenuLayout(event?.currentTarget);
+      setOpenEvidenceMenuPlacement(placement);
+      setOpenEvidenceMenuMaxHeight(maxHeight);
       return messageId;
     });
   }
@@ -3568,7 +3572,12 @@ function App() {
                       openEvidenceMenuMessageId === message.id
                         ? React.createElement(
                           "section",
-                          { className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`, role: "menu", "aria-label": "Evidence details" },
+                          {
+                            className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`,
+                            role: "menu",
+                            "aria-label": "Evidence details",
+                            style: { maxHeight: `${openEvidenceMenuMaxHeight}px` },
+                          },
                           React.createElement("h4", { className: "assistant-evidence-heading" }, "Sources"),
                           React.createElement(
                             "p",
