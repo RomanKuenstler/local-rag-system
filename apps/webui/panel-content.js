@@ -906,34 +906,30 @@ export function renderPanelContent({
         { className: "help-grid" },
         ...parsedHelpPanel.sections.map((section, sectionIndex) => {
           const paragraphs = Array.isArray(section?.paragraphs) ? section.paragraphs : [];
-          const composerNotes = Array.isArray(section?.composerNotes) ? section.composerNotes : [];
-          const attachmentExtensions = Array.isArray(section?.attachmentExtensions) ? section.attachmentExtensions : [];
+          const userInputNotes = Array.isArray(section?.userInputNotes) ? section.userInputNotes : [];
+          const sectionExtensions = Array.isArray(section?.extensions) ? section.extensions : [];
           return React.createElement(
             "section",
             { key: section?.id || `help-section-${sectionIndex}`, className: "info-group-card" },
             React.createElement("h4", null, section?.title || "Section"),
             ...paragraphs.map((line, idx) => React.createElement("p", { key: `help-section-${sectionIndex}-line-${idx}` }, line)),
-            composerNotes.length
+            userInputNotes.length
               ? React.createElement(
                 React.Fragment,
                 { key: `help-section-${sectionIndex}-composer` },
-                React.createElement("h5", null, "Composer"),
-                React.createElement(
-                  "ul",
-                  { className: "help-tips" },
-                  ...composerNotes.map((note, idx) => React.createElement("li", { key: `help-section-${sectionIndex}-composer-note-${idx}` }, note))
-                )
+                React.createElement("h5", null, section?.userInputHeading || "User input"),
+                ...userInputNotes.map((note, idx) => React.createElement("p", { key: `help-section-${sectionIndex}-user-input-note-${idx}` }, note))
               )
               : null,
-            attachmentExtensions.length
+            sectionExtensions.length
               ? React.createElement(
                 React.Fragment,
                 { key: `help-section-${sectionIndex}-attachments` },
-                React.createElement("h5", null, "Attachable file extensions"),
+                React.createElement("h5", null, section?.extensionHeading || "File extensions"),
                 React.createElement(
                   "div",
                   { className: "info-extension-chip-row" },
-                  ...attachmentExtensions.map((extension, idx) => {
+                  ...sectionExtensions.map((extension, idx) => {
                     const normalized = String(extension || "").trim().replace(/^\./, "").toLowerCase();
                     const colorClass = getExtensionColorClass(normalized);
                     return React.createElement(

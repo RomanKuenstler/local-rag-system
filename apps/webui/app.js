@@ -360,16 +360,26 @@ function buildWebUiHelpContent() {
           "Create a chat with the + New Chat button in the sidebar. Use separate chats for separate topics so answers stay focused.",
           "Open the chat menu (⋯) to rename chats, archive chats you no longer need, or remove chats.",
         ],
-        composerNotes: [
+        userInputHeading: "User input",
+        userInputNotes: [
           "Use the composer field at the bottom to type your question or instruction.",
           "Press Enter to send, or Shift+Enter for a new line.",
           "You can attach up to 3 files to a single prompt.",
         ],
-        attachmentExtensions: PROMPT_ATTACHMENT_RULES.allowedExtensions,
+        extensionHeading: "Attachable file extensions",
+        extensions: PROMPT_ATTACHMENT_RULES.allowedExtensions,
       },
       {
         id: "library",
         title: "Library",
+        paragraphs: [
+          "The Library can include system/admin controlled files and user controlled files. System/admin files are managed centrally and are available to users without giving edit or delete access.",
+          "User controlled files are the files you upload yourself. You can manage their availability per file with disable/enable and remove them when they are no longer needed.",
+          "Disable removes a file from retrieval results without deleting it. Enable makes the file available for retrieval again.",
+          "Delete permanently removes your own uploaded file from your user scope. It does not delete system/admin managed files for other users.",
+        ],
+        extensionHeading: "Embeddable file extensions",
+        extensions: LIBRARY_UPLOAD_RULES.allowedExtensions,
       },
       {
         id: "personalization",
