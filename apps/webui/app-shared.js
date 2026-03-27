@@ -69,6 +69,7 @@ export const LIBRARY_UPLOAD_RULES = {
 };
 export const SESSION_ID_STORAGE_KEY = "rag-session-id";
 export const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+export const ASSISTANT_MODE_STORAGE_KEY = "rag-assistant-mode";
 export const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
 export const LOGIN_PAGE_HASH = "#login";
 export const LIBRARY_PAGE_HASH = "#library";
