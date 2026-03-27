@@ -91,6 +91,7 @@ import {
   normalizeIndexableTextByExtension,
 } from "../../shared/src/document-processing.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "../../shared/src/runtime-config.js";
+import { createRetrieverRequestHandler } from "./request-dispatcher.js";
 
 validateRetrievalConfig();
 
@@ -1759,97 +1760,25 @@ async function handleFileTags(req, res) {
   });
 }
 
+const handleRequest = createRetrieverRequestHandler({
+  json,
+  handleStatus,
+  handleFiles,
+  handleTagFilters,
+  handleFileTags,
+  handleMessages,
+  handleListChats,
+  handleCreateChat,
+  handlePersonalization,
+  handlePatchChat,
+  handleDownloadChat,
+  handleDeleteChat,
+  handlePrompt,
+});
+
 const server = http.createServer(async (req, res) => {
   try {
-    if (!req.url) {
-      json(res, 400, { error: "Missing request URL" });
-      return;
-    }
-
-    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-
-    if (req.method === "OPTIONS") {
-      json(res, 200, { ok: true });
-      return;
-    }
-
-    const isStatusRoute = ["/api/status", "/internal/retriever/status"].includes(url.pathname);
-    const isFilesRoute = ["/api/files", "/internal/retriever/files"].includes(url.pathname);
-    const isFileTagsRoute = ["/api/files/tags", "/internal/retriever/files/tags"].includes(url.pathname);
-    const isTagFiltersRoute = ["/api/files/tag-filters", "/internal/retriever/files/tag-filters"].includes(url.pathname);
-    const isMessagesRoute = ["/api/messages", "/internal/retriever/messages"].includes(url.pathname);
-    const isPromptRoute = ["/api/prompt", "/internal/retriever/prompt"].includes(url.pathname);
-    const isChatsRoute = ["/api/chats", "/internal/retriever/chats"].includes(url.pathname);
-    const isPersonalizationRoute = ["/api/personalization", "/internal/retriever/personalization"].includes(url.pathname);
-    const chatRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)$/);
-    const chatDownloadRouteMatch = url.pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)\/download$/);
-
-    if (req.method === "GET" && isStatusRoute) {
-      await handleStatus(req, res);
-      return;
-    }
-
-    if (req.method === "GET" && isFilesRoute) {
-      await handleFiles(req, res, url);
-      return;
-    }
-
-    if (isTagFiltersRoute && (req.method === "GET" || req.method === "PATCH")) {
-      await handleTagFilters(req, res, url);
-      return;
-    }
-
-    if (req.method === "PATCH" && isFileTagsRoute) {
-      await handleFileTags(req, res);
-      return;
-    }
-
-    if (req.method === "GET" && isMessagesRoute) {
-      await handleMessages(req, res);
-      return;
-    }
-
-    if (req.method === "GET" && isChatsRoute) {
-      await handleListChats(req, res);
-      return;
-    }
-
-    if (req.method === "POST" && isChatsRoute) {
-      await handleCreateChat(req, res);
-      return;
-    }
-
-    if ((req.method === "GET" || req.method === "PATCH") && isPersonalizationRoute) {
-      await handlePersonalization(req, res);
-      return;
-    }
-
-    if (req.method === "PATCH" && chatRouteMatch) {
-      await handlePatchChat(req, res, decodeURIComponent(chatRouteMatch[1]));
-      return;
-    }
-
-    if (req.method === "GET" && chatDownloadRouteMatch) {
-      await handleDownloadChat(req, res, decodeURIComponent(chatDownloadRouteMatch[1]));
-      return;
-    }
-
-    if (req.method === "DELETE" && chatRouteMatch) {
-      await handleDeleteChat(req, res, decodeURIComponent(chatRouteMatch[1]));
-      return;
-    }
-
-    if (req.method === "POST" && isPromptRoute) {
-      await handlePrompt(req, res);
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/healthz") {
-      json(res, 200, { ok: true });
-      return;
-    }
-
-    json(res, 404, { error: "Not found" });
+    await handleRequest(req, res);
   } catch (error) {
     console.error(error);
 

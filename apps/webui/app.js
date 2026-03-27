@@ -23,269 +23,45 @@ import {
   buildFallbackChatExportPayload,
   triggerJsonDownload,
 } from "./chat-export.js";
+import { createApiClient } from "./api-client.js";
 
-const UI_MODE_OPTIONS = [
-  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics.", shortDescription: "Focused chat view" },
-  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details.", shortDescription: "Show retrieval details" },
-];
-const ASSISTANT_MODE_OPTIONS = [
-  { id: "simple", label: "Simple", description: "For everyday simple tasks", shortDescription: "Fast and direct" },
-  { id: "refine", label: "Refine", description: "For getting refined answers", shortDescription: "Draft then improve" },
-  { id: "thinking", label: "Thinking", description: "For complex questions", shortDescription: "Deeper reasoning mode" },
-];
-const PERSONALIZATION_OPTIONS = {
-  baseStyleTone: [
-    { id: "default", description: "Default response style." },
-    { id: "professional", description: "Polished and precise." },
-    { id: "friendly", description: "Warm and chatty." },
-    { id: "direct", description: "Direct and encouraging." },
-    { id: "quirky", description: "Playful and imaginative." },
-    { id: "efficient", description: "Concise and plain." },
-    { id: "sceptical", description: "Sceptical and critical." },
-  ],
-  warm: [
-    { id: "more", description: "Friendlier and personable." },
-    { id: "default", description: "Balanced warmth." },
-    { id: "less", description: "More professional and factual." },
-  ],
-  enthusiastic: [
-    { id: "more", description: "More energy and excitement." },
-    { id: "default", description: "Balanced enthusiasm." },
-    { id: "less", description: "Calmer and more neutral." },
-  ],
-  headersAndLists: [
-    { id: "more", description: "Use clear formatting and lists." },
-    { id: "default", description: "Balanced formatting and paragraphs." },
-    { id: "less", description: "More paragraphs instead of lists." },
-  ],
-};
-const DEFAULT_PERSONALIZATION_PREFERENCES = {
-  baseStyleTone: "default",
-  warm: "default",
-  enthusiastic: "default",
-  headersAndLists: "default",
-  customInstructions: "",
-  nickname: "",
-  occupation: "",
-  moreAboutUser: "",
-};
-const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
-const PROMPT_ATTACHMENT_RULES = {
-  maxFiles: 3,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
-};
-const LIBRARY_UPLOAD_RULES = {
-  maxFiles: 5,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
-};
-const SESSION_ID_STORAGE_KEY = "rag-session-id";
-const CHAT_ID_STORAGE_KEY = "rag-chat-id";
-const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
-const LOGIN_PAGE_HASH = "#login";
-const LIBRARY_PAGE_HASH = "#library";
-const ADMIN_PAGE_HASH = "#admin";
-const MENU_DIALOG_TABS = [
-  { id: "general", label: "General", command: "/general" },
-  { id: "personalization", label: "Personalization", command: "/personalization" },
-  { id: "settings", label: "Settings", command: "/config" },
-  { id: "filter", label: "Filter" },
-  { id: "info", label: "Info", command: "/info" },
-  { id: "archive", label: "Archive" },
-  { id: "help", label: "Help", command: "/help" },
-];
-const DEFAULT_FILE_TAG_LABEL = "default";
-const ADMIN_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
-
-function buildChatNameFromId(chatId) {
-  const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
-  return `chat-${suffix}`;
-}
-
-function buildInitialChatList(activeChatId) {
-  const primaryId = String(activeChatId || "").trim();
-  if (!primaryId) {
-    return [];
-  }
-  return [{ id: primaryId, name: buildChatNameFromId(primaryId) }];
-}
-
-function getOrCreatePersistentId(storageKey, fallbackPrefix) {
-  try {
-    const stored = window.localStorage.getItem(storageKey);
-    if (stored) return stored;
-    const created = `${fallbackPrefix}-${crypto.randomUUID()}`;
-    window.localStorage.setItem(storageKey, created);
-    return created;
-  } catch {
-    return `${fallbackPrefix}-fallback`;
-  }
-}
-
-function getScoreSeverity(score) {
-  if (!Number.isFinite(score)) return "unknown";
-  if (score >= 0.8) return "high";
-  if (score >= 0.6) return "medium";
-  return "low";
-}
-
-function getCurrentUiModeFromInfoText(infoText) {
-  const parsedGroups = parseSystemInfoContent(infoText || "");
-  const appGroup = parsedGroups.find((group) => group.title === "App");
-  const uiModeEntry = appGroup?.items?.find((item) => item.key.toLowerCase() === "ui mode");
-  return uiModeEntry?.value || "clean";
-}
-
-function getMenuTabById(tabId) {
-  return MENU_DIALOG_TABS.find((tab) => tab.id === tabId) || MENU_DIALOG_TABS[0];
-}
-
-function getAssistantModeMeta(modeId) {
-  const normalized = String(modeId || "").trim().toLowerCase();
-  return ASSISTANT_MODE_OPTIONS.find((mode) => mode.id === normalized) || ASSISTANT_MODE_OPTIONS[0];
-}
-
-function isKnownAssistantMode(modeId) {
-  const normalized = String(modeId || "").trim().toLowerCase();
-  return ASSISTANT_MODE_OPTIONS.some((mode) => mode.id === normalized);
-}
-
-function mergeAssistantModes(parsedAssistantModes = [], availableModes = []) {
-  const normalizedById = new Map();
-  for (const mode of ASSISTANT_MODE_OPTIONS) {
-    normalizedById.set(mode.id, {
-      id: mode.id,
-      label: mode.label,
-      description: mode.description,
-      shortDescription: mode.shortDescription,
-    });
-  }
-  for (const mode of Array.isArray(parsedAssistantModes) ? parsedAssistantModes : []) {
-    const id = String(mode?.id || "").trim().toLowerCase();
-    if (!id) continue;
-    const fallback = normalizedById.get(id) || { id, label: id, shortDescription: "", description: "" };
-    normalizedById.set(id, {
-      id,
-      label: fallback.label,
-      shortDescription: fallback.shortDescription,
-      description: String(mode?.description || "").trim() || fallback.description,
-    });
-  }
-  for (const mode of Array.isArray(availableModes) ? availableModes : []) {
-    const id = String(mode?.id || "").trim().toLowerCase();
-    if (!id) continue;
-    const fallback = normalizedById.get(id) || { id, label: id, shortDescription: "", description: "" };
-    normalizedById.set(id, {
-      id,
-      label: String(mode?.label || "").trim() || fallback.label,
-      shortDescription: fallback.shortDescription,
-      description: fallback.description,
-    });
-  }
-  return Array.from(normalizedById.values());
-}
-
-function buildGeneralAssistantPanelContent(assistantAnswer, statusData, currentAssistantMode) {
-  const parsedAssistant = parseAssistantModeContent(assistantAnswer || "");
-  const assistantModes = mergeAssistantModes(parsedAssistant.modes, statusData?.assistant?.availableModes);
-  const parsedCurrentMode = String(parsedAssistant.currentMode || "").trim().toLowerCase();
-  const statusCurrentMode = String(statusData?.assistant?.mode || "").trim().toLowerCase();
-  const localCurrentMode = String(currentAssistantMode || "").trim().toLowerCase();
-  const resolvedCurrentMode = isKnownAssistantMode(parsedCurrentMode)
-    ? parsedCurrentMode
-    : isKnownAssistantMode(statusCurrentMode)
-      ? statusCurrentMode
-      : isKnownAssistantMode(localCurrentMode)
-        ? localCurrentMode
-        : ASSISTANT_MODE_OPTIONS[0].id;
-  return {
-    currentMode: resolvedCurrentMode,
-    modes: assistantModes,
-  };
-}
-
-function isAssistantModeTemporarilyDisabled(modeId) {
-  const normalized = String(modeId || "").trim().toLowerCase();
-  return TEMPORARILY_DISABLED_ASSISTANT_MODES.has(normalized);
-}
-
-function getPendingAssistantMessage(modeId, chainStage) {
-  const normalizedMode = String(modeId || "").trim().toLowerCase();
-  const normalizedStage = String(chainStage || "").trim().toLowerCase();
-  if (normalizedStage === "searching") {
-    return "Searching the knowledge base…";
-  }
-  if (normalizedMode === "refine") {
-    if (normalizedStage === "refining") {
-      return "Refining the final answer…";
-    }
-    return "Drafting an answer…";
-  }
-  return "Assistant is thinking…";
-}
-
-function buildPendingAssistantTrailText(statusTrail) {
-  const normalizedTrail = Array.isArray(statusTrail)
-    ? statusTrail.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  if (normalizedTrail.length === 0) {
-    return "Assistant is thinking…";
-  }
-  return normalizedTrail.join("\n");
-}
-
-function dedupeStatusTrail(statusTrail) {
-  const deduped = [];
-  for (const step of Array.isArray(statusTrail) ? statusTrail : []) {
-    const normalized = String(step || "").trim();
-    if (!normalized) continue;
-    if (deduped[deduped.length - 1] === normalized) continue;
-    deduped.push(normalized);
-  }
-  return deduped;
-}
-
-function buildPersonalizationContent(preferences) {
-  return {
-    sections: [
-      {
-        id: "personalization",
-        title: "Personalization",
-        settings: {
-          baseStyleTone: {
-            label: "Base style and tone",
-            currentId: preferences.baseStyleTone,
-            options: PERSONALIZATION_OPTIONS.baseStyleTone,
-          },
-          warm: {
-            label: "Warm",
-            currentId: preferences.warm,
-            options: PERSONALIZATION_OPTIONS.warm,
-          },
-          enthusiastic: {
-            label: "Enthusiastic",
-            currentId: preferences.enthusiastic,
-            options: PERSONALIZATION_OPTIONS.enthusiastic,
-          },
-          headersAndLists: {
-            label: "Headers and Lists",
-            currentId: preferences.headersAndLists,
-            options: PERSONALIZATION_OPTIONS.headersAndLists,
-          },
-        },
-      },
-      {
-        id: "custom-instructions",
-        title: "Custom Instructions",
-        description: "Define custom response instructions that will be merged into your session profile prompt.",
-      },
-      {
-        id: "about-you",
-        title: "About You",
-        description: "Store user context and background details for this session profile.",
-      },
-    ],
-  };
-}
+import {
+  ADMIN_PAGE_HASH,
+  ADMIN_PROTECTED_USERNAMES,
+  ASSISTANT_MODE_OPTIONS,
+  AUTH_SESSION_TOKEN_STORAGE_KEY,
+  CHAT_ID_STORAGE_KEY,
+  DEFAULT_FILE_TAG_LABEL,
+  DEFAULT_PERSONALIZATION_PREFERENCES,
+  LIBRARY_PAGE_HASH,
+  LIBRARY_UPLOAD_RULES,
+  LOGIN_PAGE_HASH,
+  PREFERENCES_DIALOG_TABS,
+  PROMPT_ATTACHMENT_RULES,
+  SESSION_ID_STORAGE_KEY,
+  TEMPORARILY_DISABLED_ASSISTANT_MODES,
+  UI_MODE_OPTIONS,
+  buildChatNameFromId,
+  buildGeneralAssistantPanelContent,
+  buildInitialChatList,
+  buildPendingAssistantTrailText,
+  buildPersonalizationContent,
+  buildWebUiHelpContent,
+  dedupeStatusTrail,
+  formatLibraryUpdatedAt,
+  formatScorePercent,
+  getAssistantModeMeta,
+  getAttachmentColorClass,
+  getCurrentUiModeFromInfoText,
+  getDialogTabById,
+  getFileExtensionFromName,
+  getOrCreatePersistentId,
+  getPendingAssistantMessage,
+  getScoreSeverity,
+  isAssistantModeTemporarilyDisabled,
+  isKnownAssistantMode,
+  normalizeLibraryPathDisplay,
+} from "./app-shared.js";
 
 marked.setOptions({
   gfm: true,
@@ -324,6 +100,7 @@ function App() {
   const [adminUsersNotice, setAdminUsersNotice] = useState("");
   const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
   const [newUserDraft, setNewUserDraft] = useState({ username: "", displayName: "", role: "users" });
+  const [isCreateUserRoleDropdownOpen, setIsCreateUserRoleDropdownOpen] = useState(false);
   const [isCreateUserSubmitting, setIsCreateUserSubmitting] = useState(false);
   const [pendingLibraryUploads, setPendingLibraryUploads] = useState([]);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -370,6 +147,9 @@ function App() {
   const [deleteConfirmChat, setDeleteConfirmChat] = useState(null);
   const [isChatActionPending, setIsChatActionPending] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [openEvidenceMenuMessageId, setOpenEvidenceMenuMessageId] = useState(null);
+  const [openEvidenceMenuPlacement, setOpenEvidenceMenuPlacement] = useState("up");
+  const [openEvidenceMenuMaxHeight, setOpenEvidenceMenuMaxHeight] = useState(320);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
@@ -392,6 +172,7 @@ function App() {
   const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
+  const createUserRoleDropdownRef = useRef(null);
   const userMenuRef = useRef(null);
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
@@ -460,37 +241,12 @@ function App() {
     }
   }
 
-  function ensureAuthenticatedForPreferencesApi(featureLabel = "this preferences action") {
-    if (isAuthenticated && authSessionTokenRef.current) {
-      return;
-    }
-    clearAuthenticatedSessionState();
-    throw new Error(`Please sign in again to use ${featureLabel}.`);
-  }
-
-  async function apiFetchForPreferences(pathOrUrl, options = {}, featureLabel = "this preferences action") {
-    ensureAuthenticatedForPreferencesApi(featureLabel);
-    return apiFetch(pathOrUrl, options, { skipAuth: false });
-  }
-
-  async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
-    const rawUrl = String(pathOrUrl || "");
-    const requestUrl = rawUrl.startsWith("http") ? rawUrl : `${API_BASE_URL}${rawUrl}`;
-    const headers = new Headers(options.headers || {});
-    if (!skipAuth && authSessionTokenRef.current) {
-      headers.set("X-Session-Token", authSessionTokenRef.current);
-    }
-
-    const response = await fetch(requestUrl, {
-      ...options,
-      headers,
-    });
-
-    if (response.status === 401 && !skipAuth) {
-      clearAuthenticatedSessionState();
-    }
-    return response;
-  }
+  const { apiFetch, apiFetchForPreferences } = createApiClient({
+    apiBaseUrl: API_BASE_URL,
+    getSessionToken: () => authSessionTokenRef.current,
+    onUnauthorized: clearAuthenticatedSessionState,
+    isAuthenticated: () => Boolean(isAuthenticated && authSessionTokenRef.current),
+  });
 
   async function restoreActiveSession() {
     let storedToken = "";
@@ -703,6 +459,7 @@ function App() {
   }
 
   function handleLogout() {
+    setIsUserMenuOpen(false);
     apiFetch(`/api/auth/logout?sessionId=${encodeURIComponent(sessionIdRef.current)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -725,6 +482,21 @@ function App() {
     setNewPassword("");
     setConfirmNewPassword("");
     setLoginError("");
+  }
+
+  function openInfoFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openUnifiedDialog("info");
+  }
+
+  function openHelpFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openUnifiedDialog("help");
+  }
+
+  function openPreferencesFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openSettingsDialog();
   }
 
   useEffect(() => {
@@ -1037,11 +809,23 @@ function App() {
       if (!userMenuRef.current?.contains(event.target)) {
         setIsUserMenuOpen(false);
       }
+      if (!event.target.closest(".assistant-evidence-wrap")) {
+        setOpenEvidenceMenuMessageId(null);
+      }
+      if (!createUserRoleDropdownRef.current?.contains(event.target)) {
+        setIsCreateUserRoleDropdownOpen(false);
+      }
     }
 
     document.addEventListener("pointerdown", closeMenuOnOutside);
     return () => document.removeEventListener("pointerdown", closeMenuOnOutside);
   }, []);
+
+  useEffect(() => {
+    if (!isCreateUserDialogOpen) {
+      setIsCreateUserRoleDropdownOpen(false);
+    }
+  }, [isCreateUserDialogOpen]);
 
   useEffect(() => {
     function handleEscape(event) {
@@ -1085,6 +869,33 @@ function App() {
     })));
   }
 
+  function resolveEvidenceMenuLayout(triggerElement) {
+    if (!triggerElement || typeof window === "undefined") {
+      return { placement: "up", maxHeight: 320 };
+    }
+    const triggerRect = triggerElement.getBoundingClientRect();
+    const viewportPadding = 12;
+    const spaceAbove = Math.max(120, triggerRect.top - viewportPadding);
+    const spaceBelow = Math.max(120, window.innerHeight - triggerRect.bottom - viewportPadding);
+    const minimumComfortableDownwardSpace = 220;
+    const placement = spaceBelow >= minimumComfortableDownwardSpace || spaceBelow > spaceAbove ? "down" : "up";
+    const availableSpace = placement === "down" ? spaceBelow : spaceAbove;
+    const maxHeight = Math.max(160, Math.min(420, Math.floor(availableSpace)));
+    return { placement, maxHeight };
+  }
+
+  function toggleEvidenceMenu(messageId, event) {
+    setOpenEvidenceMenuMessageId((current) => {
+      if (current === messageId) {
+        return null;
+      }
+      const { placement, maxHeight } = resolveEvidenceMenuLayout(event?.currentTarget);
+      setOpenEvidenceMenuPlacement(placement);
+      setOpenEvidenceMenuMaxHeight(maxHeight);
+      return messageId;
+    });
+  }
+
   function getFileExtension(filename) {
     const normalized = String(filename || "");
     const extension = normalized.includes(".")
@@ -1117,7 +928,7 @@ function App() {
 
     return {
       validFiles: selectedFiles,
-      notice: `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected.`,
+      notice: "",
     };
   }
 
@@ -1674,7 +1485,7 @@ function App() {
   }
 
   async function loadUnifiedDialogTab(tabId, { forceReload = false } = {}) {
-    const selectedTab = getMenuTabById(tabId);
+    const selectedTab = getDialogTabById(tabId);
     const existingPanel = dialogTabPanels[selectedTab.id];
     setActiveDialogTab(selectedTab.id);
     setDialogTabError("");
@@ -1684,7 +1495,6 @@ function App() {
     if (existingPanel && !forceReload) return;
 
     if (!isEmbeddingReady) return;
-    ensureAuthenticatedForPreferencesApi(`${selectedTab.label} preferences`);
     setIsSending(true);
     setIsDialogTabLoading(true);
 
@@ -1756,6 +1566,16 @@ function App() {
           command: "/filter",
           title: "Filter",
           content: null,
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else if (selectedTab.id === "help") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/help",
+          title: "Help",
+          content: buildWebUiHelpContent(),
           severity: null,
           responseType: null,
           configView: null,
@@ -2112,6 +1932,11 @@ function App() {
     event.target.value = "";
   }
 
+  function removeAttachedPromptFile(targetIndex) {
+    setAttachedPromptFiles((previous) => previous.filter((_, index) => index !== targetIndex));
+    setAttachmentNotice("");
+  }
+
   async function submitConfigChange(configName, rawValue) {
     const normalizedName = String(configName || "").trim().toLowerCase();
     const value = String(rawValue || "").trim();
@@ -2203,14 +2028,78 @@ function App() {
   const trashIconPath = "M9 3h6l1.4 2H20a1 1 0 1 1 0 2h-1v12a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V7H4a1 1 0 1 1 0-2h3.6zM7 7v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V7zm3 3a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1m4 0a1 1 0 0 1 1 1v6a1 1 0 1 1-2 0v-6a1 1 0 0 1 1-1";
   const eyeIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7z";
   const eyeOffIconPath = "M12 2v3a7 7 0 0 1 6.5 9.5l1.8 1.8A10 10 0 0 0 14 2.4V1zm0 20v-3a7 7 0 0 1-6.5-9.5l-1.8-1.8A10 10 0 0 0 10 21.6V23zm9.2-12.7A10 10 0 0 1 12 19v3l6-6h-3a7 7 0 0 0 6.2-6.7zM2.8 14.7A10 10 0 0 1 12 5V2L6 8h3a7 7 0 0 0-6.2 6.7zM3.7 2.3 2.3 3.7l18 18 1.4-1.4z";
+  const disableFileIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 2a8 8 0 0 1 6.2 13L7 5.8A8 8 0 0 1 12 4m-6.2 3L17 18.2A8 8 0 0 1 5.8 7";
+  const enableFileIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m-1.1 14.6L6.7 12.4l1.4-1.4 2.8 2.8 5.8-5.8 1.4 1.4z";
   const keepIconPath = "M9.6 16.6 5.4 12.4l1.4-1.4 2.8 2.8 7.6-7.6 1.4 1.4z";
   const downloadIconPath = "M12 3a1 1 0 0 1 1 1v8.6l2.3-2.3 1.4 1.4-4.7 4.7-4.7-4.7 1.4-1.4 2.3 2.3V4a1 1 0 0 1 1-1M4 17h16v4H4z";
   const dotsIconPath = "M6 12a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12m6 0a1.5 1.5 0 1 0 0 .01V12";
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
   const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
+  const unarchiveIconPath = "M3 8a2 2 0 0 1 2-2h5.2a2 2 0 0 1 1.4.6l1.1 1.1a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5zm7.8-4.8a2 2 0 0 1 1.4-.6h6.8v2h-6.8a2 2 0 0 1-1.4-.6L9.9 3h-4V1h4.4a2 2 0 0 1 1.4.6z";
+  const infoIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 4a1.25 1.25 0 1 1-1.25 1.25A1.25 1.25 0 0 1 12 6m1.5 12h-3v-2h1V11h-1V9h3v7h1z";
+  const questionIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 16a1.25 1.25 0 1 1 1.25-1.25A1.25 1.25 0 0 1 12 18m2.2-7.3-.9.7c-.7.5-1 1-1 1.8V14h-2v-.8c0-1.2.5-2.2 1.6-2.9l1-.7c.6-.4 1-.9 1-1.5a2 2 0 1 0-4 0H8a4 4 0 1 1 8 0c0 1.1-.6 2-1.8 2.9";
+  const rescueRingIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 2a8 8 0 0 1 5.3 2l-2 2A5.2 5.2 0 0 0 12 6.8zm6.7 3.3A8 8 0 0 1 20 12a8 8 0 0 1-1.3 4.7l-2-2A5.2 5.2 0 0 0 17.2 12c0-1-.3-2-.8-2.7zM12 17.2a5.2 5.2 0 0 0 3.3-1.2l2 2A8 8 0 0 1 12 20a8 8 0 0 1-5.3-2l2-2a5.2 5.2 0 0 0 3.3 1.2M7.3 14.7l-2 2A8 8 0 0 1 4 12c0-1.7.5-3.3 1.3-4.7l2 2a5.2 5.2 0 0 0-.5 2.7c0 1 .2 2 .5 2.7M12 9.8a2.2 2.2 0 1 1 0 4.4 2.2 2.2 0 0 1 0-4.4";
+  const keyIconPath = "M14.5 4a5.5 5.5 0 0 0-5.4 6.5L3 16.6V21h4.4l1.8-1.8V17h2.2l1.8-1.8a5.5 5.5 0 1 0 1.3-11.2m0 2a3.5 3.5 0 1 1-3.5 3.5A3.5 3.5 0 0 1 14.5 6";
+  const logoutIconPath = "M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3h-2v3H6V5h9v3h2V5a2 2 0 0 0-2-2m-1.6 12.4L12 14l2.6-2.6H8v-2h6.6L12 6.8l1.4-1.4L18.4 11z";
+  const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
+  const userIconPath = "M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
+  const xIconPath = "M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z";
+  const getDialogTabIcon = (tabId) => {
+    if (tabId === "personalization") return icon(userIconPath);
+    if (tabId === "settings") return icon("M4 7h10v2H4zm0 8h10v2H4zm12-9h4v4h-4zm0 8h4v4h-4z");
+    if (tabId === "filter") return icon(filterIconPath);
+    if (tabId === "info") return icon(infoIconPath);
+    if (tabId === "archive") return icon(archiveIconPath);
+    if (tabId === "help") return icon(questionIconPath);
+    return icon(settingsIconPath);
+  };
+  const renderAttachmentChip = ({ fileName, index, keyPrefix, removable = false, onRemove = null, className = "" }) => {
+    const name = String(fileName || "").trim() || `Attachment ${index + 1}`;
+    const extension = getFileExtensionFromName(name);
+    const iconColorClass = getAttachmentColorClass(name);
+    return React.createElement(
+      "div",
+      { className: `composer-attachment-chip ${className}`.trim(), key: `${keyPrefix}-${name}-${index}` },
+      removable
+        ? React.createElement(
+          "button",
+          {
+            type: "button",
+            className: "composer-attachment-remove",
+            onClick: () => onRemove?.(index),
+            "aria-label": `Remove ${name}`,
+            title: `Remove ${name}`,
+          },
+          "×"
+        )
+        : null,
+      React.createElement(
+        "div",
+        { className: `composer-attachment-icon ${iconColorClass}`, "aria-hidden": "true" },
+        React.createElement(
+          "svg",
+          { viewBox: "0 0 24 24", className: "composer-attachment-icon-svg" },
+          React.createElement("path", { d: sourceFileIconPath })
+        )
+      ),
+      React.createElement(
+        "div",
+        { className: "composer-attachment-meta" },
+        React.createElement("p", { className: "composer-attachment-name", title: name }, name),
+        React.createElement("p", { className: "composer-attachment-ext" }, extension ? extension.toUpperCase() : "FILE")
+      )
+    );
+  };
+  const renderComposerAttachmentChip = (file, index) => renderAttachmentChip({
+    fileName: file?.name,
+    index,
+    keyPrefix: "composer-attachment",
+    removable: true,
+    onRemove: removeAttachedPromptFile,
+  });
   const renderAssistantMarkdown = (text) => {
     const rendered = marked.parse(String(text || ""));
     const sanitized = DOMPurify.sanitize(rendered, { USE_PROFILES: { html: true } });
@@ -2242,6 +2131,8 @@ function App() {
   };
 
   const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
+  const isAuxiliaryDialogTab = activeDialogTab === "info" || activeDialogTab === "help";
+  const activeDialogMeta = getDialogTabById(activeDialogTab);
   const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
   const panelTitle = isUnifiedDialogOpen ? "Preferences" : getPanelTitle(panelData?.command);
   const archivedChatRows = Array.isArray(activeUnifiedPanel?.content?.rows) ? activeUnifiedPanel.content.rows : [];
@@ -2253,7 +2144,9 @@ function App() {
     ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : [];
   const parsedHelpPanel = activeModalPanel?.command === "/help" || activeModalPanel?.command === "?"
-    ? parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
+    ? (activeModalPanel?.content && typeof activeModalPanel.content === "object" && Array.isArray(activeModalPanel.content.sections)
+      ? activeModalPanel.content
+      : parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || "")))
     : null;
   const configSections = activeModalPanel?.command === "/config" && activeModalPanel.configView
     ? activeModalPanel.configView.sections
@@ -2266,6 +2159,12 @@ function App() {
     .map((entry) => ({ ...entry, section: section.label })));
   const retrieverStatus = normalizeStatusBadge(statusData?.services?.retriever?.role || statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
+  const serviceStatuses = {
+    backend: normalizeStatusBadge(statusData?.services?.backend?.role || "active"),
+    retriever: retrieverStatus,
+    embedder: embedderStatus,
+    ocrScanner: normalizeStatusBadge(statusData?.services?.ocrScanner?.status || statusData?.services?.ocrScanner?.role || "disconnected"),
+  };
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
   const defaultFileTag = String(filesData?.defaultTag || DEFAULT_FILE_TAG_LABEL).trim().toLowerCase() || DEFAULT_FILE_TAG_LABEL;
   const tagFilterRows = useMemo(() => {
@@ -2316,6 +2215,7 @@ function App() {
       extension: file.extension,
       embedded: Boolean(file.embedded),
       hash: file.hash,
+      embeddedAt: managed?.embeddedAt || null,
       updatedAt: managed?.updatedAt || file.lastModified || null,
       canDelete: isAdminUser || Boolean(managed?.canDelete),
       canToggle: Boolean(managed?.canToggle),
@@ -2334,17 +2234,40 @@ function App() {
       extension: managed.extension || getFileExtension(managed.originalName),
       embedded: Boolean(managed.embedded),
       hash: managed.hash,
+      embeddedAt: managed.embeddedAt || null,
       updatedAt: managed.updatedAt || managed.uploadedAt || null,
       canDelete: Boolean(managed.canDelete),
       canToggle: Boolean(managed.canToggle),
       lastError: managed.lastError || null,
       tags: Array.isArray(managed.tags) ? managed.tags : [],
     }));
-  const dbRows = retrieverRows.concat(managedOnlyRows).sort((left, right) => {
-    const a = Date.parse(String(left.updatedAt || 0));
-    const b = Date.parse(String(right.updatedAt || 0));
-    return b - a;
-  });
+  const parseSortDate = (value) => {
+    const parsed = Date.parse(String(value || ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const sortRowsByEmbeddingDateDesc = (left, right) => {
+    const leftEmbeddedAt = parseSortDate(left.embeddedAt);
+    const rightEmbeddedAt = parseSortDate(right.embeddedAt);
+    if (rightEmbeddedAt !== leftEmbeddedAt) {
+      return rightEmbeddedAt - leftEmbeddedAt;
+    }
+
+    const leftUpdatedAt = parseSortDate(left.updatedAt);
+    const rightUpdatedAt = parseSortDate(right.updatedAt);
+    if (rightUpdatedAt !== leftUpdatedAt) {
+      return rightUpdatedAt - leftUpdatedAt;
+    }
+
+    return String(left.path || "").localeCompare(String(right.path || ""));
+  };
+  const allDbRows = retrieverRows.concat(managedOnlyRows);
+  const userLibraryRows = allDbRows
+    .filter((row) => String(row.path || "").startsWith("_library/"))
+    .sort(sortRowsByEmbeddingDateDesc);
+  const rootLibraryRows = allDbRows
+    .filter((row) => !String(row.path || "").startsWith("_library/"))
+    .sort(sortRowsByEmbeddingDateDesc);
+  const dbRows = userLibraryRows.concat(rootLibraryRows);
   const libraryRows = pendingLibraryUploads.concat(dbRows);
   const adminUserRows = Array.isArray(adminUsersData)
     ? [...adminUsersData].sort((left, right) => String(left?.username || "").localeCompare(String(right?.username || "")))
@@ -2352,15 +2275,6 @@ function App() {
   const libraryTotalChunks = libraryFiles.reduce((sum, file) => sum + (Number(file.chunkCount) || 0), 0);
   const selectedAssistantMode = getAssistantModeMeta(currentAssistantMode);
   const isNavigationLocked = isSending;
-  const sendButtonLabel = isSending
-    ? activeChainStage === "searching"
-      ? "Searching..."
-      : activeChainStage === "drafting"
-      ? "Drafting..."
-      : activeChainStage === "refining"
-        ? "Refining..."
-        : "Thinking..."
-    : "Send";
 
   function openLibraryPage() {
     setIsMenuOpen(false);
@@ -2411,7 +2325,19 @@ function App() {
 
   async function switchChat(chatId) {
     const selectedId = String(chatId || "").trim();
-    if (!selectedId || selectedId === activeChatId) {
+    if (!selectedId) {
+      return;
+    }
+    if (selectedId === activeChatId) {
+      setPanelData(null);
+      setIsMenuOpen(false);
+      setIsAssistantModeMenuOpen(false);
+      if (activeView !== "chat") {
+        window.location.hash = "";
+        await loadMessagesFromDb(selectedId).catch(() => {
+          setMessages([]);
+        });
+      }
       return;
     }
     if (volatileChat && selectedId !== volatileChat.id) {
@@ -2447,7 +2373,6 @@ function App() {
   }
 
   async function downloadChat(chat) {
-    ensureAuthenticatedForPreferencesApi("Archive preferences");
     if (!chat?.id) return;
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
@@ -2953,17 +2878,6 @@ function App() {
           icon(plusChatIconPath),
           React.createElement("span", null, "New chat")
         ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: `side-nav-item${activeView === "chat" ? " active" : ""}`,
-            onClick: openChatPage,
-            disabled: isNavigationLocked,
-          },
-          icon(chatIconPath),
-          React.createElement("span", null, "Chat")
-        ),
         isAdminUser
           ? React.createElement(
             "button",
@@ -2998,17 +2912,6 @@ function App() {
           },
           icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
           React.createElement("span", null, "Personalization")
-        ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && (activeDialogTab === "general" || activeDialogTab === "settings")) ? " active" : ""}`,
-            onClick: openSettingsDialog,
-            disabled: isNavigationLocked || !isEmbeddingReady,
-          },
-          icon(settingsIconPath),
-          React.createElement("span", null, "Settings")
         )
       ),
       React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
@@ -3196,10 +3099,56 @@ function App() {
                     type: "button",
                     className: "chat-item-actions-option",
                     role: "menuitem",
+                    onClick: openInfoFromUserMenu,
+                  },
+                  icon(infoIconPath),
+                  React.createElement("span", null, "Info")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openHelpFromUserMenu,
+                  },
+                  icon(rescueRingIconPath),
+                  React.createElement("span", null, "Help")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openPreferencesFromUserMenu,
+                  },
+                  icon(settingsIconPath),
+                  React.createElement("span", null, "Preferences")
+                )
+              ),
+              React.createElement("li", { className: "side-nav-user-menu-divider", role: "separator", "aria-hidden": "true" }),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
                     onClick: openChangePasswordFlow,
                   },
-                  icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
-                  React.createElement("span", null, "Change password")
+                  icon(keyIconPath),
+                  React.createElement("span", null, "Change Password")
                 )
               ),
               React.createElement(
@@ -3213,7 +3162,7 @@ function App() {
                     role: "menuitem",
                     onClick: handleLogout,
                   },
-                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
+                  icon(logoutIconPath),
                   React.createElement("span", null, "Logout")
                 )
               )
@@ -3232,11 +3181,25 @@ function App() {
           React.createElement(
             "section",
             { className: "info-group-card library-summary-card" },
-            React.createElement("h4", null, "Library summary"),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "content path"), React.createElement("strong", null, filesData?.contentPath || "n/a")),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "files"), React.createElement("strong", null, String(filesData?.totalFiles ?? 0))),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "embedded files"), React.createElement("strong", null, String(filesData?.embeddedFiles ?? 0))),
-            React.createElement("div", { className: "info-row" }, React.createElement("span", null, "total chunks"), React.createElement("strong", null, String(libraryTotalChunks)))
+            React.createElement("h4", null, "Knowledge Base"),
+            React.createElement(
+              "div",
+              { className: "library-summary-table", role: "table", "aria-label": "Library summary" },
+              React.createElement(
+                "div",
+                { className: "library-summary-head", role: "row" },
+                React.createElement("span", { role: "columnheader" }, "files"),
+                React.createElement("span", { role: "columnheader" }, "embedded files"),
+                React.createElement("span", { role: "columnheader" }, "chunks")
+              ),
+              React.createElement(
+                "div",
+                { className: "library-summary-row", role: "row" },
+                React.createElement("strong", { role: "cell" }, String(filesData?.totalFiles ?? 0)),
+                React.createElement("strong", { role: "cell" }, String(filesData?.embeddedFiles ?? 0)),
+                React.createElement("strong", { role: "cell" }, String(libraryTotalChunks))
+              )
+            )
           ),
           React.createElement(
             "section",
@@ -3244,7 +3207,148 @@ function App() {
             React.createElement(
               "div",
               { className: "library-table-header" },
-              React.createElement("h4", null, "Embeddable files"),
+              React.createElement("h4", null, "Files")
+            ),
+            React.createElement(
+              "div",
+              { className: "library-table", role: "table", "aria-label": "Library files" },
+              React.createElement(
+                "div",
+                { className: "library-table-head", role: "row" },
+                React.createElement("span", null, "File"),
+                React.createElement("span", null, "Status"),
+                React.createElement("span", null, "Tags"),
+                React.createElement("span", null, "Size"),
+                React.createElement("span", null, "Chunks"),
+                React.createElement("span", null, "Extension"),
+                React.createElement("span", null, "Embedded"),
+                React.createElement("span", null, "Updated"),
+                React.createElement("span", null, "Action")
+              ),
+              React.createElement(
+                "div",
+                { className: "library-table-body", role: "rowgroup" },
+                ...libraryRows.map((file) => React.createElement(
+                  "div",
+                  {
+                    key: `${file.path}-${file.uploadStatus}-${file.updatedAt || "n/a"}-${file.isVolatile ? "volatile" : "db"}`,
+                    className: "library-table-row",
+                    role: "row",
+                  },
+                  React.createElement("strong", { className: "library-path" }, normalizeLibraryPathDisplay(file.path)),
+                  React.createElement(
+                    "span",
+                    { className: "library-status-cell" },
+                    (() => {
+                      const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
+                      const isDisabled = file.enabled === false;
+                      const isLoadingStatus = !isDisabled && ["uploading", "uploaded", "embedding", "discovered", "removing", "deleted"].includes(normalizedStatus);
+                      const isErrorStatus = normalizedStatus === "error";
+                      const statusClassName = isDisabled
+                        ? "pending"
+                        : isErrorStatus
+                          ? "error"
+                          : isLoadingStatus
+                            ? "pending"
+                            : "active";
+                      return React.createElement(
+                        "span",
+                        {
+                          className: `status-badge status-badge-icon ${statusClassName}${isLoadingStatus ? " with-spinner" : ""}`,
+                          "aria-label": isDisabled ? "disabled" : (normalizedStatus || "ready"),
+                        },
+                        isLoadingStatus
+                          ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                          : icon(isDisabled ? disableFileIconPath : (isErrorStatus ? xIconPath : enableFileIconPath))
+                      );
+                    })(),
+                    file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
+                  ),
+                  React.createElement(
+                    "span",
+                    { className: "library-tags-cell" },
+                    Array.isArray(file.tags) && file.tags.length > 0
+                      ? file.tags.map((tag) => React.createElement(
+                        "span",
+                        { key: `${file.path}-tag-${tag}`, className: "library-tag-line" },
+                        tag
+                      ))
+                      : React.createElement("span", { className: "library-tag-line muted" }, "—")
+                  ),
+                  React.createElement("span", null, formatBytes(file.sizeBytes)),
+                  React.createElement("span", null, String(file.chunkCount ?? "0")),
+                  React.createElement(
+                    "span",
+                    { className: `library-extension-chip ${getAttachmentColorClass(file.path || file.extension || "")}` },
+                    (file.extension || "n/a").toUpperCase()
+                  ),
+                  (() => {
+                    const normalizedStatus = String(file.uploadStatus || "").toLowerCase();
+                    const embeddingInProgress = file.enabled !== false
+                      && !file.embedded
+                      && ["uploading", "uploaded", "embedding", "discovered"].includes(normalizedStatus);
+                    const removingInProgress = file.enabled !== false
+                      && !file.embedded
+                      && file.uploadStatus === "removing";
+                    const showProgress = embeddingInProgress || removingInProgress;
+                    const embeddedClassName = file.embedded
+                      ? "active"
+                      : file.uploadStatus === "error"
+                        ? "error"
+                        : "pending";
+                    return React.createElement(
+                      "span",
+                      {
+                        className: `status-badge status-badge-icon ${embeddedClassName} ${showProgress ? "with-spinner" : ""}`,
+                        "aria-label": showProgress ? "embedding" : (file.embedded ? "embedded" : "not embedded"),
+                      },
+                      showProgress
+                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
+                        : icon(file.uploadStatus === "error" && !file.embedded ? xIconPath : (file.embedded ? enableFileIconPath : disableFileIconPath))
+                    );
+                  })(),
+                  (() => {
+                    const updated = formatLibraryUpdatedAt(file.updatedAt);
+                    return React.createElement(
+                      "span",
+                      { className: "library-updated-cell" },
+                      React.createElement("span", null, updated.date),
+                      updated.time ? React.createElement("span", null, updated.time) : null
+                    );
+                  })(),
+                  React.createElement(
+                    "div",
+                    { className: "library-row-actions" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "library-toggle-button",
+                        "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
+                        onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
+                        disabled: !file.canToggle,
+                      },
+                      icon(file.enabled === false ? enableFileIconPath : disableFileIconPath)
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "library-delete-button",
+                        "aria-label": `Delete ${file.path}`,
+                        onClick: () => setDeleteConfirmFile(file),
+                        disabled: !file.canDelete,
+                      },
+                      icon(trashIconPath)
+                    )
+                  )
+                ))
+              )
+            ),
+            libraryNotice ? React.createElement("p", { className: "library-notice library-notice-below-table" }, libraryNotice) : null,
+            React.createElement(
+              "div",
+              { className: "library-table-footer" },
               React.createElement(
                 "button",
                 {
@@ -3265,117 +3369,6 @@ function App() {
                 "aria-hidden": "true",
                 tabIndex: -1,
               })
-            ),
-            libraryNotice ? React.createElement("p", { className: "library-notice" }, libraryNotice) : null,
-            React.createElement(
-              "div",
-              { className: "library-table", role: "table", "aria-label": "Library files" },
-              React.createElement(
-                "div",
-                { className: "library-table-head", role: "row" },
-                React.createElement("span", null, "File"),
-                React.createElement("span", null, "Status"),
-                React.createElement("span", null, "Tags"),
-                React.createElement("span", null, "Size"),
-                React.createElement("span", null, "Chunks"),
-                React.createElement("span", null, "Extension"),
-                React.createElement("span", null, "Embedded"),
-                React.createElement("span", null, "Updated"),
-                React.createElement("span", null, "Action")
-              ),
-              ...libraryRows.map((file) => React.createElement(
-                "div",
-                {
-                  key: `${file.path}-${file.uploadStatus}-${file.updatedAt || "n/a"}-${file.isVolatile ? "volatile" : "db"}`,
-                  className: "library-table-row",
-                  role: "row",
-                },
-                React.createElement("strong", { className: "library-path" }, file.path),
-                React.createElement(
-                  "span",
-                  { className: "library-status-cell" },
-                  React.createElement(
-                    "span",
-                    {
-                      className: `status-badge ${
-                        file.enabled === false
-                          ? "pending"
-                          : ["ready", "embedded", "discovered"].includes(String(file.uploadStatus))
-                          ? "active"
-                          : file.uploadStatus === "error"
-                            ? "error"
-                            : "pending"
-                      }`,
-                    },
-                    file.enabled === false ? "disabled" : (file.uploadStatus || "unknown")
-                  ),
-                  file.lastError ? React.createElement("small", { className: "library-row-error" }, file.lastError) : null
-                ),
-                React.createElement(
-                  "span",
-                  { className: "library-tags-cell" },
-                  Array.isArray(file.tags) && file.tags.length > 0
-                    ? file.tags.map((tag) => React.createElement(
-                      "span",
-                      { key: `${file.path}-tag-${tag}`, className: "library-tag-line" },
-                      tag
-                    ))
-                    : React.createElement("span", { className: "library-tag-line muted" }, "—")
-                ),
-                React.createElement("span", null, formatBytes(file.sizeBytes)),
-                React.createElement("span", null, String(file.chunkCount ?? "0")),
-                React.createElement("span", null, file.extension || "n/a"),
-                (() => {
-                  const embeddingInProgress = ["uploading", "uploaded", "embedding"].includes(String(file.uploadStatus));
-                  const removingInProgress = file.uploadStatus === "removing"
-                    || (file.uploadStatus === "deleted" && Boolean(file.embedded));
-                  const showProgress = embeddingInProgress || removingInProgress;
-                  const embeddedLabel = embeddingInProgress
-                    ? "embedding"
-                    : removingInProgress
-                      ? "removing"
-                      : file.embedded ? "yes" : "no";
-                  return React.createElement(
-                    "span",
-                    null,
-                    React.createElement(
-                      "span",
-                      { className: `status-badge ${file.embedded ? "active" : "pending"} ${showProgress ? "with-spinner" : ""}` },
-                      showProgress
-                        ? React.createElement("span", { className: "spinner spinner-inline", "aria-hidden": "true" })
-                        : null,
-                      embeddedLabel
-                    )
-                  );
-                })(),
-                React.createElement("span", null, file.updatedAt ? new Date(file.updatedAt).toISOString() : "n/a"),
-                React.createElement(
-                  "div",
-                  { className: "library-row-actions" },
-                  React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "library-toggle-button",
-                      "aria-label": file.enabled === false ? `Activate ${file.path}` : `Disable ${file.path}`,
-                      onClick: () => toggleLibraryFile(file, file.enabled === false ? "activate" : "disable"),
-                      disabled: !file.canToggle,
-                    },
-                    icon(file.enabled === false ? eyeIconPath : eyeOffIconPath)
-                  ),
-                  React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "library-delete-button",
-                      "aria-label": `Delete ${file.path}`,
-                      onClick: () => setDeleteConfirmFile(file),
-                      disabled: !file.canDelete,
-                    },
-                    icon(trashIconPath)
-                  )
-                )
-              ))
             )
           )
         )
@@ -3385,32 +3378,22 @@ function App() {
             { className: "chat-column library-column" },
             React.createElement(
               "section",
-              { className: "info-group-card library-table-card" },
+              { className: "info-group-card library-table-card admin-users-card" },
               React.createElement(
                 "div",
                 { className: "library-table-header" },
-                React.createElement("h4", null, "Users"),
-                React.createElement(
-                  "button",
-                  {
-                    type: "button",
-                    className: "restart-button library-upload-button",
-                    onClick: openCreateUserDialog,
-                  },
-                  icon(plusChatIconPath),
-                  "New User"
-                )
+                React.createElement("h4", null, "Users")
               ),
               adminUsersNotice ? React.createElement("p", { className: "library-notice" }, adminUsersNotice) : null,
               React.createElement(
                 "div",
-                { className: "library-table", role: "table", "aria-label": "Users" },
+                { className: "library-table admin-users-table", role: "table", "aria-label": "Users" },
                 React.createElement(
                   "div",
                   { className: "library-table-head", role: "row" },
                   React.createElement("span", null, "Username"),
-                  React.createElement("span", null, "is_active"),
-                  React.createElement("span", null, "require_changepw"),
+                  React.createElement("span", null, "ACTIVE"),
+                  React.createElement("span", null, "CHANGE-PW"),
                   React.createElement("span", null, "Action")
                 ),
                 ...(adminUserRows.length === 0
@@ -3457,9 +3440,23 @@ function App() {
                           },
                           icon(trashIconPath)
                         )
-                      )
-                    );
+                        )
+                      );
                   }))
+              ),
+              React.createElement(
+                "div",
+                { className: "admin-user-actions" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "admin-new-user-button",
+                    onClick: openCreateUserDialog,
+                  },
+                  icon(userIconPath),
+                  "New User"
+                )
               )
             )
           )
@@ -3499,8 +3496,6 @@ function App() {
                   React.createElement("pre", null, message.text)
                 )
                 : message.role === "assistant"
-                  && isRagMode
-                  && message.retrieval
                   && message.interaction?.type !== "weak_confirmation"
                   && message.evidenceSeverity !== "source_attached"
                   && !(message.upload?.uploadedCount > 0)
@@ -3516,48 +3511,73 @@ function App() {
                         : renderAssistantMarkdown(message.text)
                     ),
                     React.createElement(
-                      "details",
-                      { className: "assistant-evidence-block" },
-                      React.createElement("summary", null, React.createElement("small", null, "Evidence details")),
+                      "div",
+                      { className: "assistant-evidence-wrap" },
                       React.createElement(
-                        "div",
-                        { className: "assistant-evidence-content" },
-                        React.createElement(
-                          "p",
-                          { className: "assistant-evidence-summary" },
-                          `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval.matches?.length || 0} • Cosine limit: ${message.retrieval.cosineLimit ?? "n/a"}`
-                        ),
-                        Array.isArray(message.retrieval.matches) && message.retrieval.matches.length > 0
-                          ? React.createElement(
-                            "ul",
-                            { className: "assistant-evidence-list" },
-                            ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
-                              "li",
-                              { key: `${message.id}-${match.rank}-${match.source}` },
-                              React.createElement(
-                                "div",
-                                { className: "assistant-evidence-meta" },
-                                React.createElement("strong", null, `#${match.rank}`),
+                        "button",
+                        {
+                          type: "button",
+                          className: `assistant-evidence-trigger${openEvidenceMenuMessageId === message.id ? " active" : ""}`,
+                          "aria-expanded": openEvidenceMenuMessageId === message.id,
+                          "aria-haspopup": "menu",
+                          onClick: (event) => toggleEvidenceMenu(message.id, event),
+                        },
+                        React.createElement("span", { className: "assistant-evidence-trigger-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                        React.createElement("small", null, "Sources")
+                      ),
+                      openEvidenceMenuMessageId === message.id
+                        ? React.createElement(
+                          "section",
+                          {
+                            className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`,
+                            role: "menu",
+                            "aria-label": "Evidence details",
+                            style: { maxHeight: `${openEvidenceMenuMaxHeight}px` },
+                          },
+                          React.createElement("h4", { className: "assistant-evidence-heading" }, "Sources"),
+                          React.createElement(
+                            "p",
+                            { className: "assistant-evidence-summary" },
+                            `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval?.matches?.length || 0} • Cosine limit: ${message.retrieval?.cosineLimit ?? "n/a"}`
+                          ),
+                          Array.isArray(message.retrieval?.matches) && message.retrieval.matches.length > 0
+                            ? React.createElement(
+                              "ul",
+                              { className: "assistant-evidence-list" },
+                              ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
+                                "li",
+                                { key: `${message.id}-${match.rank}-${match.source}` },
                                 React.createElement(
-                                  "span",
-                                  { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
-                                  `score: ${Number.isFinite(match.score) ? match.score.toFixed(3) : "n/a"}`
+                                  "div",
+                                  { className: "assistant-evidence-meta" },
+                                  React.createElement("span", { className: "assistant-evidence-file-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                                  React.createElement(
+                                    "span",
+                                    { className: "assistant-evidence-file-name" },
+                                    String(match.source || "unknown source").replace(/^_library\//, "")
+                                  ),
                                 ),
-                                React.createElement("span", null, match.source || "unknown source")
-                              ),
-                              Array.isArray(match.tags) && match.tags.length > 0
-                                ? React.createElement(
+                                React.createElement(
                                   "p",
-                                  { className: "assistant-evidence-tags" },
-                                  `tags: ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
-                                )
-                                : null,
-                              match.title ? React.createElement("div", { className: "assistant-evidence-title" }, match.title) : null,
-                              match.preview ? React.createElement("p", null, match.preview) : null
-                            ))
-                          )
-                          : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
-                      )
+                                  { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
+                                  `Score ${formatScorePercent(match.score)}`
+                                ),
+                                match.title ? React.createElement("p", { className: "assistant-evidence-title" }, match.title) : null,
+                                Array.isArray(match.tags) && match.tags.length > 0
+                                  ? React.createElement(
+                                    "p",
+                                    { className: "assistant-evidence-tags" },
+                                    `Tags ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
+                                  )
+                                  : null,
+                                Array.isArray(match.tags) && match.tags.length > 0
+                                  ? null
+                                  : React.createElement("p", { className: "assistant-evidence-tags assistant-evidence-tags-empty" }, "Tags none")
+                              ))
+                            )
+                            : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                        )
+                        : null
                     )
                   )
                   : message.role === "assistant"
@@ -3567,25 +3587,25 @@ function App() {
                         : renderAssistantMarkdown(message.text)
                     )
                     : React.createElement(
-                      "div",
-                      { className: "user-message-content" },
-                      React.createElement("p", null, message.text),
+                      React.Fragment,
+                      null,
                       Array.isArray(message.attachedFiles) && message.attachedFiles.length > 0
                         ? React.createElement(
                           "div",
-                          { className: "user-attachment-box" },
-                          React.createElement(
-                            "small",
-                            { className: "user-attachment-label" },
-                            `Attached file${message.attachedFiles.length > 1 ? "s" : ""}`
-                          ),
-                          React.createElement(
-                            "ul",
-                            { className: "user-attachment-list" },
-                            ...message.attachedFiles.map((fileName) => React.createElement("li", { key: `${message.id}-${fileName}` }, fileName))
-                          )
+                          { className: "composer-attachment-chip-list user-message-attachment-chip-list" },
+                          ...message.attachedFiles.map((fileName, fileIndex) => renderAttachmentChip({
+                            fileName,
+                            index: fileIndex,
+                            keyPrefix: `message-attachment-${message.id}`,
+                            className: "user-message-attachment-chip",
+                          }))
                         )
-                        : null
+                        : null,
+                      React.createElement(
+                        "div",
+                        { className: "user-message-content" },
+                        React.createElement("p", null, message.text),
+                      )
                     )
               );
             })
@@ -3606,57 +3626,60 @@ function App() {
               "aria-hidden": "true",
               tabIndex: -1,
             }),
+            attachedPromptFiles.length > 0
+              ? React.createElement(
+                "div",
+                { className: "composer-attachment-chip-list" },
+                ...attachedPromptFiles.map((file, index) => renderComposerAttachmentChip(file, index))
+              )
+              : null,
             React.createElement(
-              "button",
-              {
-                className: "composer-attach-button",
-                type: "button",
-                onClick: openPromptFilePicker,
-                disabled: isSending || !isEmbeddingReady,
-                "aria-label": "Attach files",
-                "data-testid": "composer-attach-button",
-                title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
-              },
-              icon("M8 7.5v8a4 4 0 0 0 8 0v-9a2.5 2.5 0 0 0-5 0V15a1 1 0 0 0 2 0V8.5h1.8V15a2.8 2.8 0 0 1-5.6 0V6.5a4.3 4.3 0 1 1 8.6 0v9a5.8 5.8 0 0 1-11.6 0v-8z")
-            ),
-            React.createElement("textarea", {
-              ref: composerInputRef,
-              value: inputValue,
-              onChange: (event) => {
-                setInputValue(event.target.value);
-                resizeComposerInput(event.target);
-              },
-              onInput: (event) => resizeComposerInput(event.target),
-              onKeyDown: (event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  if (inputValue.trim() && !isSending && isEmbeddingReady) {
-                    void sendRawPrompt(inputValue, attachedPromptFiles);
+              "div",
+              { className: "composer-entry-row" },
+              React.createElement(
+                "button",
+                {
+                  className: "composer-attach-button",
+                  type: "button",
+                  onClick: openPromptFilePicker,
+                  disabled: isSending || !isEmbeddingReady,
+                  "aria-label": "Attach files",
+                  "data-testid": "composer-attach-button",
+                  title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
+                },
+                icon("M12 5a1 1 0 0 1 1 1v5h5a1 1 0 1 1 0 2h-5v5a1 1 0 1 1-2 0v-5H6a1 1 0 1 1 0-2h5V6a1 1 0 0 1 1-1")
+              ),
+              React.createElement("textarea", {
+                ref: composerInputRef,
+                value: inputValue,
+                onChange: (event) => {
+                  setInputValue(event.target.value);
+                  resizeComposerInput(event.target);
+                },
+                onInput: (event) => resizeComposerInput(event.target),
+                onKeyDown: (event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (inputValue.trim() && !isSending && isEmbeddingReady) {
+                      void sendRawPrompt(inputValue, attachedPromptFiles);
+                    }
                   }
-                }
-              },
-              rows: 1,
-              placeholder: "Ask anything about your knowledge base...",
-              disabled: isSending || !isEmbeddingReady,
-            })
+                },
+                rows: 1,
+                placeholder: "Ask anything about your knowledge base...",
+                disabled: isSending || !isEmbeddingReady,
+              })
+            )
           ),
           React.createElement(
             "button",
             { className: "send", type: "submit", disabled: isSending || !isEmbeddingReady || !inputValue.trim() },
-            icon("M2 21l20-9L2 3v7l14 2-14 2z"),
-            React.createElement("span", null, sendButtonLabel)
+            icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
           ),
-          attachedPromptFiles.length > 0
-            ? React.createElement(
-              "p",
-              { className: "composer-attachment-list" },
-              `Attached: ${attachedPromptFiles.map((file) => file.name).join(", ")}`
-            )
-            : null,
           attachmentNotice
             ? React.createElement(
               "p",
-              { className: `composer-attachment-notice${attachedPromptFiles.length > 0 ? " valid" : " invalid"}` },
+              { className: "composer-attachment-notice invalid" },
               attachmentNotice
             )
             : null
@@ -3842,22 +3865,17 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete this file?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path)
+            "Are you sure you want to delete this file?"
           ),
+          renderAttachmentChip({
+            fileName: deleteConfirmFile.path,
+            index: 0,
+            keyPrefix: "delete-file",
+            className: "dialog-delete-chip",
+          }),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "library-delete-confirm",
-                onClick: confirmDeleteLibraryFile,
-              },
-              icon(trashIconPath),
-              "Delete"
-            ),
             React.createElement(
               "button",
               {
@@ -3867,6 +3885,16 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteLibraryFile,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )
@@ -3889,36 +3917,88 @@ function App() {
             onClick: (event) => event.stopPropagation(),
           },
           React.createElement("h4", null, "New User"),
-          React.createElement("input", {
-            type: "text",
-            className: "library-upload-tags-input",
-            placeholder: "username",
-            value: newUserDraft.username,
-            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
-            disabled: isCreateUserSubmitting,
-          }),
-          React.createElement("input", {
-            type: "text",
-            className: "library-upload-tags-input",
-            placeholder: "display name",
-            value: newUserDraft.displayName,
-            onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
-            disabled: isCreateUserSubmitting,
-          }),
           React.createElement(
             "label",
-            { className: "setting-input-wrap" },
-            React.createElement("span", { className: "setting-input-label" }, "Role"),
+            { className: "create-user-field-wrap" },
+            React.createElement("span", { className: "create-user-field-label" }, "Username"),
+            React.createElement("input", {
+              type: "text",
+              className: "library-upload-tags-input",
+              placeholder: "username",
+              value: newUserDraft.username,
+              onChange: (event) => setNewUserDraft((previous) => ({ ...previous, username: event.target.value })),
+              disabled: isCreateUserSubmitting,
+            })
+          ),
+          React.createElement(
+            "label",
+            { className: "create-user-field-wrap" },
+            React.createElement("span", { className: "create-user-field-label" }, "Display Name"),
+            React.createElement("input", {
+              type: "text",
+              className: "library-upload-tags-input",
+              placeholder: "display name",
+              value: newUserDraft.displayName,
+              onChange: (event) => setNewUserDraft((previous) => ({ ...previous, displayName: event.target.value })),
+              disabled: isCreateUserSubmitting,
+            })
+          ),
+          React.createElement(
+            "label",
+            { className: "create-user-field-wrap" },
+            React.createElement("span", { className: "create-user-field-label" }, "Role"),
             React.createElement(
-              "select",
+              "details",
               {
-                className: "setting-input",
-                value: newUserDraft.role,
-                onChange: (event) => setNewUserDraft((previous) => ({ ...previous, role: event.target.value })),
-                disabled: isCreateUserSubmitting,
+                className: "general-dropdown create-user-role-dropdown",
+                open: isCreateUserRoleDropdownOpen,
+                ref: createUserRoleDropdownRef,
               },
-              React.createElement("option", { value: "users" }, "user"),
-              React.createElement("option", { value: "admin" }, "admin")
+              React.createElement(
+                "summary",
+                {
+                  className: "general-dropdown-trigger",
+                  onClick: (event) => {
+                    event.preventDefault();
+                    if (isCreateUserSubmitting) return;
+                    setIsCreateUserRoleDropdownOpen((previous) => !previous);
+                  },
+                },
+                React.createElement("span", { className: "general-dropdown-value" }, newUserDraft.role === "admin" ? "admin" : "user"),
+                React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, icon(chevronDownIconPath))
+              ),
+              React.createElement(
+                "div",
+                { className: "general-dropdown-menu", role: "menu", "aria-label": "Select role" },
+                ...[
+                  { value: "users", label: "user" },
+                  { value: "admin", label: "admin" },
+                ].map((roleOption) => {
+                  const active = newUserDraft.role === roleOption.value;
+                  return React.createElement(
+                    "button",
+                    {
+                      key: roleOption.value,
+                      type: "button",
+                      className: `general-dropdown-option${active ? " active" : ""}`,
+                      role: "menuitemradio",
+                      "aria-checked": active ? "true" : "false",
+                      disabled: isCreateUserSubmitting,
+                      onClick: (event) => {
+                        event.preventDefault();
+                        setNewUserDraft((previous) => ({ ...previous, role: roleOption.value }));
+                        setIsCreateUserRoleDropdownOpen(false);
+                      },
+                    },
+                    React.createElement(
+                      "span",
+                      { className: "general-dropdown-option-copy" },
+                      React.createElement("strong", null, roleOption.label)
+                    ),
+                    active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, icon(checkIconPath)) : null
+                  );
+                })
+              )
             )
           ),
           React.createElement(
@@ -3969,22 +4049,26 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you really want to delete this user?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmUser.username)
+            "Are you sure you really want to delete this user?"
+          ),
+          React.createElement(
+            "div",
+            { className: "side-nav-user delete-user-preview" },
+            React.createElement(
+              "span",
+              { className: "side-nav-avatar-placeholder", "aria-hidden": "true" },
+              String(deleteConfirmUser?.username || "?").slice(0, 1).toUpperCase()
+            ),
+            React.createElement(
+              "span",
+              { className: "side-nav-user-meta" },
+              React.createElement("strong", null, deleteConfirmUser?.displayName || deleteConfirmUser?.username || "Unknown user"),
+              React.createElement("small", null, deleteConfirmUser?.username || "unknown")
+            )
           ),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "library-delete-confirm",
-                onClick: confirmDeleteAdminUser,
-              },
-              icon(trashIconPath),
-              "Delete"
-            ),
             React.createElement(
               "button",
               {
@@ -3994,6 +4078,16 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteAdminUser,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )
@@ -4082,8 +4176,26 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete this chat?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmChat.name)
+            "Are you sure you want to delete this chat?"
+          ),
+          React.createElement(
+            "div",
+            { className: "composer-attachment-chip dialog-delete-chip dialog-delete-chat-chip" },
+            React.createElement(
+              "span",
+              { className: "composer-attachment-icon is-black", "aria-hidden": "true" },
+              React.createElement(
+                "svg",
+                { viewBox: "0 0 24 24", className: "composer-attachment-icon-svg" },
+                React.createElement("path", { d: chatIconPath })
+              )
+            ),
+            React.createElement(
+              "span",
+              { className: "composer-attachment-meta" },
+              React.createElement("p", { className: "composer-attachment-name" }, deleteConfirmChat.name),
+              React.createElement("p", { className: "composer-attachment-ext" }, "chat")
+            )
           ),
           React.createElement(
             "div",
@@ -4161,6 +4273,7 @@ function App() {
               restartConfigRows: [],
               retrieverStatus,
               embedderStatus,
+              serviceStatuses,
               isSending,
               isEmbeddingReady,
               disabledAssistantModes: disabledAssistantModesList,
@@ -4204,174 +4317,251 @@ function App() {
         React.createElement(
           "section",
           {
-            className: "panel-modal panel-modal-with-tabs",
+            className: `panel-modal${isAuxiliaryDialogTab ? "" : " panel-modal-with-tabs"}`,
             role: "dialog",
             "aria-modal": "true",
-            "aria-label": "Preferences dialog",
+            "aria-label": isAuxiliaryDialogTab ? `${activeDialogMeta.label} dialog` : "Preferences dialog",
             onClick: (event) => event.stopPropagation(),
           },
-          React.createElement(
-            "div",
-            { className: "panel-modal-head" },
-            React.createElement("strong", null, "Preferences"),
-            React.createElement(
-              "div",
-              { className: "panel-modal-head-actions" },
+          isAuxiliaryDialogTab
+            ? React.createElement(
+              React.Fragment,
+              null,
               React.createElement(
-                "button",
-                {
-                  className: "panel-close",
-                  type: "button",
-                  onClick: () => setIsUnifiedDialogOpen(false),
-                  "aria-label": "Close preferences dialog",
-                },
-                "×"
+                "div",
+                { className: "panel-modal-head" },
+                React.createElement("strong", null, activeDialogMeta.label),
+                React.createElement(
+                  "div",
+                  { className: "panel-modal-head-actions" },
+                  React.createElement(
+                    "button",
+                    {
+                      className: "panel-close",
+                      type: "button",
+                      onClick: () => setIsUnifiedDialogOpen(false),
+                      "aria-label": `Close ${activeDialogMeta.label} dialog`,
+                    },
+                    "×"
+                  )
+                )
+              ),
+              React.createElement(
+                "div",
+                { className: "panel-modal-content" },
+                dialogTabError
+                  ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
+                  : isDialogTabLoading && !activeModalPanel
+                    ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
+                    : activeModalPanel
+                      ? renderPanelContent({
+                        panelData: activeModalPanel,
+                        parsedInfoGroups,
+                        parsedAssistantPanel,
+                        parsedHelpPanel,
+                        editableConfigRows,
+                        restartConfigRows,
+                        retrieverStatus,
+                        embedderStatus,
+                        serviceStatuses,
+                        isSending,
+                        isEmbeddingReady,
+                        disabledAssistantModes: disabledAssistantModesList,
+                        submitConfigChange,
+                        applyPersonalizationChange,
+                        customInstructionsDraft,
+                        isCustomInstructionsDirty,
+                        updateCustomInstructionsDraft,
+                        saveCustomInstructions,
+                        nicknameDraft,
+                        occupationDraft,
+                        moreAboutUserDraft,
+                        isNicknameDirty,
+                        isOccupationDirty,
+                        isMoreAboutUserDirty,
+                        updateNicknameDraft,
+                        updateOccupationDraft,
+                        updateMoreAboutUserDraft,
+                        saveNickname,
+                        saveOccupation,
+                        saveMoreAboutUser,
+                        tagFilterRows,
+                        tagFilterEnabledByTag,
+                        globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                        filterScope: "global",
+                        toggleTagFilter,
+                        isTagFilterSaving,
+                        icon,
+                        settingsTabError,
+                        clearSettingsTabError: () => setSettingsTabError(""),
+                        settingsInputResetTokenByKey,
+                      })
+                      : React.createElement("p", null, "No content available.")
               )
             )
-          ),
-          React.createElement(
-            "div",
-            { className: "panel-modal-tab-layout" },
-            React.createElement(
-              "nav",
-              { className: "panel-tab-nav", "aria-label": "Preferences sections" },
-              ...MENU_DIALOG_TABS.map((tab) => React.createElement(
-                "button",
-                {
-                  key: tab.id,
-                  type: "button",
-                  className: `panel-tab-button${tab.id === activeDialogTab ? " active" : ""}`,
-                  onClick: () => loadUnifiedDialogTab(tab.id),
-                  disabled: isDialogTabLoading && tab.id === activeDialogTab,
-                  "aria-current": tab.id === activeDialogTab ? "page" : undefined,
-                },
-                tab.label
-              ))
-            ),
-            React.createElement(
+            : React.createElement(
               "div",
-              { className: "panel-modal-content" },
-              dialogTabError
-                ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
-                : isDialogTabLoading && !activeModalPanel
-                  ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
-                  : activeDialogTab === "archive"
-                    ? React.createElement(
-                      "section",
-                      { className: "archive-table-wrapper" },
-                      React.createElement(
-                        "div",
-                        { className: "archive-table", role: "table", "aria-label": "Archived chats" },
+              { className: "panel-modal-tab-layout" },
+              React.createElement(
+                "nav",
+                { className: "panel-tab-nav", "aria-label": "Preferences sections" },
+                React.createElement(
+                  "div",
+                  { className: "panel-tab-nav-top" },
+                  React.createElement(
+                    "button",
+                    {
+                      className: "panel-close panel-close-sidebar",
+                      type: "button",
+                      onClick: () => setIsUnifiedDialogOpen(false),
+                      "aria-label": "Close preferences dialog",
+                    },
+                    "×"
+                  )
+                ),
+                ...PREFERENCES_DIALOG_TABS.map((tab) => React.createElement(
+                  "button",
+                  {
+                    key: tab.id,
+                    type: "button",
+                    className: `panel-tab-button${tab.id === activeDialogTab ? " active" : ""}`,
+                    onClick: () => loadUnifiedDialogTab(tab.id),
+                    disabled: isDialogTabLoading && tab.id === activeDialogTab,
+                    "aria-current": tab.id === activeDialogTab ? "page" : undefined,
+                  },
+                  React.createElement("span", { className: "panel-tab-button-icon", "aria-hidden": "true" }, getDialogTabIcon(tab.id)),
+                  React.createElement("span", null, tab.label)
+                ))
+              ),
+              React.createElement(
+                "div",
+                { className: "panel-modal-content" },
+                dialogTabError
+                  ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
+                  : isDialogTabLoading && !activeModalPanel
+                    ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
+                    : activeDialogTab === "archive"
+                      ? React.createElement(
+                        "section",
+                        { className: "archive-table-wrapper" },
                         React.createElement(
                           "div",
-                          { className: "archive-table-head", role: "row" },
-                          React.createElement("strong", { role: "columnheader" }, "Chat name"),
-                          React.createElement("strong", { role: "columnheader" }, "Archived at"),
-                          React.createElement("strong", { role: "columnheader" }, "Actions")
-                        ),
-                        archivedChatRows.length === 0
-                          ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
-                          : archivedChatRows.map((chat) => React.createElement(
+                          { className: "library-table archive-table", role: "table", "aria-label": "Archived chats" },
+                          React.createElement(
                             "div",
-                            { key: chat.id, className: "archive-table-row", role: "row" },
-                            React.createElement("strong", { className: "archive-chat-name" }, chat.name),
-                            React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
-                            React.createElement(
-                              "div",
-                              { className: "library-row-actions archive-row-actions" },
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-toggle-button",
-                                  title: "Download chat",
-                                  "aria-label": `Download ${chat.name}`,
-                                  onClick: async () => {
-                                    try {
-                                      await downloadChat(chat);
-                                    } catch (error) {
-                                      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-                                        evidenceSeverity: "error",
-                                        isVolatile: true,
-                                      })));
-                                    }
-                                  },
-                                },
-                                icon(downloadIconPath)
-                              ),
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-toggle-button",
-                                  title: "Unarchive chat",
-                                  "aria-label": `Unarchive ${chat.name}`,
-                                  onClick: () => unarchiveChat(chat.id),
-                                  disabled: isChatActionPending,
-                                },
-                                icon(keepIconPath)
-                              ),
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-delete-button",
-                                  title: "Delete chat",
-                                  "aria-label": `Delete ${chat.name}`,
-                                  onClick: () => setDeleteConfirmChat(chat),
-                                  disabled: isChatActionPending,
-                                },
-                                icon(trashIconPath)
-                              )
-                            )
-                          ))
+                            { className: "library-table-head archive-table-head", role: "row" },
+                            React.createElement("strong", { role: "columnheader" }, "Chat name"),
+                            React.createElement("strong", { role: "columnheader" }, "Archived at"),
+                            React.createElement("strong", { role: "columnheader" }, "Actions")
+                          ),
+                          React.createElement(
+                            "div",
+                            { className: "library-table-body", role: "rowgroup" },
+                            archivedChatRows.length === 0
+                              ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
+                              : archivedChatRows.map((chat) => React.createElement(
+                                "div",
+                                { key: chat.id, className: "library-table-row archive-table-row", role: "row" },
+                                React.createElement("strong", { className: "library-path archive-chat-name" }, chat.name),
+                                React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
+                                React.createElement(
+                                  "div",
+                                  { className: "library-row-actions archive-row-actions" },
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "library-toggle-button",
+                                      title: "Download chat",
+                                      "aria-label": `Download ${chat.name}`,
+                                      onClick: async () => {
+                                        try {
+                                          await downloadChat(chat);
+                                        } catch (error) {
+                                          setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                                            evidenceSeverity: "error",
+                                            isVolatile: true,
+                                          })));
+                                        }
+                                      },
+                                    },
+                                    icon(downloadIconPath)
+                                  ),
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "library-toggle-button",
+                                      title: "Unarchive chat",
+                                      "aria-label": `Unarchive ${chat.name}`,
+                                      onClick: () => unarchiveChat(chat.id),
+                                      disabled: isChatActionPending,
+                                    },
+                                    icon(unarchiveIconPath)
+                                  ),
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "library-delete-button",
+                                      title: "Delete chat",
+                                      "aria-label": `Delete ${chat.name}`,
+                                      onClick: () => setDeleteConfirmChat(chat),
+                                      disabled: isChatActionPending,
+                                    },
+                                    icon(trashIconPath)
+                                  )
+                                )
+                              ))
+                          )
+                        )
                       )
-                    )
-                    : activeModalPanel
-                    ? renderPanelContent({
-                      panelData: activeModalPanel,
-                      parsedInfoGroups,
-                      parsedAssistantPanel,
-                      parsedHelpPanel,
-                      editableConfigRows,
-                      restartConfigRows,
-                      retrieverStatus,
-                      embedderStatus,
-                      isSending,
-                      isEmbeddingReady,
-                      disabledAssistantModes: disabledAssistantModesList,
-                      submitConfigChange,
-                      applyPersonalizationChange,
-                      customInstructionsDraft,
-                      isCustomInstructionsDirty,
-                      updateCustomInstructionsDraft,
-                      saveCustomInstructions,
-                      nicknameDraft,
-                      occupationDraft,
-                      moreAboutUserDraft,
-                      isNicknameDirty,
-                      isOccupationDirty,
-                      isMoreAboutUserDirty,
-                      updateNicknameDraft,
-                      updateOccupationDraft,
-                      updateMoreAboutUserDraft,
-                      saveNickname,
-                      saveOccupation,
-                      saveMoreAboutUser,
-                      tagFilterRows,
-                      tagFilterEnabledByTag,
-                      globalTagFilterEnabledByTag: tagFilterEnabledByTag,
-                      filterScope: "global",
-                      toggleTagFilter,
-                      isTagFilterSaving,
-                      icon,
-                      settingsTabError,
-                      clearSettingsTabError: () => setSettingsTabError(""),
-                      settingsInputResetTokenByKey,
-                    })
-                    : React.createElement("p", null, "Select a section.")
+                      : activeModalPanel
+                      ? renderPanelContent({
+                        panelData: activeModalPanel,
+                        parsedInfoGroups,
+                        parsedAssistantPanel,
+                        parsedHelpPanel,
+                        editableConfigRows,
+                        restartConfigRows,
+                        retrieverStatus,
+                        embedderStatus,
+                        serviceStatuses,
+                        isSending,
+                        isEmbeddingReady,
+                        disabledAssistantModes: disabledAssistantModesList,
+                        submitConfigChange,
+                        applyPersonalizationChange,
+                        customInstructionsDraft,
+                        isCustomInstructionsDirty,
+                        updateCustomInstructionsDraft,
+                        saveCustomInstructions,
+                        nicknameDraft,
+                        occupationDraft,
+                        moreAboutUserDraft,
+                        isNicknameDirty,
+                        isOccupationDirty,
+                        isMoreAboutUserDirty,
+                        updateNicknameDraft,
+                        updateOccupationDraft,
+                        updateMoreAboutUserDraft,
+                        saveNickname,
+                        saveOccupation,
+                        saveMoreAboutUser,
+                        tagFilterRows,
+                        tagFilterEnabledByTag,
+                        globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                        filterScope: "global",
+                        toggleTagFilter,
+                        isTagFilterSaving,
+                        icon,
+                        settingsTabError,
+                        clearSettingsTabError: () => setSettingsTabError(""),
+                        settingsInputResetTokenByKey,
+                      })
+                      : React.createElement("p", null, "Select a section.")
+              )
             )
-          )
         )
       )
       : null,
@@ -4429,6 +4619,7 @@ function App() {
               restartConfigRows,
               retrieverStatus,
               embedderStatus,
+              serviceStatuses,
               isSending,
               isEmbeddingReady,
               disabledAssistantModes: disabledAssistantModesList,

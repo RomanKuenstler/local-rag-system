@@ -2,88 +2,135 @@
 
 Maintainer and contributor guide for `local-rag-system`.
 
-## Repository layout
+## 1) Repository map
 
 ```text
 .
 ├── apps/
 │   ├── backend/
-│   │   ├── api.js                 # Frontend-facing API gateway
-│   │   └── library-service.js     # Backend-only managed-library persistence helpers
+│   │   ├── api.js                 # public API + auth/session + admin + orchestration
+│   │   ├── request-dispatcher.js  # route matcher/dispatcher for backend HTTP server
+│   │   ├── library-service.js     # managed-library persistence helpers
+│   │   └── user-bootstrap.js      # sync/bootstrap users from config file
 │   ├── retriever/
-│   │   ├── api.js                 # Chat/retrieval API + prompt orchestration
-│   │   ├── cli.js                 # Terminal chat/debug entrypoint
-│   │   └── ui.js                  # CLI-only terminal UI helpers
+│   │   ├── api.js                 # retrieval + prompt/chat orchestration API
+│   │   ├── request-dispatcher.js  # retriever route dispatcher
+│   │   ├── cli.js                 # terminal chat/debug entrypoint
+│   │   ├── ui.js                  # CLI rendering integration
+│   │   └── ui-helpers.js          # CLI helper utilities
 │   ├── embedder/
-│   │   └── worker.js              # Background indexing worker
+│   │   ├── worker.js              # indexing + embedding loop
+│   │   └── health-server.js       # embedder status HTTP endpoint
+│   ├── ocr-scanner/
+│   │   └── worker.py              # OCR service
 │   └── webui/
-│       ├── app.js
-│       ├── panel-content.js
-│       ├── utils.js
-│       ├── chat-export.js
-│       └── styles.css
+│       ├── app.js                 # browser app entry
+│       ├── api-client.js          # backend API client wrapper
+│       ├── app-shared.js          # shared webui constants/helpers
+│       ├── panel-content.js       # panel rendering logic
+│       ├── chat-export.js         # export helpers
+│       ├── utils.js               # utility helpers
+│       ├── styles.css             # styling
+│       └── index.html
 │
 ├── shared/
-│   ├── src/                       # Cross-service shared runtime modules
-│   ├── config/index.js            # Environment + runtime config constants
-│   ├── db/index.js                # Postgres setup/health helpers
-│   └── prompts/guardrails.md      # Guardrail policy source used by retriever
+│   ├── src/                       # cross-service runtime modules
+│   ├── config/index.js            # env + runtime config constants
+│   ├── db/index.js                # postgres readiness/migration helpers
+│   └── prompts/                   # guardrails + assistant + personalization prompt templates
 │
-├── compose.yml                    # Local stack orchestration
-├── Dockerfile                     # Shared Node service image (APP_ROLE driven)
-├── migrations/                    # Postgres schema migration files
-├── docs/                          # Architecture + maintainer docs
-└── data/                          # Indexable knowledge files
+├── migrations/                    # postgres schema changes
+├── compose.yml                    # service orchestration + model bindings
+├── Dockerfile                     # shared Node image (APP_ROLE startup)
+└── docs/                          # architecture and contributor docs
 ```
 
-## Service boundaries
+---
 
-### `apps/backend/api.js`
-- Stable public API surface for WebUI.
-- Proxies prompt/chat requests to `apps/retriever/api.js`.
-- Exposes consolidated status and library management routes.
-- Uses `apps/backend/library-service.js` for backend-specific file metadata writes.
+## 2) Service boundaries (important)
 
-### `apps/retriever/api.js`
-- Core orchestration layer.
-- Handles prompt execution, retrieval, assistant mode behavior, chat lifecycle, and personalization.
-- Builds final model messages using guardrails + mode + evidence + history + personalization.
+Keep responsibility ownership explicit:
 
-### `apps/embedder/worker.js`
-- Watches/loops through embeddable files.
-- Splits documents and updates vectors in Qdrant.
-- Updates shared embed/index status files.
+- `apps/backend/*`
+  - owns public entrypoint concerns: auth/session, admin, managed-library APIs, upstream proxying.
+- `apps/retriever/*`
+  - owns retrieval/chat/prompt composition, assistant behavior, personalization orchestration.
+- `apps/embedder/*`
+  - owns indexing loop and embedding lifecycle.
+- `apps/ocr-scanner/*`
+  - owns OCR + extraction logic.
+- `shared/*`
+  - only reusable modules that are genuinely cross-service.
 
-### `shared/src/state-store.js`
-- Single source of truth for Postgres persistence interactions.
-- Owns SQL/data-shape logic for sessions, chats, messages, settings, and file metadata.
+When you add/relocate behavior, update **code + compose + docs** together.
 
-## Prompt architecture map
+---
 
-Use these files when changing model behavior:
+## 3) High-impact modules and what they own
 
-- Global safety/rules: `shared/prompts/guardrails.md`, `shared/src/guardrails.js`
-- Assistant modes/refine chain: `shared/src/assistant-modes.js`
-- RAG evidence packaging: `shared/src/messages.js`
-- Personalization instruction shaping: `shared/src/personalization.js`
-- Assembly/call order: `apps/retriever/api.js`
+- `shared/src/state-store.js`
+  - canonical persistence access layer for users/sessions/chats/messages/settings/file metadata.
+- `shared/src/guardrails.js`
+  - guardrail loading and prompt-layer assembly.
+- `shared/src/assistant-modes.js`
+  - assistant mode templates/refine-chain behavior.
+- `shared/src/messages.js`
+  - RAG evidence packaging and helper messaging.
+- `shared/src/personalization.js`
+  - personalization instruction shaping.
+- `shared/src/embedding-service.js`
+  - embedding + chunk extraction helpers and Qdrant client access.
+- `shared/src/document-processing.js`
+  - extension-aware text normalization/parsing helpers.
 
-See also `docs/PROMPTBUILDING.md` for a full walkthrough.
+---
 
-## Compose + container notes
+## 4) Safe change strategy
 
-- Node services (`backend`, `retriever`, `embedder`) share one base image (`Dockerfile`) and select startup flow via `APP_ROLE`.
-- Default retriever role startup is `apps/retriever/api.js`.
-- Shared persistent state paths are explicitly mapped in compose:
-  - `/app/state/index-state.json`
-  - `/app/state/embedding-status.json`
+Before editing:
 
-## Development checks
+1. Identify ownership (backend vs retriever vs embedder vs shared).
+2. Verify API contracts used by `apps/webui/api-client.js` and backend dispatchers.
+3. Preserve existing route compatibility unless intentionally versioning.
+
+When changing prompt behavior:
+
+- Read `docs/PROMPTBUILDING.md` first.
+- Touch the minimal prompt-related modules needed.
+- Re-check assistant mode behavior and evidence formatting.
+
+When changing indexing/retrieval behavior:
+
+- Keep embedder pipeline and retriever query assumptions aligned.
+- Validate file metadata/tag/filter flows still match state-store contracts.
+
+---
+
+## 5) Common checks
 
 Run before commit:
 
 ```bash
 npm run lint
-node --check apps/webui/app.js apps/webui/panel-content.js apps/webui/utils.js apps/webui/chat-export.js
-node --check apps/retriever/api.js apps/retriever/cli.js apps/retriever/ui.js apps/backend/api.js apps/backend/library-service.js apps/embedder/worker.js
+node --check apps/webui/app.js apps/webui/panel-content.js apps/webui/utils.js apps/webui/chat-export.js apps/webui/api-client.js apps/webui/app-shared.js
+node --check apps/retriever/api.js apps/retriever/cli.js apps/retriever/ui.js apps/retriever/ui-helpers.js apps/backend/api.js apps/backend/library-service.js apps/backend/request-dispatcher.js apps/backend/user-bootstrap.js apps/embedder/worker.js apps/embedder/health-server.js
 ```
+
+Optional runtime sanity:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 backend retriever embedder ocr-scanner
+```
+
+---
+
+## 6) Documentation maintenance policy
+
+Any PR that changes architecture, APIs, service boundaries, or core behavior should update:
+
+- `README.md` (user-facing quick map)
+- `docs/DOCUMENTATION.md` (architecture + runtime flow)
+- `docs/DEVELOPERS.md` (maintainer map)
+- `docs/CHANGELOG.md` (dated entry)

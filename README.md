@@ -1,18 +1,24 @@
 # Local RAG AI System
 
-Local, containerized Retrieval-Augmented Generation (RAG) for indexing your documents and chatting against them with grounded answers.
+![Version](https://img.shields.io/badge/version-1.9.0-blue)
+![Docker](https://img.shields.io/badge/docker-required-blue)
+![Node](https://img.shields.io/badge/node.js-20+-green)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Beginner Friendly](https://img.shields.io/badge/beginner-friendly-success)
 
-## Services
+Local, containerized Retrieval-Augmented Generation (RAG) for indexing your own files and chatting with grounded, citation-ready answers.
 
-This stack runs with Docker Compose and includes:
+## What this project includes
 
-- `backend` – frontend-facing API gateway.
-- `retriever` – chat/retrieval API, assistant-mode logic, prompt orchestration.
-- `embedder` – indexing worker for files in `./data`.
-- `ocr-scanner` – Python OCR service for scanned/text-poor PDFs and images from library and prompt uploads.
-- `qdrant` – vector database for chunk embeddings.
-- `postgres` – chat/session/runtime/index metadata persistence.
-- `webui` – lightweight browser UI (nginx + static JS).
+This stack runs with Docker Compose and ships as multiple focused services:
+
+- `backend` – frontend-facing API, auth/session handling, admin/user management, managed-library routes.
+- `retriever` – prompt orchestration, retrieval, chat lifecycle, assistant modes, personalization.
+- `embedder` – background indexing + embedding worker for `data/`.
+- `ocr-scanner` – OCR + layout-aware extraction for PDFs/images from library files and prompt uploads.
+- `qdrant` – vector database for similarity search.
+- `postgres` – persistence for users, sessions, chats, messages, settings, tags, and runtime metadata.
+- `webui` – static browser UI (nginx-served) with backend API proxying.
 
 ## Quick start
 
@@ -20,73 +26,84 @@ This stack runs with Docker Compose and includes:
 docker compose up -d --build
 ```
 
-Endpoints:
+### Default endpoints
 
 - Web UI: `http://localhost:5173`
 - Backend API: `http://localhost:3100`
 - Retriever API (internal): `http://retriever:3000`
+- Embedder health endpoint (internal): `http://embedder:3200/internal/embedder/status`
 - OCR scanner API: `http://localhost:3300`
 
-OCR scanner endpoints:
+### Health checks
 
-- `GET /healthz`
-- `POST /ocr/scan`
+- Backend: `GET /healthz`
+- Retriever: `GET /healthz`
+- OCR scanner: `GET /healthz`
+- Embedder: `GET /internal/embedder/status`
 
-`POST /ocr/scan` request types:
+## Current feature set
 
-- `library_pdf` → pass `pdf_relative_path` under `data/` (works for `_library/...` and direct PDFs in data root/subfolders).
-- `prompt_pdf` → pass either `prompt_pdf_relative_path` under `upload/` or `pdf_base64`.
-- `library_image` → pass `image_relative_path` under `data/` for `.png`, `.jpg`, `.jpeg`, or `.webp` images.
-- `prompt_image` → pass either `prompt_image_relative_path` under `upload/` or `image_base64` (optionally `image_extension` for base64 requests, default `.png`).
-- OCR scanner performs layout-aware PDF extraction first (including block ordering / multi-column handling), evaluates extraction quality, and falls back to OCR when quality is weak.
-- OCR scanner performs OCR extraction directly for supported image formats.
-- Image OCR responses include `useful_text` / `extraction_status`; if OCR output is empty or below threshold (`minimum_extracted_chars`), the service marks it as `no_useful_text`.
-- OCR scanner responses include `status` and `extraction_details`; on failures it returns `status=error` with `error_code` (used by retriever/embedder for robust error handling).
+- **Session-based auth** (`/api/auth/*`) with token refresh and max-lifetime enforcement.
+- **Admin user APIs** for user CRUD under `/api/admin/users`.
+- **Chat lifecycle APIs** (`/api/chats`, rename/delete/download).
+- **Prompt execution API** (`/api/prompt`) with RAG + assistant-mode orchestration.
+- **Personalization APIs** (`/api/personalization`) for per-user behavior shaping.
+- **File management APIs**:
+  - Retriever-backed index view and tagging (`/api/files`, `/api/files/tags`, `/api/files/tag-filters`).
+  - Managed library upload/toggle/delete/list (`/api/library/files`).
+- **Prompt file attachments** (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`, and OCR image formats).
+- **OCR integration path** for both indexing-time and prompt-time extraction.
 
-Embedder behavior:
+## OCR scanner behavior
 
-- The embedder indexes files normally.
-- For PDFs in `data/` (including `data/_library`), embedder delegates text extraction to `ocr-scanner`.
-- For prompt-attached PDFs, retriever delegates extraction to `ocr-scanner` via `prompt_pdf` requests and uses returned text to build prompt upload context.
-- If OCR fails for an uploaded prompt PDF, retriever reports a file-level skip/error without crashing the whole prompt request.
+`POST /ocr/scan` supports:
 
-## Core API endpoints
+- `library_pdf` (from `data/`)
+- `prompt_pdf` (from `upload/` or inline base64)
+- `library_image` (from `data/`)
+- `prompt_image` (from `upload/` or inline base64)
 
-- `GET /api/status`
-- `GET /api/files`
-- `POST /api/prompt`
-- `GET /api/chats`
-- `POST /api/chats`
-- `PATCH /api/chats/:chatId`
-- `DELETE /api/chats/:chatId`
-- `GET /api/chats/:chatId/download`
-- `GET /api/messages`
-- `GET /healthz`
+Extraction behavior:
 
-## Prompt + assistant behavior docs
-
-- `docs/PROMPTS.md` – high-level prompting principles.
-- `docs/PROMPTBUILDING.md` – implementation-level prompt assembly pipeline, guardrails layering, assistant mode differences, personalization behavior, and file-level change map.
-
-## Documentation map
-
-- `docs/DOCUMENTATION.md` – conceptual and architecture overview.
-- `docs/DEVELOPERS.md` – contributor map, where to change what, and refactor notes.
-- `docs/CHANGELOG.md` – release and change history.
-
-## Notes
-
-- The retriever and embedder now share explicit state file paths via compose:
-  - `INDEX_STATE_FILE=/app/state/index-state.json`
-  - `EMBEDDING_STATUS_FILE=/app/state/embedding-status.json`
-- The base app container uses `APP_ROLE` to select startup command; retriever role now boots `apps/retriever/api.js` by default.
-
+- PDF flow attempts layout-aware extraction first and falls back to OCR when quality is weak.
+- Image flow runs OCR directly.
+- Responses include status metadata (`status`, `extraction_details`, and `error_code` when relevant).
 
 ## Repository layout
 
-- `apps/` – deployable service entrypoints and UI (`backend`, `retriever`, `embedder`, `ocr-scanner`, `webui`).
-- `shared/` – reusable modules and cross-service assets (`src`, `config`, `db`, `prompts`).
-- Service-local helpers now live with each app (for example `apps/backend/library-service.js` and `apps/retriever/ui.js`) to avoid unnecessary cross-service coupling.
-- `docs/` – architecture, changelog, and contributor notes.
-- `scripts/` – helper scripts for content download/prep.
-- `data/`, `migrations/`, `upload/`, `downloaded-html/` – runtime/content assets.
+```text
+.
+├── apps/
+│   ├── backend/          # frontend-facing API + auth/admin/library integration
+│   ├── retriever/        # retrieval + chat orchestration + assistant behavior
+│   ├── embedder/         # background embedding/index worker + health route
+│   ├── ocr-scanner/      # Python OCR microservice
+│   └── webui/            # static browser client + nginx config
+├── shared/
+│   ├── src/              # reusable runtime modules
+│   ├── config/           # env/runtime constants
+│   ├── db/               # postgres helpers
+│   └── prompts/          # guardrails + assistant/persona prompt templates
+├── docs/                 # project docs
+├── data/                 # indexable knowledge base files
+├── upload/               # temporary prompt-upload files
+├── migrations/           # postgres migrations
+├── compose.yml           # local orchestration
+└── Dockerfile            # shared Node image used by backend/retriever/embedder
+```
+
+## Documentation map
+
+- `docs/DOCUMENTATION.md` – architecture, runtime flow, data flow, and API surface summary.
+- `docs/DEVELOPERS.md` – contributor guide: boundaries, key modules, and safe change strategy.
+- `docs/CHANGELOG.md` – change history.
+- `docs/PROMPTS.md` – high-level prompt design principles.
+- `docs/PROMPTBUILDING.md` – implementation-level prompt assembly internals.
+
+## Typical development checks
+
+```bash
+npm run lint
+node --check apps/webui/app.js apps/webui/panel-content.js apps/webui/utils.js apps/webui/chat-export.js apps/webui/api-client.js apps/webui/app-shared.js
+node --check apps/retriever/api.js apps/retriever/cli.js apps/retriever/ui.js apps/retriever/ui-helpers.js apps/backend/api.js apps/backend/library-service.js apps/backend/request-dispatcher.js apps/backend/user-bootstrap.js apps/embedder/worker.js apps/embedder/health-server.js
+```

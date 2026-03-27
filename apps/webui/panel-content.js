@@ -1,13 +1,34 @@
 import React from "https://esm.sh/react@18";
 
+const ATTACHMENT_EXTENSION_COLOR_CLASS = {
+  pdf: "is-red",
+  epub: "is-red",
+  md: "is-gray",
+  txt: "is-gray",
+  html: "is-blue",
+  htm: "is-blue",
+  png: "is-purple",
+  jpg: "is-purple",
+  jpeg: "is-purple",
+  webp: "is-purple",
+  csv: "is-green",
+};
+
+function getExtensionColorClass(extensionValue) {
+  const normalized = String(extensionValue || "").trim().replace(/^\./, "").toLowerCase();
+  return ATTACHMENT_EXTENSION_COLOR_CLASS[normalized] || "is-gray";
+}
+
 function GeneralDropdown({
   label,
+  description = "",
   currentId,
   options,
   kind,
   interactionDisabled,
   isOptionDisabled,
   applyPersonalizationChange,
+  onSelectOption,
   chevron,
   check,
 }) {
@@ -44,7 +65,12 @@ function GeneralDropdown({
   return React.createElement(
     "div",
     { className: "general-setting-row", key: `setting-${kind}-${label}` },
-    React.createElement("span", { className: "general-setting-label" }, label),
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, label),
+      description ? React.createElement("small", { className: "general-setting-description" }, description) : null
+    ),
     React.createElement(
       "details",
       {
@@ -83,14 +109,18 @@ function GeneralDropdown({
               disabled: interactionDisabled || optionDisabled,
               onClick: (event) => {
                 event.preventDefault();
-                applyPersonalizationChange(kind, optionId);
+                if (typeof onSelectOption === "function") {
+                  onSelectOption(optionId);
+                } else {
+                  applyPersonalizationChange(kind, optionId);
+                }
                 setIsOpen(false);
               },
             },
             React.createElement(
               "span",
               { className: "general-dropdown-option-copy" },
-              React.createElement("strong", null, optionId),
+              React.createElement("strong", null, option.label || optionId),
               React.createElement("small", null, option.shortDescription || option.description || "")
             ),
             active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
@@ -98,6 +128,185 @@ function GeneralDropdown({
         })
       )
     )
+  );
+}
+
+function VoiceSettingRow({ currentId, options, onSelectOption, chevron, check }) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+  const normalizedCurrentId = String(currentId || "").trim().toLowerCase();
+  const activeOption = options.find((option) => String(option.id || "").trim().toLowerCase() === normalizedCurrentId) || null;
+  const triggerLabel = activeOption?.label || activeOption?.id || normalizedCurrentId || "Default";
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
+
+  return React.createElement(
+    "div",
+    { className: "general-setting-row", key: "setting-general-voice" },
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, "Voice"),
+      React.createElement("small", { className: "general-setting-description" }, "Currently under development")
+    ),
+    React.createElement(
+      "div",
+      { className: "general-setting-controls", ref: rootRef },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "general-play-button",
+          "aria-label": "Play voice preview",
+        },
+        "▶",
+        " ",
+        "Play"
+      ),
+      React.createElement(
+        "details",
+        {
+          className: "general-dropdown general-dropdown-voice",
+          open: isOpen,
+        },
+        React.createElement(
+          "summary",
+          {
+            className: "general-dropdown-trigger",
+            onClick: (event) => {
+              event.preventDefault();
+              setIsOpen((prev) => !prev);
+            },
+          },
+          React.createElement("span", { className: "general-dropdown-value" }, triggerLabel),
+          React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
+        ),
+        React.createElement(
+          "div",
+          { className: "general-dropdown-menu", role: "menu" },
+          ...options.map((option) => {
+            const optionId = String(option.id || "").trim().toLowerCase();
+            const active = optionId === normalizedCurrentId;
+            return React.createElement(
+              "button",
+              {
+                key: `voice-${optionId}`,
+                type: "button",
+                className: `general-dropdown-option${active ? " active" : ""}`,
+                role: "menuitemradio",
+                "aria-checked": active ? "true" : "false",
+                onClick: (event) => {
+                  event.preventDefault();
+                  onSelectOption(optionId);
+                  setIsOpen(false);
+                },
+              },
+              React.createElement("span", { className: "general-dropdown-option-copy" }, React.createElement("strong", null, option.label || optionId)),
+              active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderModeDropdown, chevron, check }) {
+  const [appearance, setAppearance] = React.useState("system");
+  const [language, setLanguage] = React.useState("auto-detect");
+  const [spokenLanguage, setSpokenLanguage] = React.useState("auto-detect");
+  const [voice, setVoice] = React.useState("default");
+
+  const appearanceOptions = [
+    { id: "system", label: "System" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark" },
+  ];
+  const languageOptions = [
+    { id: "auto-detect", label: "Auto-detect" },
+    { id: "english", label: "English" },
+    { id: "german", label: "German" },
+    { id: "spanish", label: "Spanish" },
+    { id: "french", label: "French" },
+  ];
+  const voiceOptions = [
+    { id: "default", label: "Default" },
+    { id: "male", label: "Male" },
+    { id: "female", label: "Female" },
+  ];
+
+  return React.createElement(
+    "section",
+    { className: "info-group-card general-settings-card" },
+    renderModeDropdown({
+      label: "Assistant mode",
+      currentId: currentAssistantMode,
+      options: assistantModes,
+      kind: "assistant",
+    }),
+    React.createElement(GeneralDropdown, {
+      label: "Appearance",
+      description: "Currently under development",
+      currentId: appearance,
+      options: appearanceOptions,
+      kind: "appearance",
+      interactionDisabled: false,
+      applyPersonalizationChange: null,
+      onSelectOption: setAppearance,
+      chevron,
+      check,
+    }),
+    React.createElement(GeneralDropdown, {
+      label: "Language",
+      description: "Currently under development",
+      currentId: language,
+      options: languageOptions,
+      kind: "language",
+      interactionDisabled: false,
+      applyPersonalizationChange: null,
+      onSelectOption: setLanguage,
+      chevron,
+      check,
+    }),
+    React.createElement(GeneralDropdown, {
+      label: "Spoken language",
+      description: "Currently under development",
+      currentId: spokenLanguage,
+      options: languageOptions,
+      kind: "spoken-language",
+      interactionDisabled: false,
+      applyPersonalizationChange: null,
+      onSelectOption: setSpokenLanguage,
+      chevron,
+      check,
+    }),
+    React.createElement(VoiceSettingRow, {
+      currentId: voice,
+      options: voiceOptions,
+      onSelectOption: setVoice,
+      chevron,
+      check,
+    })
   );
 }
 
@@ -110,6 +319,7 @@ export function renderPanelContent({
   restartConfigRows,
   retrieverStatus,
   embedderStatus,
+  serviceStatuses = {},
   isSending,
   isEmbeddingReady,
   disabledAssistantModes = [],
@@ -178,10 +388,11 @@ export function renderPanelContent({
     element.style.height = "auto";
     element.style.height = `${Math.max(element.scrollHeight, 24)}px`;
   };
-  const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
+  const renderModeDropdown = ({ label, description, currentId, options, kind, isOptionDisabled }) => React.createElement(
     GeneralDropdown,
     {
       label,
+      description,
       currentId,
       options,
       kind,
@@ -202,102 +413,121 @@ export function renderPanelContent({
         : null,
       React.createElement(
         "section",
-        { className: "config-section config-table-card" },
-        React.createElement("h4", null, "Change now (no restart)"),
+        { className: "library-table-card config-live-table-card" },
         React.createElement(
           "div",
-          { className: "config-table" },
+          { className: "library-table config-live-table", role: "table", "aria-label": "Settings that apply immediately" },
           React.createElement(
             "div",
-            { className: "config-table-head" },
-            React.createElement("span", null, "Setting"),
-            React.createElement("span", null, "Value"),
-            React.createElement("span", null, "Save")
-          ),
-          ...editableConfigRows.map((entry) => React.createElement(
-            "div",
-            { key: `editable-${entry.section}-${entry.key}`, className: "config-table-row" },
-            React.createElement(
-              "div",
-              { className: "config-setting-cell" },
-              React.createElement("strong", null, entry.key),
-              React.createElement("small", null, entry.section)
-            ),
-            React.createElement(
-              "form",
-              {
-                className: "config-edit-form",
-                key: `config-form-${String(entry.key || "").trim().toLowerCase()}-${settingsInputResetTokenByKey[String(entry.key || "").trim().toLowerCase()] || 0}`,
-                onSubmit: async (event) => {
-                  event.preventDefault();
-                  const formData = new FormData(event.currentTarget);
-                  await submitConfigChange(entry.key, formData.get("value"));
-                },
-              },
-              React.createElement("input", {
-                name: "value",
-                defaultValue: String(entry.value),
-                className: "config-input",
-                disabled: isSending || !isEmbeddingReady,
-                onChange: () => clearSettingsTabError(),
-              }),
-              React.createElement(
-                "button",
-                {
-                  type: "submit",
-                  className: "personalization-custom-save-button active config-apply-save-button",
-                  disabled: isSending || !isEmbeddingReady,
-                  "aria-label": `Save ${entry.key}`,
-                  title: `Save ${entry.key}`,
-                },
-                icon(saveIconPath)
-              )
-            ),
-            React.createElement("span", { className: "config-row-ready" }, "Live")
-          ))
-        )
-      ),
-      React.createElement(
-        "section",
-        { className: "config-section config-table-card" },
-        React.createElement(
-          "div",
-          { className: "config-table-header" },
-          React.createElement("h4", null, "Restart required"),
-          React.createElement(
-            "button",
-            { type: "button", className: "restart-button", disabled: true },
-            icon("M12 6V3l-4 4 4 4V8c2.8 0 5 2.2 5 5a5 5 0 0 1-8.7 3.3l-1.4 1.4A7 7 0 0 0 19 13c0-3.9-3.1-7-7-7"),
-            "Restart"
-          )
-        ),
-        React.createElement(
-          "div",
-          { className: "config-table" },
-          React.createElement(
-            "div",
-            { className: "config-table-head" },
+            { className: "library-table-head config-live-table-head", role: "row" },
             React.createElement("span", null, "Setting"),
             React.createElement("span", null, "Value")
           ),
-          ...restartConfigRows.map((entry) => React.createElement(
+          React.createElement(
             "div",
-            { key: `restart-${entry.section}-${entry.key}`, className: "config-table-row static" },
-            React.createElement(
+            { className: "library-table-body", role: "rowgroup" },
+            ...editableConfigRows.map((entry) => React.createElement(
               "div",
-              { className: "config-setting-cell" },
-              React.createElement("strong", null, entry.key),
-              React.createElement("small", null, entry.section)
-            ),
-            React.createElement("strong", { className: "config-static-value" }, String(entry.value))
-          ))
+              { key: `editable-${entry.section}-${entry.key}`, className: "library-table-row config-live-table-row", role: "row" },
+              React.createElement(
+                "div",
+                { className: "config-setting-cell" },
+                React.createElement("strong", null, entry.key),
+                React.createElement("small", null, entry.section)
+              ),
+              React.createElement(
+                "form",
+                {
+                  className: "config-edit-form",
+                  key: `config-form-${String(entry.key || "").trim().toLowerCase()}-${settingsInputResetTokenByKey[String(entry.key || "").trim().toLowerCase()] || 0}`,
+                  onSubmit: async (event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    await submitConfigChange(entry.key, formData.get("value"));
+                  },
+                },
+                React.createElement("input", {
+                  name: "value",
+                  defaultValue: String(entry.value),
+                  className: "config-input",
+                  disabled: isSending || !isEmbeddingReady,
+                  onChange: () => clearSettingsTabError(),
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "submit",
+                    className: "personalization-custom-save-button active config-apply-save-button",
+                    disabled: isSending || !isEmbeddingReady,
+                    "aria-label": `Save ${entry.key}`,
+                    title: `Save ${entry.key}`,
+                  },
+                  icon(saveIconPath)
+                )
+              )
+            ))
+          )
         )
-      ),
-      React.createElement("p", { className: "config-help" }, panelData.configView.help)
+      )
     );
   }
 
   if (panelData.command === "/info") {
+    const storageGroup = parsedInfoGroups.find((group) => String(group?.title || "").trim().toLowerCase() === "storage");
+    const appGroupTitle = "app";
+    const vectorDbValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "vector db")?.value || "";
+    const postgresValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "postgres")?.value || "";
+    const embeddableExtensionsValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "embeddable extensions")?.value || "";
+    const embeddableExtensions = embeddableExtensionsValue
+      .split(",")
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+    const normalizeStorageStatus = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (!normalized || normalized === "n/a" || normalized === "not configured") {
+        return "disconnected";
+      }
+      return "active";
+    };
+    const infoServiceRows = [
+      {
+        key: "backend",
+        label: "backend",
+        status: serviceStatuses.backend || "active",
+        description: "Web API gateway handling authentication, sessions, and orchestration.",
+      },
+      {
+        key: "retriever",
+        label: "retriever",
+        status: serviceStatuses.retriever || retrieverStatus,
+        description: "Runs retrieval, prompt assembly, and /info /config command handling.",
+      },
+      {
+        key: "embedder",
+        label: "embedder",
+        status: serviceStatuses.embedder || embedderStatus,
+        description: "Processes library documents and generates embeddings for semantic search.",
+      },
+      {
+        key: "ocr-scanner",
+        label: "ocr scanner",
+        status: serviceStatuses.ocrScanner || "disconnected",
+        description: "Extracts text from scanned PDFs and images for retrieval and embedding.",
+      },
+      {
+        key: "vector-db",
+        label: "vector db",
+        status: normalizeStorageStatus(vectorDbValue),
+        description: "Stores vector embeddings used for nearest-neighbor retrieval.",
+      },
+      {
+        key: "postgres",
+        label: "postgres",
+        status: normalizeStorageStatus(postgresValue),
+        description: "Stores chat/session data, app metadata, and relational state.",
+      },
+    ];
+
     return React.createElement(
       "div",
       { className: "info-groups" },
@@ -305,33 +535,64 @@ export function renderPanelContent({
         "section",
         { className: "info-group-card" },
         React.createElement("h4", null, "Status"),
-        React.createElement(
+        ...infoServiceRows.map((service) => React.createElement(
           "div",
-          { className: "info-row" },
-          React.createElement("span", null, "retriever"),
+          { key: service.key, className: "info-row info-service-row" },
+          React.createElement(
+            "span",
+            { className: "info-service-meta" },
+            React.createElement("strong", null, service.label),
+            React.createElement("small", null, service.description)
+          ),
           React.createElement(
             "strong",
             null,
-            React.createElement("span", { className: `status-badge ${retrieverStatus}` }, retrieverStatus)
+            React.createElement("span", { className: `status-badge ${service.status}` }, service.status)
           )
-        ),
-        React.createElement(
-          "div",
-          { className: "info-row" },
-          React.createElement("span", null, "embedder"),
-          React.createElement(
-            "strong",
-            null,
-            React.createElement("span", { className: `status-badge ${embedderStatus}` }, embedderStatus)
-          )
-        ),
-        React.createElement(
-          "p",
-          { className: "config-help" },
-          "Includes runtime model selection, vector/postgres storage wiring, and state-file paths."
-        )
+        ))
       ),
-      ...parsedInfoGroups.map((group) => React.createElement(
+      ...parsedInfoGroups
+        .filter((group) => {
+          const normalizedTitle = String(group?.title || "").trim().toLowerCase();
+          return normalizedTitle !== appGroupTitle && normalizedTitle !== "state";
+        })
+        .map((group) => {
+          if (String(group.title || "").trim().toLowerCase() === "storage") {
+            return React.createElement(
+              "section",
+              { key: group.title, className: "info-group-card" },
+              React.createElement("h4", null, group.title),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Knowledge base"),
+                React.createElement("strong", null, "Qdrant")
+              ),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Persistent storage"),
+                React.createElement("strong", null, "Postgres")
+              ),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Embeddable files"),
+                React.createElement(
+                  "strong",
+                  { className: "info-extension-chip-row" },
+                  ...(embeddableExtensions.length
+                    ? embeddableExtensions.map((extension) => React.createElement(
+                      "span",
+                      { key: `embeddable-${extension}`, className: `library-extension-chip ${getExtensionColorClass(extension)}` },
+                      extension
+                    ))
+                    : [React.createElement("span", { key: "embeddable-empty" }, "n/a")])
+                )
+              )
+            );
+          }
+          return React.createElement(
         "section",
         { key: group.title, className: "info-group-card" },
         React.createElement("h4", null, group.title),
@@ -341,7 +602,8 @@ export function renderPanelContent({
           React.createElement("span", null, item.key),
           React.createElement("strong", null, item.value)
         ))
-      ))
+          );
+        })
     );
   }
 
@@ -363,31 +625,24 @@ export function renderPanelContent({
   }
 
   if (panelData.command === "/general" && panelData.content) {
-    const uiModes = panelData.content.ui?.modes || [];
-    const currentUiMode = panelData.content.ui?.currentMode || null;
     const assistantModes = panelData.content.assistant?.modes || [];
     const currentAssistantMode = panelData.content.assistant?.currentMode || null;
     return React.createElement(
       "div",
       { className: "info-groups general-settings-grid" },
-      React.createElement(
-        "section",
-        { className: "info-group-card general-settings-card" },
-        renderModeDropdown({
-          label: "UI-Mode",
-          currentId: currentUiMode,
-          options: uiModes,
-          kind: "ui",
-          isOptionDisabled: null,
-        }),
-        renderModeDropdown({
-          label: "Assistant mode",
-          currentId: currentAssistantMode,
-          options: assistantModes,
-          kind: "assistant",
+      React.createElement(GeneralPreviewSettings, {
+        assistantModes,
+        currentAssistantMode,
+        chevron,
+        check,
+        renderModeDropdown: ({ label, currentId, options, kind }) => renderModeDropdown({
+          label,
+          currentId,
+          options,
+          kind,
           isOptionDisabled: (optionId) => disabledAssistantModeSet.has(optionId),
-        })
-      )
+        }),
+      })
     );
   }
 
@@ -401,7 +656,7 @@ export function renderPanelContent({
           return React.createElement(
             "section",
             { key: section.id, className: "info-group-card personalization-section-card" },
-            React.createElement("h4", null, section.title),
+            React.createElement("h5", { className: "personalization-option-heading" }, section.title),
             React.createElement(
               "div",
               { className: "personalization-custom-instructions-row" },
@@ -441,19 +696,21 @@ export function renderPanelContent({
         if (section.id === "about-you") {
           return React.createElement(
             "section",
-            { key: section.id, className: "info-group-card personalization-section-card" },
+            { key: section.id, className: "info-group-card personalization-section-card personalization-about-you-card" },
             React.createElement("h4", null, section.title),
-            React.createElement("h5", { className: "personalization-subheadline" }, "Personal details"),
+            React.createElement("div", { className: "personalization-section-divider", "aria-hidden": "true" }),
             React.createElement(
               "div",
-              { className: "personalization-custom-instructions-row" },
+              { className: "personalization-custom-instructions-row personalization-about-you-row" },
+              React.createElement("label", { className: "personalization-field-label", htmlFor: "personalization-nickname-input" }, "Nickname"),
               React.createElement(
                 "div",
                 { className: "personalization-custom-instructions-input-shell" },
                 React.createElement("input", {
+                  id: "personalization-nickname-input",
                   className: "personalization-custom-instructions-input",
                   value: nicknameValue,
-                  placeholder: "Nickname",
+                  placeholder: "What should the assistant call you?",
                   onChange: (event) => updateNicknameDraft(event.currentTarget.value),
                   disabled: interactionDisabled,
                   "aria-label": "Nickname",
@@ -474,14 +731,16 @@ export function renderPanelContent({
             ),
             React.createElement(
               "div",
-              { className: "personalization-custom-instructions-row" },
+              { className: "personalization-custom-instructions-row personalization-about-you-row" },
+              React.createElement("label", { className: "personalization-field-label", htmlFor: "personalization-occupation-input" }, "Occupation"),
               React.createElement(
                 "div",
                 { className: "personalization-custom-instructions-input-shell" },
                 React.createElement("input", {
+                  id: "personalization-occupation-input",
                   className: "personalization-custom-instructions-input",
                   value: occupationValue,
-                  placeholder: "Occupation",
+                  placeholder: "What do you do?",
                   onChange: (event) => updateOccupationDraft(event.currentTarget.value),
                   disabled: interactionDisabled,
                   "aria-label": "Occupation",
@@ -502,14 +761,16 @@ export function renderPanelContent({
             ),
             React.createElement(
               "div",
-              { className: "personalization-custom-instructions-row" },
+              { className: "personalization-custom-instructions-row personalization-about-you-row" },
+              React.createElement("label", { className: "personalization-field-label", htmlFor: "personalization-about-user-input" }, "More about you"),
               React.createElement(
                 "div",
                 { className: "personalization-custom-instructions-input-shell" },
                 React.createElement("textarea", {
+                  id: "personalization-about-user-input",
                   className: "personalization-custom-instructions-input",
                   value: moreAboutUserValue,
-                  placeholder: "More about you",
+                  placeholder: "Anything else that helps personalize responses",
                   rows: 1,
                   onChange: (event) => {
                     autoResizeTextarea(event.currentTarget);
@@ -549,13 +810,24 @@ export function renderPanelContent({
           "section",
           { key: section.id, className: "info-group-card general-settings-card personalization-settings-card" },
           React.createElement("h4", null, section.title),
+          React.createElement("div", { className: "personalization-section-divider", "aria-hidden": "true" }),
           renderModeDropdown({
             label: section.settings.baseStyleTone.label,
+            description: "Set the style and tone of how the assistant responds to you.",
             currentId: section.settings.baseStyleTone.currentId,
             options: section.settings.baseStyleTone.options,
             kind: "personalization:baseStyleTone",
           }),
-          React.createElement("h5", { className: "personalization-subheadline" }, "Characteristics"),
+          React.createElement(
+            "div",
+            { className: "personalization-subheadline-block" },
+            React.createElement("h5", { className: "personalization-subheadline" }, "Characteristics"),
+            React.createElement(
+              "p",
+              { className: "personalization-subheadline-description" },
+              "Choose additional customizations on top of your base style and tone."
+            )
+          ),
           renderModeDropdown({
             label: section.settings.warm.label,
             currentId: section.settings.warm.currentId,
@@ -588,13 +860,6 @@ export function renderPanelContent({
       "section",
       { className: "filter-table-wrapper" },
       React.createElement(
-        "p",
-        { className: "filter-scope-note" },
-        isChatScopedFilter
-          ? "Note: Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
-          : "Note: Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
-      ),
-      React.createElement(
         "div",
         { className: "filter-table", role: "table", "aria-label": "Tag filters" },
         React.createElement(
@@ -602,7 +867,7 @@ export function renderPanelContent({
           { className: "filter-table-head", role: "row" },
           React.createElement("strong", { role: "columnheader" }, "Tag"),
           React.createElement("strong", { role: "columnheader" }, "Files"),
-          React.createElement("strong", { role: "columnheader" }, "Action")
+          React.createElement("strong", { role: "columnheader", className: "filter-action-header" }, "Action")
         ),
         rows.length === 0
           ? React.createElement("p", { className: "archive-empty" }, "No tags available yet.")
@@ -630,10 +895,91 @@ export function renderPanelContent({
               )
             );
           })
+      ),
+      React.createElement(
+        "p",
+        { className: "filter-scope-note" },
+        isChatScopedFilter
+          ? "Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
+          : "Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
       )
     );
   }
   if ((panelData.command === "/help" || panelData.command === "?") && parsedHelpPanel) {
+    if (Array.isArray(parsedHelpPanel.sections)) {
+      return React.createElement(
+        "div",
+        { className: "help-grid" },
+        ...parsedHelpPanel.sections.map((section, sectionIndex) => {
+          const paragraphs = Array.isArray(section?.paragraphs) ? section.paragraphs : [];
+          const userInputNotes = Array.isArray(section?.userInputNotes) ? section.userInputNotes : [];
+          const sectionExtensions = Array.isArray(section?.extensions) ? section.extensions : [];
+          const assistantModes = Array.isArray(section?.assistantModes) ? section.assistantModes : [];
+          return React.createElement(
+            "section",
+            { key: section?.id || `help-section-${sectionIndex}`, className: "info-group-card" },
+            React.createElement("h4", null, section?.title || "Section"),
+            ...paragraphs.map((line, idx) => React.createElement("p", { key: `help-section-${sectionIndex}-line-${idx}` }, line)),
+            assistantModes.length
+              ? React.createElement(
+                React.Fragment,
+                { key: `help-section-${sectionIndex}-assistant-modes` },
+                React.createElement("h5", null, "Assistant modes"),
+                React.createElement(
+                  "div",
+                  { className: "library-table help-assistant-modes-table", role: "table", "aria-label": "Assistant modes" },
+                  React.createElement(
+                    "div",
+                    { className: "library-table-head help-assistant-modes-head", role: "row" },
+                    React.createElement("span", null, "Mode"),
+                    React.createElement("span", null, "Description")
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "library-table-body", role: "rowgroup" },
+                    ...assistantModes.map((mode, idx) => React.createElement(
+                      "div",
+                      { key: `help-section-${sectionIndex}-assistant-mode-${idx}`, className: "library-table-row help-assistant-modes-row", role: "row" },
+                      React.createElement("strong", null, mode?.label || "n/a"),
+                      React.createElement("span", null, mode?.description || "")
+                    ))
+                  )
+                )
+              )
+              : null,
+            userInputNotes.length
+              ? React.createElement(
+                React.Fragment,
+                { key: `help-section-${sectionIndex}-composer` },
+                React.createElement("h5", null, section?.userInputHeading || "User input"),
+                ...userInputNotes.map((note, idx) => React.createElement("p", { key: `help-section-${sectionIndex}-user-input-note-${idx}` }, note))
+              )
+              : null,
+            sectionExtensions.length
+              ? React.createElement(
+                React.Fragment,
+                { key: `help-section-${sectionIndex}-attachments` },
+                React.createElement("h5", null, section?.extensionHeading || "File extensions"),
+                React.createElement(
+                  "div",
+                  { className: "info-extension-chip-row" },
+                  ...sectionExtensions.map((extension, idx) => {
+                    const normalized = String(extension || "").trim().replace(/^\./, "").toLowerCase();
+                    const colorClass = getExtensionColorClass(normalized);
+                    return React.createElement(
+                      "span",
+                      { key: `help-section-${sectionIndex}-extension-${idx}`, className: `library-extension-chip ${colorClass}`.trim() },
+                      `.${normalized}`
+                    );
+                  })
+                )
+              )
+              : null
+          );
+        })
+      );
+    }
+
     return React.createElement(
       "div",
       { className: "help-grid" },
