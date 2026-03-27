@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,6 +97,26 @@ def get_model_bundle() -> tuple[WhisperProcessor, WhisperForConditionalGeneratio
     return _model_bundle["processor"], _model_bundle["model"]
 
 
+LANGUAGE_TOKEN_PATTERN = re.compile(r"^<\|([a-z]{2})\|>$")
+
+
+def detect_language_from_generated_ids(processor: WhisperProcessor, predicted_ids: object) -> str | None:
+    try:
+        if hasattr(predicted_ids, "sequences"):
+            sequence = predicted_ids.sequences[0].tolist()
+        else:
+            sequence = predicted_ids[0].tolist()
+    except Exception:
+        return None
+
+    for token_id in sequence[:8]:
+        token = processor.tokenizer.convert_ids_to_tokens(int(token_id))
+        match = LANGUAGE_TOKEN_PATTERN.match(str(token or ""))
+        if match:
+            return match.group(1).lower()
+    return None
+
+
 def transcribe_audio(_audio_path: Path) -> dict[str, object]:
     processor, model = get_model_bundle()
 
@@ -119,16 +140,28 @@ def transcribe_audio(_audio_path: Path) -> dict[str, object]:
         sampling_rate=sampling_rate,
         return_tensors="pt",
     ).input_features
-    predicted_ids = model.generate(input_features)
-    transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)
-    text = transcription[0].strip() if transcription else ""
+    transcribe_predicted = model.generate(
+        input_features,
+        task="transcribe",
+        return_dict_in_generate=True,
+    )
+    detected_language = detect_language_from_generated_ids(processor, transcribe_predicted)
+
+    translate_predicted = model.generate(
+        input_features,
+        task="translate",
+        return_dict_in_generate=True,
+    )
+    translated = processor.batch_decode(translate_predicted.sequences, skip_special_tokens=True)
+    text = translated[0].strip() if translated else ""
 
     return {
         "text": text,
-        "language": "unknown",
+        "detected_language": detected_language or "unknown",
         "segments": [],
         "duration_seconds": round(duration_seconds, 3),
         "sample_rate": DEFAULT_SAMPLE_RATE,
+        "task": "translate_to_english",
     }
 
 

@@ -231,6 +231,7 @@ export async function listManagedLibraryFiles({ userId, isAdmin = false }) {
     lastError: row.last_error,
     lastJobId: row.last_job_id,
     extension: row.extension,
+    detectedLanguage: row.detected_language || null,
     lastModified: row.last_modified,
     hash: row.file_hash,
     chunkCount: row.chunk_count,

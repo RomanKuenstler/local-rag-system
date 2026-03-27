@@ -84,7 +84,8 @@ Current behavior:
 
 - Accepts `.wav`, `.mp3`, and `.m4a` files.
 - Validates request type + payload shape and returns normalized response metadata.
-- Runs Whisper Small (`openai/whisper-small`) to transcribe audio to text for downstream embedding.
+- Detects spoken language and returns it as metadata (`detected_language`).
+- Runs Whisper Small (`openai/whisper-small`) in translate mode to return English text for downstream embedding.
 
 ## Repository layout
 

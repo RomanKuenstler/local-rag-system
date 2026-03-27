@@ -126,6 +126,7 @@ The system is composed of eight services coordinated by Docker Compose:
 
 - `GET /healthz`
 - `POST /audio/transcribe`
+  - Detects source language and translates transcription output to English for embedding.
 
 ---
 

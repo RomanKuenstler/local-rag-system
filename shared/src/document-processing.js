@@ -749,12 +749,23 @@ export async function normalizeIndexableFileByExtension(filePath, extension, enc
   }
   if (AUDIO_EXTENSIONS.has(normalizedExtension)) {
     if (typeof options.audioTranscriptionHandler === "function") {
-      const transcribedText = await options.audioTranscriptionHandler({
+      const transcriptionResult = await options.audioTranscriptionHandler({
         filePath,
         extension: normalizedExtension,
         relativePath: options.relativePath,
       });
-      return normalizeTextForIndexing(typeof transcribedText === "string" ? transcribedText : "");
+      if (transcriptionResult && typeof transcriptionResult === "object") {
+        const text = normalizeTextForIndexing(typeof transcriptionResult.text === "string" ? transcriptionResult.text : "");
+        return {
+          text,
+          metadata: {
+            detectedLanguage: typeof transcriptionResult.detectedLanguage === "string"
+              ? transcriptionResult.detectedLanguage
+              : null,
+          },
+        };
+      }
+      return normalizeTextForIndexing(typeof transcriptionResult === "string" ? transcriptionResult : "");
     }
     return "";
   }
@@ -817,10 +828,16 @@ export async function readTextFilesRecursively(
 
       try {
         const relativePath = path.relative(dirPath, itemPath);
-        const content = await normalizeIndexableFileByExtension(itemPath, ext, encoding, {
+        const extraction = await normalizeIndexableFileByExtension(itemPath, ext, encoding, {
           ...options,
           relativePath,
         });
+        const content = extraction && typeof extraction === "object" && !Array.isArray(extraction)
+          ? String(extraction.text || "")
+          : String(extraction || "");
+        const metadata = extraction && typeof extraction === "object" && !Array.isArray(extraction)
+          ? extraction.metadata || null
+          : null;
 
         if (!content || content.length === 0) {
           console.log(`Skipping file with no indexable text: ${itemPath}`);
@@ -833,6 +850,7 @@ export async function readTextFilesRecursively(
           filename: path.basename(itemPath),
           extension: ext,
           content,
+          detectedLanguage: metadata?.detectedLanguage || null,
           hash: buildIndexRelevantHash(content),
           size: stats.size,
           lastModified: stats.mtimeMs,

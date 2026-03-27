@@ -266,11 +266,17 @@ async function requestLibraryAudioTranscription({ relativePath }) {
     if (!transcribedText.trim()) {
       return null;
     }
+    const detectedLanguage = typeof payload?.transcription?.detected_language === "string"
+      ? payload.transcription.detected_language
+      : null;
 
     console.log(
-      `[embedder] Audio transcription extracted for ${normalizedPath} (${transcribedText.length} chars)`
+      `[embedder] Audio transcription extracted for ${normalizedPath} (${transcribedText.length} chars, detected_language=${detectedLanguage || "unknown"})`
     );
-    return transcribedText;
+    return {
+      text: transcribedText,
+      detectedLanguage,
+    };
   } catch (error) {
     console.warn(`[embedder] Audio transcription request error for ${normalizedPath}: ${error.message}`);
     return null;
