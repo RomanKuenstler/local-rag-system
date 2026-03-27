@@ -546,7 +546,10 @@ export function renderPanelContent({
         ))
       ),
       ...parsedInfoGroups
-        .filter((group) => String(group?.title || "").trim().toLowerCase() !== appGroupTitle)
+        .filter((group) => {
+          const normalizedTitle = String(group?.title || "").trim().toLowerCase();
+          return normalizedTitle !== appGroupTitle && normalizedTitle !== "state";
+        })
         .map((group) => {
           if (String(group.title || "").trim().toLowerCase() === "storage") {
             return React.createElement(
