@@ -350,6 +350,28 @@ function buildPersonalizationContent(preferences) {
   };
 }
 
+function buildWebUiHelpContent() {
+  return [
+    "Quick help",
+    "",
+    "This guide is for the Web UI experience for regular users.",
+    "Use it to understand where your answers come from and how to tune the assistant for your day-to-day work.",
+    "",
+    "Commands:",
+    "- Library  Your library is the document set the assistant searches before answering. Keep files focused, well titled, and up to date for better results.",
+    "- Preferences  Open Preferences from the user menu to control chat behavior, filters, and archive options used across the Web UI.",
+    "- Personalization  Personalization changes tone and response style (for example concise vs. detailed) without changing the factual source of answers.",
+    "- Global vs chat filtering  Global filters apply everywhere. Chat filters only narrow context for the current chat and cannot override globally disabled tags.",
+    "- Prompt attachments  You can attach files to a single message when asking a question. Those files are used only for that request and do not replace your library.",
+    "- Chats and answer sources  Each chat keeps its own history. Assistant answers use both chat context and matched library evidence, and source snippets show what was used.",
+    "",
+    "Tips:",
+    "- Start a new chat when switching to a different topic to keep retrieval focused.",
+    "- If an answer feels off, check filters first, then rephrase with specific keywords from your documents.",
+    "- Prefer smaller, topic-specific files over one very large mixed document for more reliable matches.",
+  ].join("\n");
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -1879,6 +1901,16 @@ function App() {
           command: "/filter",
           title: "Filter",
           content: null,
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
+      } else if (selectedTab.id === "help") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/help",
+          title: "Help",
+          content: buildWebUiHelpContent(),
           severity: null,
           responseType: null,
           configView: null,
