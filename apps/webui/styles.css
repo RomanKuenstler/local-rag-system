@@ -2353,6 +2353,19 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   width: fit-content;
   font-size: 0.8rem;
 }
+
+.help-assistant-modes-table {
+  max-height: none;
+}
+.help-assistant-modes-head,
+.help-assistant-modes-row {
+  grid-template-columns: minmax(120px, 0.8fr) minmax(220px, 2fr);
+}
+.help-assistant-modes-head > :nth-child(2),
+.help-assistant-modes-row > :nth-child(2) {
+  justify-self: start;
+  text-align: left;
+}
 .help-tips { margin: 0; padding-left: 1.1rem; color: #334155; display: grid; gap: 0.3rem; }
 
 .floating-menu {

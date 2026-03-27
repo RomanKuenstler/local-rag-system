@@ -350,6 +350,61 @@ function buildPersonalizationContent(preferences) {
   };
 }
 
+function buildWebUiHelpContent() {
+  return {
+    sections: [
+      {
+        id: "chat-usage",
+        title: "Chat Usage",
+        paragraphs: [
+          "Create a chat with the + New Chat button in the sidebar. Use separate chats for separate topics so answers stay focused.",
+          "Open the chat menu (⋯) to rename chats, download chats, archive chats you no longer need, or remove chats. Here you can also filter the applied knowledge base for this specific chat by the provided tags.",
+        ],
+        userInputHeading: "User input",
+        userInputNotes: [
+          "Use the input field at the bottom to type your question or instruction, make sure to be percise and think of good prompting and give the needed context.",
+          "Press Enter to send, or Shift+Enter for a new line.",
+          "You can attach up to 3 files to a single prompt.",
+        ],
+        extensionHeading: "Attachable file extensions",
+        extensions: PROMPT_ATTACHMENT_RULES.allowedExtensions,
+      },
+      {
+        id: "library",
+        title: "Library",
+        paragraphs: [
+          "The Library can include system/admin controlled files and user controlled files. System/admin files are managed centrally and are available to users without giving edit or delete access.",
+          "User controlled files are the files you upload yourself. You can manage their availability per file with disable/enable and remove them when they are no longer needed.",
+          "Disable removes a file from retrieval results without deleting it. Enable makes the file available for retrieval again.",
+          "Delete permanently removes your own uploaded file from your user scope. It does not delete system/admin managed files for other users.",
+        ],
+        extensionHeading: "Embeddable file extensions",
+        extensions: LIBRARY_UPLOAD_RULES.allowedExtensions,
+      },
+      {
+        id: "personalization",
+        title: "Personalization",
+        paragraphs: [
+          "Custom instructions are persistent guidance for how the assistant should behave across your chats (for example tone or response format preferences).",
+        ],
+        assistantModes: ASSISTANT_MODE_OPTIONS.map((mode) => ({
+          label: mode.label,
+          description: mode.description,
+        })),
+      },
+      {
+        id: "preferences",
+        title: "Preferences",
+        paragraphs: [
+          "Settings Tab: you can adjust runtime retrieval settings that affect how many matches are considered and how strict matching should be, helping you tune recall versus precision.",
+          "Filter Tab: you manage global tag filters for your session. Tags disabled here are excluded in all chats, and chat-level filters cannot re-enable globally disabled tags.",
+          "Archive Tab: you can review archived chats and restore or permanently remove them. This helps keep the active chat list clean while still keeping older work accessible when needed.",
+        ],
+      },
+    ],
+  };
+}
+
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -1883,6 +1938,16 @@ function App() {
           responseType: null,
           configView: null,
         };
+      } else if (selectedTab.id === "help") {
+        nextPanel = {
+          id: crypto.randomUUID(),
+          command: "/help",
+          title: "Help",
+          content: buildWebUiHelpContent(),
+          severity: null,
+          responseType: null,
+          configView: null,
+        };
       } else {
         const payload = await fetchPanelCommand(selectedTab.command);
         nextPanel = buildPanelDataFromCommand(selectedTab.command, payload);
@@ -2444,7 +2509,9 @@ function App() {
     ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : [];
   const parsedHelpPanel = activeModalPanel?.command === "/help" || activeModalPanel?.command === "?"
-    ? parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
+    ? (activeModalPanel?.content && typeof activeModalPanel.content === "object" && Array.isArray(activeModalPanel.content.sections)
+      ? activeModalPanel.content
+      : parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || "")))
     : null;
   const configSections = activeModalPanel?.command === "/config" && activeModalPanel.configView
     ? activeModalPanel.configView.sections
