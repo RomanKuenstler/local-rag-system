@@ -368,10 +368,11 @@ export function renderPanelContent({
     element.style.height = "auto";
     element.style.height = `${Math.max(element.scrollHeight, 24)}px`;
   };
-  const renderModeDropdown = ({ label, currentId, options, kind, isOptionDisabled }) => React.createElement(
+  const renderModeDropdown = ({ label, description, currentId, options, kind, isOptionDisabled }) => React.createElement(
     GeneralDropdown,
     {
       label,
+      description,
       currentId,
       options,
       kind,
@@ -732,13 +733,28 @@ export function renderPanelContent({
           "section",
           { key: section.id, className: "info-group-card general-settings-card personalization-settings-card" },
           React.createElement("h4", null, section.title),
+          React.createElement(
+            "p",
+            { className: "personalization-section-description" },
+            "Set the style and tone of how the assistant responds to you."
+          ),
           renderModeDropdown({
             label: section.settings.baseStyleTone.label,
+            description: "This doesn't impact core capabilities.",
             currentId: section.settings.baseStyleTone.currentId,
             options: section.settings.baseStyleTone.options,
             kind: "personalization:baseStyleTone",
           }),
-          React.createElement("h5", { className: "personalization-subheadline" }, "Characteristics"),
+          React.createElement(
+            "div",
+            { className: "personalization-subheadline-block" },
+            React.createElement("h5", { className: "personalization-subheadline" }, "Characteristics"),
+            React.createElement(
+              "p",
+              { className: "personalization-subheadline-description" },
+              "Choose additional customizations on top of your base style and tone."
+            )
+          ),
           renderModeDropdown({
             label: section.settings.warm.label,
             currentId: section.settings.warm.currentId,
