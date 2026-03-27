@@ -23,6 +23,7 @@ import {
   buildFallbackChatExportPayload,
   triggerJsonDownload,
 } from "./chat-export.js";
+import { createApiClient } from "./api-client.js";
 
 import {
   ADMIN_PAGE_HASH,
@@ -239,37 +240,12 @@ function App() {
     }
   }
 
-  function ensureAuthenticatedForPreferencesApi(featureLabel = "this preferences action") {
-    if (isAuthenticated && authSessionTokenRef.current) {
-      return;
-    }
-    clearAuthenticatedSessionState();
-    throw new Error(`Please sign in again to use ${featureLabel}.`);
-  }
-
-  async function apiFetchForPreferences(pathOrUrl, options = {}, featureLabel = "this preferences action") {
-    ensureAuthenticatedForPreferencesApi(featureLabel);
-    return apiFetch(pathOrUrl, options, { skipAuth: false });
-  }
-
-  async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
-    const rawUrl = String(pathOrUrl || "");
-    const requestUrl = rawUrl.startsWith("http") ? rawUrl : `${API_BASE_URL}${rawUrl}`;
-    const headers = new Headers(options.headers || {});
-    if (!skipAuth && authSessionTokenRef.current) {
-      headers.set("X-Session-Token", authSessionTokenRef.current);
-    }
-
-    const response = await fetch(requestUrl, {
-      ...options,
-      headers,
-    });
-
-    if (response.status === 401 && !skipAuth) {
-      clearAuthenticatedSessionState();
-    }
-    return response;
-  }
+  const { apiFetch, apiFetchForPreferences } = createApiClient({
+    apiBaseUrl: API_BASE_URL,
+    getSessionToken: () => authSessionTokenRef.current,
+    onUnauthorized: clearAuthenticatedSessionState,
+    isAuthenticated: () => Boolean(isAuthenticated && authSessionTokenRef.current),
+  });
 
   async function restoreActiveSession() {
     let storedToken = "";
