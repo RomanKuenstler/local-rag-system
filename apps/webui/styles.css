@@ -1116,10 +1116,10 @@ body {
 }
 .library-delete-confirm,
 .library-delete-cancel {
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  padding: 0.4rem 0.75rem;
-  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 0.43rem 0.86rem;
+  font-weight: 700;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1128,16 +1128,42 @@ body {
 .library-delete-confirm {
   background: #dc2626;
   color: #fff;
-  border-color: #dc2626;
 }
 .library-delete-cancel {
-  background: #fff;
+  background: transparent;
   color: #111827;
+}
+.library-delete-cancel:hover:not(:disabled) {
+  background: #f0f0f2;
+}
+.library-delete-confirm:hover:not(:disabled) {
+  background: #b91c1c;
+}
+.library-delete-confirm:disabled,
+.library-delete-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .library-delete-confirm .icon,
 .library-delete-cancel .icon {
   width: 0.86rem;
   height: 0.86rem;
+}
+.dialog-delete-chip {
+  margin-top: -0.2rem;
+}
+.dialog-delete-chip.composer-attachment-chip {
+  max-width: 100%;
+}
+.delete-user-preview {
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 0.45rem 0.55rem;
+  margin-top: -0.15rem;
+}
+.dialog-delete-chat-chip {
+  width: 100%;
 }
 .status-badge.with-spinner {
   gap: 0.35rem;
@@ -1925,7 +1951,8 @@ body {
   bottom: calc(100% + 0.38rem);
   width: min(58vw, 25rem);
   max-height: min(55vh, 26rem);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid #d4d4d8;
   border-radius: 12px;
   padding: 0.68rem 1.2rem;
@@ -2156,6 +2183,7 @@ body {
   fill: #fff;
 }
 .composer-attachment-icon.is-red { background: #ef4444; }
+.composer-attachment-icon.is-black { background: #111827; }
 .composer-attachment-icon.is-gray { background: #6b7280; }
 .composer-attachment-icon.is-blue { background: #2563eb; }
 .composer-attachment-icon.is-purple { background: #8b5cf6; }

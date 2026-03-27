@@ -23,387 +23,45 @@ import {
   buildFallbackChatExportPayload,
   triggerJsonDownload,
 } from "./chat-export.js";
+import { createApiClient } from "./api-client.js";
 
-const UI_MODE_OPTIONS = [
-  { id: "clean", description: "Clean chat-focused UI without retrieval diagnostics.", shortDescription: "Focused chat view" },
-  { id: "rag", description: "Retrieval-debug UI that includes evidence quality and similarity details.", shortDescription: "Show retrieval details" },
-];
-const ASSISTANT_MODE_OPTIONS = [
-  { id: "simple", label: "Simple", description: "For everyday simple tasks", shortDescription: "Fast and direct" },
-  { id: "refine", label: "Refine", description: "For getting refined answers", shortDescription: "Draft then improve" },
-  { id: "thinking", label: "Thinking", description: "For complex questions", shortDescription: "Deeper reasoning mode" },
-];
-const PERSONALIZATION_OPTIONS = {
-  baseStyleTone: [
-    { id: "default", description: "Default response style." },
-    { id: "professional", description: "Polished and precise." },
-    { id: "friendly", description: "Warm and chatty." },
-    { id: "direct", description: "Direct and encouraging." },
-    { id: "quirky", description: "Playful and imaginative." },
-    { id: "efficient", description: "Concise and plain." },
-    { id: "sceptical", description: "Sceptical and critical." },
-  ],
-  warm: [
-    { id: "more", description: "Friendlier and personable." },
-    { id: "default", description: "Balanced warmth." },
-    { id: "less", description: "More professional and factual." },
-  ],
-  enthusiastic: [
-    { id: "more", description: "More energy and excitement." },
-    { id: "default", description: "Balanced enthusiasm." },
-    { id: "less", description: "Calmer and more neutral." },
-  ],
-  headersAndLists: [
-    { id: "more", description: "Use clear formatting and lists." },
-    { id: "default", description: "Balanced formatting and paragraphs." },
-    { id: "less", description: "More paragraphs instead of lists." },
-  ],
-};
-const DEFAULT_PERSONALIZATION_PREFERENCES = {
-  baseStyleTone: "default",
-  warm: "default",
-  enthusiastic: "default",
-  headersAndLists: "default",
-  customInstructions: "",
-  nickname: "",
-  occupation: "",
-  moreAboutUser: "",
-};
-const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
-const PROMPT_ATTACHMENT_RULES = {
-  maxFiles: 3,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
-};
-const ATTACHMENT_EXTENSION_COLOR_CLASS = {
-  pdf: "is-red",
-  epub: "is-red",
-  md: "is-gray",
-  txt: "is-gray",
-  html: "is-blue",
-  htm: "is-blue",
-  png: "is-purple",
-  jpg: "is-purple",
-  jpeg: "is-purple",
-  webp: "is-purple",
-  csv: "is-green",
-};
-const LIBRARY_UPLOAD_RULES = {
-  maxFiles: 5,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
-};
-const SESSION_ID_STORAGE_KEY = "rag-session-id";
-const CHAT_ID_STORAGE_KEY = "rag-chat-id";
-const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
-const LOGIN_PAGE_HASH = "#login";
-const LIBRARY_PAGE_HASH = "#library";
-const ADMIN_PAGE_HASH = "#admin";
-const PREFERENCES_DIALOG_TABS = [
-  { id: "general", label: "General", command: "/general" },
-  { id: "personalization", label: "Personalization", command: "/personalization" },
-  { id: "settings", label: "Settings", command: "/config" },
-  { id: "filter", label: "Filter" },
-  { id: "archive", label: "Archive" },
-];
-const AUXILIARY_DIALOG_TABS = [
-  { id: "info", label: "Info", command: "/info" },
-  { id: "help", label: "Help", command: "/help" },
-];
-const DEFAULT_FILE_TAG_LABEL = "default";
-const ADMIN_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
-const BERLIN_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
-  timeZone: "Europe/Berlin",
-  day: "2-digit",
-  month: "2-digit",
-  year: "2-digit",
-});
-const BERLIN_TIME_FORMATTER = new Intl.DateTimeFormat("de-DE", {
-  timeZone: "Europe/Berlin",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-function buildChatNameFromId(chatId) {
-  const suffix = String(chatId || "").replace(/^chat-/, "").slice(0, 6) || Math.random().toString(36).slice(2, 8);
-  return `chat-${suffix}`;
-}
-
-function buildInitialChatList(activeChatId) {
-  const primaryId = String(activeChatId || "").trim();
-  if (!primaryId) {
-    return [];
-  }
-  return [{ id: primaryId, name: buildChatNameFromId(primaryId) }];
-}
-
-function getOrCreatePersistentId(storageKey, fallbackPrefix) {
-  try {
-    const stored = window.localStorage.getItem(storageKey);
-    if (stored) return stored;
-    const created = `${fallbackPrefix}-${crypto.randomUUID()}`;
-    window.localStorage.setItem(storageKey, created);
-    return created;
-  } catch {
-    return `${fallbackPrefix}-fallback`;
-  }
-}
-
-function getScoreSeverity(score) {
-  if (!Number.isFinite(score)) return "unknown";
-  if (score >= 0.8) return "high";
-  if (score >= 0.6) return "medium";
-  return "low";
-}
-
-function formatScorePercent(score) {
-  if (!Number.isFinite(score)) return "n/a";
-  return `${(score * 100).toFixed(1).replace(".", ",")}%`;
-}
-
-function getFileExtensionFromName(fileName) {
-  const normalized = String(fileName || "").trim();
-  if (!normalized) return "";
-  const parts = normalized.split(".");
-  if (parts.length <= 1) return "";
-  return parts.pop().toLowerCase();
-}
-
-function getAttachmentColorClass(fileName) {
-  const extension = getFileExtensionFromName(fileName);
-  return ATTACHMENT_EXTENSION_COLOR_CLASS[extension] || "is-gray";
-}
-
-function normalizeLibraryPathDisplay(pathValue) {
-  return String(pathValue || "").replace(/^_library\//, "");
-}
-
-function formatLibraryUpdatedAt(value) {
-  if (!value) {
-    return { date: "n/a", time: "" };
-  }
-  const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return { date: "n/a", time: "" };
-  }
-  return {
-    date: BERLIN_DATE_FORMATTER.format(parsedDate),
-    time: BERLIN_TIME_FORMATTER.format(parsedDate),
-  };
-}
-
-function getCurrentUiModeFromInfoText(infoText) {
-  const parsedGroups = parseSystemInfoContent(infoText || "");
-  const appGroup = parsedGroups.find((group) => group.title === "App");
-  const uiModeEntry = appGroup?.items?.find((item) => item.key.toLowerCase() === "ui mode");
-  return uiModeEntry?.value || "clean";
-}
-
-function getDialogTabById(tabId) {
-  return PREFERENCES_DIALOG_TABS.concat(AUXILIARY_DIALOG_TABS).find((tab) => tab.id === tabId) || PREFERENCES_DIALOG_TABS[0];
-}
-
-function getAssistantModeMeta(modeId) {
-  const normalized = String(modeId || "").trim().toLowerCase();
-  return ASSISTANT_MODE_OPTIONS.find((mode) => mode.id === normalized) || ASSISTANT_MODE_OPTIONS[0];
-}
-
-function isKnownAssistantMode(modeId) {
-  const normalized = String(modeId || "").trim().toLowerCase();
-  return ASSISTANT_MODE_OPTIONS.some((mode) => mode.id === normalized);
-}
-
-function mergeAssistantModes(parsedAssistantModes = [], availableModes = []) {
-  const normalizedById = new Map();
-  for (const mode of ASSISTANT_MODE_OPTIONS) {
-    normalizedById.set(mode.id, {
-      id: mode.id,
-      label: mode.label,
-      description: mode.description,
-      shortDescription: mode.shortDescription,
-    });
-  }
-  for (const mode of Array.isArray(parsedAssistantModes) ? parsedAssistantModes : []) {
-    const id = String(mode?.id || "").trim().toLowerCase();
-    if (!id) continue;
-    const fallback = normalizedById.get(id) || { id, label: id, shortDescription: "", description: "" };
-    normalizedById.set(id, {
-      id,
-      label: fallback.label,
-      shortDescription: fallback.shortDescription,
-      description: String(mode?.description || "").trim() || fallback.description,
-    });
-  }
-  for (const mode of Array.isArray(availableModes) ? availableModes : []) {
-    const id = String(mode?.id || "").trim().toLowerCase();
-    if (!id) continue;
-    const fallback = normalizedById.get(id) || { id, label: id, shortDescription: "", description: "" };
-    normalizedById.set(id, {
-      id,
-      label: String(mode?.label || "").trim() || fallback.label,
-      shortDescription: fallback.shortDescription,
-      description: fallback.description,
-    });
-  }
-  return Array.from(normalizedById.values());
-}
-
-function buildGeneralAssistantPanelContent(assistantAnswer, statusData, currentAssistantMode) {
-  const parsedAssistant = parseAssistantModeContent(assistantAnswer || "");
-  const assistantModes = mergeAssistantModes(parsedAssistant.modes, statusData?.assistant?.availableModes);
-  const parsedCurrentMode = String(parsedAssistant.currentMode || "").trim().toLowerCase();
-  const statusCurrentMode = String(statusData?.assistant?.mode || "").trim().toLowerCase();
-  const localCurrentMode = String(currentAssistantMode || "").trim().toLowerCase();
-  const resolvedCurrentMode = isKnownAssistantMode(parsedCurrentMode)
-    ? parsedCurrentMode
-    : isKnownAssistantMode(statusCurrentMode)
-      ? statusCurrentMode
-      : isKnownAssistantMode(localCurrentMode)
-        ? localCurrentMode
-        : ASSISTANT_MODE_OPTIONS[0].id;
-  return {
-    currentMode: resolvedCurrentMode,
-    modes: assistantModes,
-  };
-}
-
-function isAssistantModeTemporarilyDisabled(modeId) {
-  const normalized = String(modeId || "").trim().toLowerCase();
-  return TEMPORARILY_DISABLED_ASSISTANT_MODES.has(normalized);
-}
-
-function getPendingAssistantMessage(modeId, chainStage) {
-  const normalizedMode = String(modeId || "").trim().toLowerCase();
-  const normalizedStage = String(chainStage || "").trim().toLowerCase();
-  if (normalizedStage === "searching") {
-    return "Searching the knowledge base…";
-  }
-  if (normalizedMode === "refine") {
-    if (normalizedStage === "refining") {
-      return "Refining the final answer…";
-    }
-    return "Drafting an answer…";
-  }
-  return "Assistant is thinking…";
-}
-
-function buildPendingAssistantTrailText(statusTrail) {
-  const normalizedTrail = Array.isArray(statusTrail)
-    ? statusTrail.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-  if (normalizedTrail.length === 0) {
-    return "Assistant is thinking…";
-  }
-  return normalizedTrail.join("\n");
-}
-
-function dedupeStatusTrail(statusTrail) {
-  const deduped = [];
-  for (const step of Array.isArray(statusTrail) ? statusTrail : []) {
-    const normalized = String(step || "").trim();
-    if (!normalized) continue;
-    if (deduped[deduped.length - 1] === normalized) continue;
-    deduped.push(normalized);
-  }
-  return deduped;
-}
-
-function buildPersonalizationContent(preferences) {
-  return {
-    sections: [
-      {
-        id: "personalization",
-        title: "Personalization",
-        settings: {
-          baseStyleTone: {
-            label: "Base style and tone",
-            currentId: preferences.baseStyleTone,
-            options: PERSONALIZATION_OPTIONS.baseStyleTone,
-          },
-          warm: {
-            label: "Warm",
-            currentId: preferences.warm,
-            options: PERSONALIZATION_OPTIONS.warm,
-          },
-          enthusiastic: {
-            label: "Enthusiastic",
-            currentId: preferences.enthusiastic,
-            options: PERSONALIZATION_OPTIONS.enthusiastic,
-          },
-          headersAndLists: {
-            label: "Headers and Lists",
-            currentId: preferences.headersAndLists,
-            options: PERSONALIZATION_OPTIONS.headersAndLists,
-          },
-        },
-      },
-      {
-        id: "custom-instructions",
-        title: "Custom Instructions",
-        description: "Define custom response instructions that will be merged into your session profile prompt.",
-      },
-      {
-        id: "about-you",
-        title: "About You",
-        description: "Store user context and background details for this session profile.",
-      },
-    ],
-  };
-}
-
-function buildWebUiHelpContent() {
-  return {
-    sections: [
-      {
-        id: "chat-usage",
-        title: "Chat Usage",
-        paragraphs: [
-          "Create a chat with the + New Chat button in the sidebar. Use separate chats for separate topics so answers stay focused.",
-          "Open the chat menu (⋯) to rename chats, download chats, archive chats you no longer need, or remove chats. Here you can also filter the applied knowledge base for this specific chat by the provided tags.",
-        ],
-        userInputHeading: "User input",
-        userInputNotes: [
-          "Use the input field at the bottom to type your question or instruction, make sure to be percise and think of good prompting and give the needed context.",
-          "Press Enter to send, or Shift+Enter for a new line.",
-          "You can attach up to 3 files to a single prompt.",
-        ],
-        extensionHeading: "Attachable file extensions",
-        extensions: PROMPT_ATTACHMENT_RULES.allowedExtensions,
-      },
-      {
-        id: "library",
-        title: "Library",
-        paragraphs: [
-          "The Library can include system/admin controlled files and user controlled files. System/admin files are managed centrally and are available to users without giving edit or delete access.",
-          "User controlled files are the files you upload yourself. You can manage their availability per file with disable/enable and remove them when they are no longer needed.",
-          "Disable removes a file from retrieval results without deleting it. Enable makes the file available for retrieval again.",
-          "Delete permanently removes your own uploaded file from your user scope. It does not delete system/admin managed files for other users.",
-        ],
-        extensionHeading: "Embeddable file extensions",
-        extensions: LIBRARY_UPLOAD_RULES.allowedExtensions,
-      },
-      {
-        id: "personalization",
-        title: "Personalization",
-        paragraphs: [
-          "Custom instructions are persistent guidance for how the assistant should behave across your chats (for example tone or response format preferences).",
-        ],
-        assistantModes: ASSISTANT_MODE_OPTIONS.map((mode) => ({
-          label: mode.label,
-          description: mode.description,
-        })),
-      },
-      {
-        id: "preferences",
-        title: "Preferences",
-        paragraphs: [
-          "Settings Tab: you can adjust runtime retrieval settings that affect how many matches are considered and how strict matching should be, helping you tune recall versus precision.",
-          "Filter Tab: you manage global tag filters for your session. Tags disabled here are excluded in all chats, and chat-level filters cannot re-enable globally disabled tags.",
-          "Archive Tab: you can review archived chats and restore or permanently remove them. This helps keep the active chat list clean while still keeping older work accessible when needed.",
-        ],
-      },
-    ],
-  };
-}
+import {
+  ADMIN_PAGE_HASH,
+  ADMIN_PROTECTED_USERNAMES,
+  ASSISTANT_MODE_OPTIONS,
+  AUTH_SESSION_TOKEN_STORAGE_KEY,
+  CHAT_ID_STORAGE_KEY,
+  DEFAULT_FILE_TAG_LABEL,
+  DEFAULT_PERSONALIZATION_PREFERENCES,
+  LIBRARY_PAGE_HASH,
+  LIBRARY_UPLOAD_RULES,
+  LOGIN_PAGE_HASH,
+  PREFERENCES_DIALOG_TABS,
+  PROMPT_ATTACHMENT_RULES,
+  SESSION_ID_STORAGE_KEY,
+  TEMPORARILY_DISABLED_ASSISTANT_MODES,
+  UI_MODE_OPTIONS,
+  buildChatNameFromId,
+  buildGeneralAssistantPanelContent,
+  buildInitialChatList,
+  buildPendingAssistantTrailText,
+  buildPersonalizationContent,
+  buildWebUiHelpContent,
+  dedupeStatusTrail,
+  formatLibraryUpdatedAt,
+  formatScorePercent,
+  getAssistantModeMeta,
+  getAttachmentColorClass,
+  getCurrentUiModeFromInfoText,
+  getDialogTabById,
+  getFileExtensionFromName,
+  getOrCreatePersistentId,
+  getPendingAssistantMessage,
+  getScoreSeverity,
+  isAssistantModeTemporarilyDisabled,
+  isKnownAssistantMode,
+  normalizeLibraryPathDisplay,
+} from "./app-shared.js";
 
 marked.setOptions({
   gfm: true,
@@ -583,37 +241,12 @@ function App() {
     }
   }
 
-  function ensureAuthenticatedForPreferencesApi(featureLabel = "this preferences action") {
-    if (isAuthenticated && authSessionTokenRef.current) {
-      return;
-    }
-    clearAuthenticatedSessionState();
-    throw new Error(`Please sign in again to use ${featureLabel}.`);
-  }
-
-  async function apiFetchForPreferences(pathOrUrl, options = {}, featureLabel = "this preferences action") {
-    ensureAuthenticatedForPreferencesApi(featureLabel);
-    return apiFetch(pathOrUrl, options, { skipAuth: false });
-  }
-
-  async function apiFetch(pathOrUrl, options = {}, { skipAuth = false } = {}) {
-    const rawUrl = String(pathOrUrl || "");
-    const requestUrl = rawUrl.startsWith("http") ? rawUrl : `${API_BASE_URL}${rawUrl}`;
-    const headers = new Headers(options.headers || {});
-    if (!skipAuth && authSessionTokenRef.current) {
-      headers.set("X-Session-Token", authSessionTokenRef.current);
-    }
-
-    const response = await fetch(requestUrl, {
-      ...options,
-      headers,
-    });
-
-    if (response.status === 401 && !skipAuth) {
-      clearAuthenticatedSessionState();
-    }
-    return response;
-  }
+  const { apiFetch, apiFetchForPreferences } = createApiClient({
+    apiBaseUrl: API_BASE_URL,
+    getSessionToken: () => authSessionTokenRef.current,
+    onUnauthorized: clearAuthenticatedSessionState,
+    isAuthenticated: () => Boolean(isAuthenticated && authSessionTokenRef.current),
+  });
 
   async function restoreActiveSession() {
     let storedToken = "";
@@ -1862,7 +1495,6 @@ function App() {
     if (existingPanel && !forceReload) return;
 
     if (!isEmbeddingReady) return;
-    ensureAuthenticatedForPreferencesApi(`${selectedTab.label} preferences`);
     setIsSending(true);
     setIsDialogTabLoading(true);
 
@@ -2741,7 +2373,6 @@ function App() {
   }
 
   async function downloadChat(chat) {
-    ensureAuthenticatedForPreferencesApi("Archive preferences");
     if (!chat?.id) return;
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
@@ -4234,22 +3865,17 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete this file?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path)
+            "Are you sure you want to delete this file?"
           ),
+          renderAttachmentChip({
+            fileName: deleteConfirmFile.path,
+            index: 0,
+            keyPrefix: "delete-file",
+            className: "dialog-delete-chip",
+          }),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "library-delete-confirm",
-                onClick: confirmDeleteLibraryFile,
-              },
-              icon(trashIconPath),
-              "Delete"
-            ),
             React.createElement(
               "button",
               {
@@ -4259,6 +3885,16 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteLibraryFile,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )
@@ -4413,22 +4049,26 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you really want to delete this user?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmUser.username)
+            "Are you sure you really want to delete this user?"
+          ),
+          React.createElement(
+            "div",
+            { className: "side-nav-user delete-user-preview" },
+            React.createElement(
+              "span",
+              { className: "side-nav-avatar-placeholder", "aria-hidden": "true" },
+              String(deleteConfirmUser?.username || "?").slice(0, 1).toUpperCase()
+            ),
+            React.createElement(
+              "span",
+              { className: "side-nav-user-meta" },
+              React.createElement("strong", null, deleteConfirmUser?.displayName || deleteConfirmUser?.username || "Unknown user"),
+              React.createElement("small", null, deleteConfirmUser?.username || "unknown")
+            )
           ),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "library-delete-confirm",
-                onClick: confirmDeleteAdminUser,
-              },
-              icon(trashIconPath),
-              "Delete"
-            ),
             React.createElement(
               "button",
               {
@@ -4438,6 +4078,16 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteAdminUser,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )
@@ -4526,8 +4176,26 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete this chat?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmChat.name)
+            "Are you sure you want to delete this chat?"
+          ),
+          React.createElement(
+            "div",
+            { className: "composer-attachment-chip dialog-delete-chip dialog-delete-chat-chip" },
+            React.createElement(
+              "span",
+              { className: "composer-attachment-icon is-black", "aria-hidden": "true" },
+              React.createElement(
+                "svg",
+                { viewBox: "0 0 24 24", className: "composer-attachment-icon-svg" },
+                React.createElement("path", { d: chatIconPath })
+              )
+            ),
+            React.createElement(
+              "span",
+              { className: "composer-attachment-meta" },
+              React.createElement("p", { className: "composer-attachment-name" }, deleteConfirmChat.name),
+              React.createElement("p", { className: "composer-attachment-ext" }, "chat")
+            )
           ),
           React.createElement(
             "div",

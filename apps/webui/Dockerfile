@@ -2,6 +2,8 @@ FROM nginx:1.27-alpine
 
 COPY index.html /usr/share/nginx/html/index.html
 COPY app.js /usr/share/nginx/html/app.js
+COPY app-shared.js /usr/share/nginx/html/app-shared.js
+COPY api-client.js /usr/share/nginx/html/api-client.js
 COPY utils.js /usr/share/nginx/html/utils.js
 COPY panel-content.js /usr/share/nginx/html/panel-content.js
 COPY chat-export.js /usr/share/nginx/html/chat-export.js
