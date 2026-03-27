@@ -398,6 +398,12 @@ function buildWebUiHelpContent() {
       {
         id: "preferences",
         title: "Preferences",
+        paragraphs: [
+          "In the General tab, you can choose the UI mode and the assistant mode used for your chats. This controls how answers are presented and how much retrieval detail you see in the interface.",
+          "In the Settings tab, you can adjust runtime retrieval settings that affect how many matches are considered and how strict matching should be, helping you tune recall versus precision.",
+          "In the Filter tab, you manage global tag filters for your session. Tags disabled here are excluded in all chats, and chat-level filters cannot re-enable globally disabled tags.",
+          "In the Archive tab, you can review archived chats and restore or permanently remove them. This helps keep the active chat list clean while still keeping older work accessible when needed.",
+        ],
       },
     ],
   };
