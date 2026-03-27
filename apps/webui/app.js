@@ -771,6 +771,7 @@ function App() {
   }
 
   function handleLogout() {
+    setIsUserMenuOpen(false);
     apiFetch(`/api/auth/logout?sessionId=${encodeURIComponent(sessionIdRef.current)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -805,13 +806,9 @@ function App() {
     openUnifiedDialog("help");
   }
 
-  function handleDeleteFromUserMenu() {
+  function openPreferencesFromUserMenu() {
     setIsUserMenuOpen(false);
-    setMessages((prev) => prev.concat(createMessage(
-      "assistant",
-      "Self-service account deletion is not available yet. Please contact an administrator.",
-      { isVolatile: true, evidenceSeverity: "warn" }
-    )));
+    openSettingsDialog();
   }
 
   useEffect(() => {
@@ -3208,17 +3205,6 @@ function App() {
           },
           icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
           React.createElement("span", null, "Personalization")
-        ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && (activeDialogTab === "general" || activeDialogTab === "settings")) ? " active" : ""}`,
-            onClick: openSettingsDialog,
-            disabled: isNavigationLocked || !isEmbeddingReady,
-          },
-          icon(settingsIconPath),
-          React.createElement("span", null, "Preferences")
         )
       ),
       React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
@@ -3427,6 +3413,21 @@ function App() {
                   React.createElement("span", null, "Help")
                 )
               ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openPreferencesFromUserMenu,
+                  },
+                  icon(settingsIconPath),
+                  React.createElement("span", null, "Preferences")
+                )
+              ),
               React.createElement("li", { className: "side-nav-user-menu-divider", role: "separator", "aria-hidden": "true" }),
               React.createElement(
                 "li",
@@ -3452,10 +3453,10 @@ function App() {
                     type: "button",
                     className: "chat-item-actions-option delete",
                     role: "menuitem",
-                    onClick: handleDeleteFromUserMenu,
+                    onClick: handleLogout,
                   },
-                  icon(trashIconPath),
-                  React.createElement("span", null, "Delete")
+                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
+                  React.createElement("span", null, "Logout")
                 )
               )
             )
