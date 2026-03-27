@@ -2321,11 +2321,22 @@ function App() {
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
   const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
+  const infoIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 4a1.25 1.25 0 1 1-1.25 1.25A1.25 1.25 0 0 1 12 6m1.5 12h-3v-2h1V11h-1V9h3v7h1z";
+  const questionIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 16a1.25 1.25 0 1 1 1.25-1.25A1.25 1.25 0 0 1 12 18m2.2-7.3-.9.7c-.7.5-1 1-1 1.8V14h-2v-.8c0-1.2.5-2.2 1.6-2.9l1-.7c.6-.4 1-.9 1-1.5a2 2 0 1 0-4 0H8a4 4 0 1 1 8 0c0 1.1-.6 2-1.8 2.9";
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
   const userIconPath = "M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
   const xIconPath = "M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7l-1.4-1.4L9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z";
+  const getDialogTabIcon = (tabId) => {
+    if (tabId === "personalization") return icon(userIconPath);
+    if (tabId === "settings") return icon("M4 7h10v2H4zm0 8h10v2H4zm12-9h4v4h-4zm0 8h4v4h-4z");
+    if (tabId === "filter") return icon(filterIconPath);
+    if (tabId === "info") return icon(infoIconPath);
+    if (tabId === "archive") return icon(archiveIconPath);
+    if (tabId === "help") return icon(questionIconPath);
+    return icon(settingsIconPath);
+  };
   const renderAttachmentChip = ({ fileName, index, keyPrefix, removable = false, onRemove = null, className = "" }) => {
     const name = String(fileName || "").trim() || `Attachment ${index + 1}`;
     const extension = getFileExtensionFromName(name);
@@ -4513,29 +4524,24 @@ function App() {
           },
           React.createElement(
             "div",
-            { className: "panel-modal-head" },
-            React.createElement("strong", null, "Preferences"),
-            React.createElement(
-              "div",
-              { className: "panel-modal-head-actions" },
-              React.createElement(
-                "button",
-                {
-                  className: "panel-close",
-                  type: "button",
-                  onClick: () => setIsUnifiedDialogOpen(false),
-                  "aria-label": "Close preferences dialog",
-                },
-                "×"
-              )
-            )
-          ),
-          React.createElement(
-            "div",
             { className: "panel-modal-tab-layout" },
             React.createElement(
               "nav",
               { className: "panel-tab-nav", "aria-label": "Preferences sections" },
+              React.createElement(
+                "div",
+                { className: "panel-tab-nav-top" },
+                React.createElement(
+                  "button",
+                  {
+                    className: "panel-close panel-close-sidebar",
+                    type: "button",
+                    onClick: () => setIsUnifiedDialogOpen(false),
+                    "aria-label": "Close preferences dialog",
+                  },
+                  "×"
+                )
+              ),
               ...MENU_DIALOG_TABS.map((tab) => React.createElement(
                 "button",
                 {
@@ -4546,7 +4552,8 @@ function App() {
                   disabled: isDialogTabLoading && tab.id === activeDialogTab,
                   "aria-current": tab.id === activeDialogTab ? "page" : undefined,
                 },
-                tab.label
+                React.createElement("span", { className: "panel-tab-button-icon", "aria-hidden": "true" }, getDialogTabIcon(tab.id)),
+                React.createElement("span", null, tab.label)
               ))
             ),
             React.createElement(

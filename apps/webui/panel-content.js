@@ -2,12 +2,14 @@ import React from "https://esm.sh/react@18";
 
 function GeneralDropdown({
   label,
+  description = "",
   currentId,
   options,
   kind,
   interactionDisabled,
   isOptionDisabled,
   applyPersonalizationChange,
+  onSelectOption,
   chevron,
   check,
 }) {
@@ -44,7 +46,12 @@ function GeneralDropdown({
   return React.createElement(
     "div",
     { className: "general-setting-row", key: `setting-${kind}-${label}` },
-    React.createElement("span", { className: "general-setting-label" }, label),
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, label),
+      description ? React.createElement("small", { className: "general-setting-description" }, description) : null
+    ),
     React.createElement(
       "details",
       {
@@ -83,14 +90,18 @@ function GeneralDropdown({
               disabled: interactionDisabled || optionDisabled,
               onClick: (event) => {
                 event.preventDefault();
-                applyPersonalizationChange(kind, optionId);
+                if (typeof onSelectOption === "function") {
+                  onSelectOption(optionId);
+                } else {
+                  applyPersonalizationChange(kind, optionId);
+                }
                 setIsOpen(false);
               },
             },
             React.createElement(
               "span",
               { className: "general-dropdown-option-copy" },
-              React.createElement("strong", null, optionId),
+              React.createElement("strong", null, option.label || optionId),
               React.createElement("small", null, option.shortDescription || option.description || "")
             ),
             active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
@@ -98,6 +109,185 @@ function GeneralDropdown({
         })
       )
     )
+  );
+}
+
+function VoiceSettingRow({ currentId, options, onSelectOption, chevron, check }) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const rootRef = React.useRef(null);
+  const normalizedCurrentId = String(currentId || "").trim().toLowerCase();
+  const activeOption = options.find((option) => String(option.id || "").trim().toLowerCase() === normalizedCurrentId) || null;
+  const triggerLabel = activeOption?.label || activeOption?.id || normalizedCurrentId || "Default";
+
+  React.useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
+
+  return React.createElement(
+    "div",
+    { className: "general-setting-row", key: "setting-general-voice" },
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, "Voice"),
+      React.createElement("small", { className: "general-setting-description" }, "Currently under development")
+    ),
+    React.createElement(
+      "div",
+      { className: "general-setting-controls", ref: rootRef },
+      React.createElement(
+        "button",
+        {
+          type: "button",
+          className: "general-play-button",
+          "aria-label": "Play voice preview",
+        },
+        "▶",
+        " ",
+        "Play"
+      ),
+      React.createElement(
+        "details",
+        {
+          className: "general-dropdown general-dropdown-voice",
+          open: isOpen,
+        },
+        React.createElement(
+          "summary",
+          {
+            className: "general-dropdown-trigger",
+            onClick: (event) => {
+              event.preventDefault();
+              setIsOpen((prev) => !prev);
+            },
+          },
+          React.createElement("span", { className: "general-dropdown-value" }, triggerLabel),
+          React.createElement("span", { className: "general-dropdown-chevron", "aria-hidden": "true" }, chevron)
+        ),
+        React.createElement(
+          "div",
+          { className: "general-dropdown-menu", role: "menu" },
+          ...options.map((option) => {
+            const optionId = String(option.id || "").trim().toLowerCase();
+            const active = optionId === normalizedCurrentId;
+            return React.createElement(
+              "button",
+              {
+                key: `voice-${optionId}`,
+                type: "button",
+                className: `general-dropdown-option${active ? " active" : ""}`,
+                role: "menuitemradio",
+                "aria-checked": active ? "true" : "false",
+                onClick: (event) => {
+                  event.preventDefault();
+                  onSelectOption(optionId);
+                  setIsOpen(false);
+                },
+              },
+              React.createElement("span", { className: "general-dropdown-option-copy" }, React.createElement("strong", null, option.label || optionId)),
+              active ? React.createElement("span", { className: "general-dropdown-check", "aria-hidden": "true" }, check) : null
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderModeDropdown, chevron, check }) {
+  const [appearance, setAppearance] = React.useState("system");
+  const [language, setLanguage] = React.useState("auto-detect");
+  const [spokenLanguage, setSpokenLanguage] = React.useState("auto-detect");
+  const [voice, setVoice] = React.useState("default");
+
+  const appearanceOptions = [
+    { id: "system", label: "System" },
+    { id: "light", label: "Light" },
+    { id: "dark", label: "Dark" },
+  ];
+  const languageOptions = [
+    { id: "auto-detect", label: "Auto-detect" },
+    { id: "english", label: "English" },
+    { id: "german", label: "German" },
+    { id: "spanish", label: "Spanish" },
+    { id: "french", label: "French" },
+  ];
+  const voiceOptions = [
+    { id: "default", label: "Default" },
+    { id: "male", label: "Male" },
+    { id: "female", label: "Female" },
+  ];
+
+  return React.createElement(
+    "section",
+    { className: "info-group-card general-settings-card" },
+    renderModeDropdown({
+      label: "Assistant mode",
+      currentId: currentAssistantMode,
+      options: assistantModes,
+      kind: "assistant",
+    }),
+    React.createElement(GeneralDropdown, {
+      label: "Appearance",
+      description: "Currently under development",
+      currentId: appearance,
+      options: appearanceOptions,
+      kind: "appearance",
+      interactionDisabled: false,
+      applyPersonalizationChange: null,
+      onSelectOption: setAppearance,
+      chevron,
+      check,
+    }),
+    React.createElement(GeneralDropdown, {
+      label: "Language",
+      description: "Currently under development",
+      currentId: language,
+      options: languageOptions,
+      kind: "language",
+      interactionDisabled: false,
+      applyPersonalizationChange: null,
+      onSelectOption: setLanguage,
+      chevron,
+      check,
+    }),
+    React.createElement(GeneralDropdown, {
+      label: "Spoken language",
+      description: "Currently under development",
+      currentId: spokenLanguage,
+      options: languageOptions,
+      kind: "spoken-language",
+      interactionDisabled: false,
+      applyPersonalizationChange: null,
+      onSelectOption: setSpokenLanguage,
+      chevron,
+      check,
+    }),
+    React.createElement(VoiceSettingRow, {
+      currentId: voice,
+      options: voiceOptions,
+      onSelectOption: setVoice,
+      chevron,
+      check,
+    })
   );
 }
 
@@ -368,17 +558,19 @@ export function renderPanelContent({
     return React.createElement(
       "div",
       { className: "info-groups general-settings-grid" },
-      React.createElement(
-        "section",
-        { className: "info-group-card general-settings-card" },
-        renderModeDropdown({
-          label: "Assistant mode",
-          currentId: currentAssistantMode,
-          options: assistantModes,
-          kind: "assistant",
+      React.createElement(GeneralPreviewSettings, {
+        assistantModes,
+        currentAssistantMode,
+        chevron,
+        check,
+        renderModeDropdown: ({ label, currentId, options, kind }) => renderModeDropdown({
+          label,
+          currentId,
+          options,
+          kind,
           isOptionDisabled: (optionId) => disabledAssistantModeSet.has(optionId),
-        })
-      )
+        }),
+      })
     );
   }
 
