@@ -2407,6 +2407,9 @@ function App() {
   const unarchiveIconPath = "M3 8a2 2 0 0 1 2-2h5.2a2 2 0 0 1 1.4.6l1.1 1.1a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5zm7.8-4.8a2 2 0 0 1 1.4-.6h6.8v2h-6.8a2 2 0 0 1-1.4-.6L9.9 3h-4V1h4.4a2 2 0 0 1 1.4.6z";
   const infoIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 4a1.25 1.25 0 1 1-1.25 1.25A1.25 1.25 0 0 1 12 6m1.5 12h-3v-2h1V11h-1V9h3v7h1z";
   const questionIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 16a1.25 1.25 0 1 1 1.25-1.25A1.25 1.25 0 0 1 12 18m2.2-7.3-.9.7c-.7.5-1 1-1 1.8V14h-2v-.8c0-1.2.5-2.2 1.6-2.9l1-.7c.6-.4 1-.9 1-1.5a2 2 0 1 0-4 0H8a4 4 0 1 1 8 0c0 1.1-.6 2-1.8 2.9";
+  const rescueRingIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m4.9 6.5-2.1 1.2A4.4 4.4 0 0 0 12.3 8V5.6a6.4 6.4 0 0 1 4.6 2.9m-10 0a6.4 6.4 0 0 1 4.6-2.9V8a4.4 4.4 0 0 0-2.5 1.7zm0 7a6.4 6.4 0 0 1 0-5l2.1 1.2a4.4 4.4 0 0 0 0 2.6zm5.4 2.9a6.4 6.4 0 0 1-4.6-2.9l2.1-1.2a4.4 4.4 0 0 0 2.5 1.7zm1.4 0V16a4.4 4.4 0 0 0 2.5-1.7l2.1 1.2a6.4 6.4 0 0 1-4.6 2.9m3.3-5.4a4.4 4.4 0 0 0 0-2.6l2.1-1.2a6.4 6.4 0 0 1 0 5zM12 10.2a1.8 1.8 0 1 1-1.8 1.8 1.8 1.8 0 0 1 1.8-1.8";
+  const keyIconPath = "M14.5 4a5.5 5.5 0 0 0-5.4 6.5L3 16.6V21h4.4l1.8-1.8V17h2.2l1.8-1.8a5.5 5.5 0 1 0 1.3-11.2m0 2a3.5 3.5 0 1 1-3.5 3.5A3.5 3.5 0 0 1 14.5 6";
+  const logoutIconPath = "M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3h-2v3H6V5h9v3h2V5a2 2 0 0 0-2-2m-1.6 12.4L12 14l2.6-2.6H8v-2h6.6L12 6.8l1.4-1.4L18.4 11z";
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
   const userIconPath = "M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
@@ -3482,7 +3485,7 @@ function App() {
                     role: "menuitem",
                     onClick: openHelpFromUserMenu,
                   },
-                  icon(questionIconPath),
+                  icon(rescueRingIconPath),
                   React.createElement("span", null, "Help")
                 )
               ),
@@ -3513,7 +3516,7 @@ function App() {
                     role: "menuitem",
                     onClick: openChangePasswordFlow,
                   },
-                  icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
+                  icon(keyIconPath),
                   React.createElement("span", null, "Change Password")
                 )
               ),
@@ -3528,7 +3531,7 @@ function App() {
                     role: "menuitem",
                     onClick: handleLogout,
                   },
-                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
+                  icon(logoutIconPath),
                   React.createElement("span", null, "Logout")
                 )
               )
