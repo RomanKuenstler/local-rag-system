@@ -1116,10 +1116,10 @@ body {
 }
 .library-delete-confirm,
 .library-delete-cancel {
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  padding: 0.4rem 0.75rem;
-  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 0.43rem 0.86rem;
+  font-weight: 700;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1128,16 +1128,62 @@ body {
 .library-delete-confirm {
   background: #dc2626;
   color: #fff;
-  border-color: #dc2626;
 }
 .library-delete-cancel {
-  background: #fff;
+  background: transparent;
   color: #111827;
+}
+.library-delete-cancel:hover:not(:disabled) {
+  background: #f0f0f2;
+}
+.library-delete-confirm:hover:not(:disabled) {
+  background: #b91c1c;
+}
+.library-delete-confirm:disabled,
+.library-delete-cancel:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .library-delete-confirm .icon,
 .library-delete-cancel .icon {
   width: 0.86rem;
   height: 0.86rem;
+}
+.dialog-delete-chip {
+  margin-top: -0.2rem;
+}
+.dialog-delete-chip.composer-attachment-chip {
+  max-width: 100%;
+}
+.delete-user-preview {
+  grid-template-columns: auto minmax(0, 1fr);
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  padding: 0.45rem 0.55rem;
+  margin-top: -0.15rem;
+}
+.dialog-delete-chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 999px;
+  padding: 0.34rem 0.58rem;
+  color: #111827;
+  max-width: 100%;
+}
+.dialog-delete-chat-chip-icon .icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  color: #64748b;
+}
+.dialog-delete-chat-chip-name {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
 }
 .status-badge.with-spinner {
   gap: 0.35rem;

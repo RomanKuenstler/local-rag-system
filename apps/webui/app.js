@@ -3865,22 +3865,17 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete this file?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmFile.path)
+            "Are you sure you want to delete this file?"
           ),
+          renderAttachmentChip({
+            fileName: deleteConfirmFile.path,
+            index: 0,
+            keyPrefix: "delete-file",
+            className: "dialog-delete-chip",
+          }),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "library-delete-confirm",
-                onClick: confirmDeleteLibraryFile,
-              },
-              icon(trashIconPath),
-              "Delete"
-            ),
             React.createElement(
               "button",
               {
@@ -3890,6 +3885,16 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteLibraryFile,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )
@@ -4044,22 +4049,26 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you really want to delete this user?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmUser.username)
+            "Are you sure you really want to delete this user?"
+          ),
+          React.createElement(
+            "div",
+            { className: "side-nav-user delete-user-preview" },
+            React.createElement(
+              "span",
+              { className: "side-nav-avatar-placeholder", "aria-hidden": "true" },
+              String(deleteConfirmUser?.username || "?").slice(0, 1).toUpperCase()
+            ),
+            React.createElement(
+              "span",
+              { className: "side-nav-user-meta" },
+              React.createElement("strong", null, deleteConfirmUser?.displayName || deleteConfirmUser?.username || "Unknown user"),
+              React.createElement("small", null, deleteConfirmUser?.username || "unknown")
+            )
           ),
           React.createElement(
             "div",
             { className: "library-delete-actions" },
-            React.createElement(
-              "button",
-              {
-                type: "button",
-                className: "library-delete-confirm",
-                onClick: confirmDeleteAdminUser,
-              },
-              icon(trashIconPath),
-              "Delete"
-            ),
             React.createElement(
               "button",
               {
@@ -4069,6 +4078,16 @@ function App() {
               },
               icon(keepIconPath),
               "Keep"
+            ),
+            React.createElement(
+              "button",
+              {
+                type: "button",
+                className: "library-delete-confirm",
+                onClick: confirmDeleteAdminUser,
+              },
+              icon(trashIconPath),
+              "Delete"
             )
           )
         )
@@ -4157,8 +4176,13 @@ function App() {
           React.createElement(
             "p",
             null,
-            "Are you sure you want to delete this chat?",
-            React.createElement("span", { className: "library-delete-filename" }, deleteConfirmChat.name)
+            "Are you sure you want to delete this chat?"
+          ),
+          React.createElement(
+            "div",
+            { className: "dialog-delete-chat-chip" },
+            React.createElement("span", { className: "dialog-delete-chat-chip-icon", "aria-hidden": "true" }, icon(chatIconPath)),
+            React.createElement("span", { className: "dialog-delete-chat-chip-name" }, deleteConfirmChat.name)
           ),
           React.createElement(
             "div",
