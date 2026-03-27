@@ -2216,6 +2216,11 @@ function App() {
     retriever: retrieverStatus,
     embedder: embedderStatus,
     ocrScanner: normalizeStatusBadge(statusData?.services?.ocrScanner?.status || statusData?.services?.ocrScanner?.role || "disconnected"),
+    audioTranscription: normalizeStatusBadge(
+      statusData?.services?.audioTranscription?.status
+      || statusData?.services?.audioTranscription?.role
+      || "disconnected"
+    ),
   };
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
   const defaultFileTag = String(filesData?.defaultTag || DEFAULT_FILE_TAG_LABEL).trim().toLowerCase() || DEFAULT_FILE_TAG_LABEL;

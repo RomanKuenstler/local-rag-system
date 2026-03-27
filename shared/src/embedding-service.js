@@ -171,6 +171,9 @@ export function fileToChunks(file) {
 
 const OCR_SCANNER_BASE_URL =
   String(process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300").trim() || "http://ocr-scanner:3300";
+const AUDIO_TRANSCRIPTION_BASE_URL =
+  String(process.env.AUDIO_TRANSCRIPTION_BASE_URL || "http://audio-transcription:3400").trim()
+  || "http://audio-transcription:3400";
 
 async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtractedChars }) {
   if (typeof relativePath !== "string" || !relativePath.toLowerCase().endsWith(".pdf")) {
@@ -224,11 +227,68 @@ async function requestLibraryPdfOcr({ relativePath, extractedText, minimumExtrac
   }
 }
 
+async function requestLibraryAudioTranscription({ relativePath }) {
+  const normalizedPath = String(relativePath || "").trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${AUDIO_TRANSCRIPTION_BASE_URL}/audio/transcribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_type: "audio_embedding",
+        audio_relative_path: normalizedPath,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      const errorCode = String(errorPayload?.error_code || `audio_http_${response.status}`);
+      const errorMessage = String(errorPayload?.error || "").trim();
+      console.warn(
+        `[embedder] Audio transcription request failed for ${normalizedPath} with HTTP ${response.status}: ${errorCode} ${errorMessage.slice(0, 240)}`
+      );
+      return null;
+    }
+
+    const payload = await response.json();
+    if (!payload?.ok) {
+      const errorCode = String(payload?.error_code || "audio_unknown_error");
+      console.warn(`[embedder] Audio transcription returned non-success status for ${normalizedPath}: ${errorCode}`);
+      return null;
+    }
+
+    const transcribedText = typeof payload?.transcription?.text === "string"
+      ? payload.transcription.text
+      : "";
+    if (!transcribedText.trim()) {
+      return null;
+    }
+    const detectedLanguage = typeof payload?.transcription?.detected_language === "string"
+      ? payload.transcription.detected_language
+      : null;
+
+    console.log(
+      `[embedder] Audio transcription extracted for ${normalizedPath} (${transcribedText.length} chars, detected_language=${detectedLanguage || "unknown"})`
+    );
+    return {
+      text: transcribedText,
+      detectedLanguage,
+    };
+  } catch (error) {
+    console.warn(`[embedder] Audio transcription request error for ${normalizedPath}: ${error.message}`);
+    return null;
+  }
+}
+
 export async function readEmbeddableFiles() {
   return readTextFilesRecursively(CONTENT_PATH, EMBEDDABLE_EXTENSIONS, "utf8", {
     minimumExtractedChars: PDF_MIN_EXTRACTED_CHARS,
     pdfExtractionMode: "ocr_only",
     pdfOcrHandler: requestLibraryPdfOcr,
+    audioTranscriptionHandler: requestLibraryAudioTranscription,
   });
 }
 

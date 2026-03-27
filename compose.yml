@@ -19,6 +19,7 @@ services:
       BACKEND_API_PORT: 3100
       RETRIEVER_BASE_URL: http://retriever:3000
       EMBEDDER_BASE_URL: http://embedder:3200
+      AUDIO_TRANSCRIPTION_BASE_URL: http://audio-transcription:3400
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: rag
@@ -67,6 +68,7 @@ services:
       EMBEDDING_STATUS_FILE: /app/state/embedding-status.json
       RETRIEVER_API_PORT: 3000
       OCR_SCANNER_BASE_URL: http://ocr-scanner:3300
+      AUDIO_TRANSCRIPTION_BASE_URL: http://audio-transcription:3400
     volumes:
       - ./data:/app/data
       - ./upload:/app/upload
@@ -79,12 +81,17 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
+      audio-model:
+        endpoint_var: MODEL_RUNNER_BASE_URL
+        model_var: MODEL_RUNNER_LLM_AUDIO
     depends_on:
       qdrant:
         condition: service_started
       embedder:
         condition: service_started
       ocr-scanner:
+        condition: service_started
+      audio-transcription:
         condition: service_started
       postgres:
         condition: service_healthy
@@ -108,6 +115,7 @@ services:
       POSTGRES_USER: rag
       POSTGRES_PASSWORD: rag
       OCR_SCANNER_BASE_URL: http://ocr-scanner:3300
+      AUDIO_TRANSCRIPTION_BASE_URL: http://audio-transcription:3400
     volumes:
       - ./data:/app/data
       - rag_state:/app/state
@@ -115,10 +123,15 @@ services:
       embedding-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_EMBEDDING
+      audio-model:
+        endpoint_var: MODEL_RUNNER_BASE_URL
+        model_var: MODEL_RUNNER_LLM_AUDIO
     depends_on:
       qdrant:
         condition: service_started
       ocr-scanner:
+        condition: service_started
+      audio-transcription:
         condition: service_started
       postgres:
         condition: service_healthy
@@ -138,6 +151,28 @@ services:
       - ./upload:/app/upload
     ports:
       - "3300:3300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  audio-transcription:
+    build:
+      context: ./apps/audio-transcription
+      dockerfile: Dockerfile
+    environment:
+      AUDIO_API_HOST: 0.0.0.0
+      AUDIO_API_PORT: 3400
+      AUDIO_CONTENT_DIR: /app/data
+      AUDIO_UPLOAD_DIR: /app/upload
+    volumes:
+      - ./data:/app/data
+      - ./upload:/app/upload
+    ports:
+      - "3400:3400"
+    models:
+      audio-model:
+        endpoint_var: MODEL_RUNNER_BASE_URL
+        model_var: MODEL_RUNNER_LLM_AUDIO
     depends_on:
       postgres:
         condition: service_healthy
@@ -201,3 +236,5 @@ models:
     model: hf.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M
   embedding-model:
     model: ai/embeddinggemma:latest
+  audio-model:
+    model: hf.co/openai/whisper-small

@@ -651,14 +651,15 @@ export async function upsertFileMetadata(files, indexState, chunkCounts = {}) {
   for (const file of files) {
     await dbQuery(
       `INSERT INTO file_metadata (
-         file_path, extension, size_bytes, last_modified, file_hash, chunk_count, embedded, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         file_path, extension, size_bytes, last_modified, file_hash, chunk_count, detected_language, embedded, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        ON CONFLICT (file_path) DO UPDATE SET
          extension = EXCLUDED.extension,
          size_bytes = EXCLUDED.size_bytes,
          last_modified = EXCLUDED.last_modified,
          file_hash = EXCLUDED.file_hash,
          chunk_count = COALESCE(EXCLUDED.chunk_count, file_metadata.chunk_count),
+         detected_language = COALESCE(EXCLUDED.detected_language, file_metadata.detected_language),
          embedded = EXCLUDED.embedded,
          updated_at = NOW()`,
       [
@@ -668,6 +669,7 @@ export async function upsertFileMetadata(files, indexState, chunkCounts = {}) {
         file.lastModified ? new Date(file.lastModified).toISOString() : null,
         file.hash,
         chunkCounts[file.relativePath] ?? null,
+        file.detectedLanguage || null,
         indexState[file.relativePath] === file.hash,
       ]
     );
@@ -691,6 +693,7 @@ export async function listFileMetadata() {
        m.last_modified,
        m.file_hash,
        m.chunk_count,
+       m.detected_language,
        m.embedded,
        COALESCE(
          ARRAY_AGG(t.tag ORDER BY t.tag) FILTER (WHERE t.tag IS NOT NULL),
@@ -698,7 +701,7 @@ export async function listFileMetadata() {
        ) AS tags
      FROM file_metadata m
      LEFT JOIN file_tags t ON t.file_path = m.file_path
-     GROUP BY m.file_path, m.extension, m.size_bytes, m.last_modified, m.file_hash, m.chunk_count, m.embedded
+     GROUP BY m.file_path, m.extension, m.size_bytes, m.last_modified, m.file_hash, m.chunk_count, m.detected_language, m.embedded
      ORDER BY file_path ASC`
     ,
     [DEFAULT_FILE_TAG]
@@ -900,6 +903,7 @@ export async function listManagedLibraryFilesWithStatus() {
        f.last_modified,
        f.file_hash,
        f.chunk_count,
+       f.detected_language,
        f.embedded
      FROM library_managed_files m
      LEFT JOIN file_metadata f ON f.file_path = m.file_path
@@ -951,6 +955,7 @@ export async function listManagedLibraryFilesWithUserPreferences(userId) {
        f.last_modified,
        f.file_hash,
        f.chunk_count,
+       f.detected_language,
        f.embedded,
        COALESCE(p.enabled, TRUE) AS enabled
      FROM library_managed_files m

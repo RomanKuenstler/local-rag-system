@@ -11,6 +11,8 @@ import {
   PDF_MIN_EXTRACTED_CHARS,
 } from "../config/index.js";
 
+const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a"]);
+
 function sha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
@@ -745,6 +747,28 @@ export async function normalizeIndexableFileByExtension(filePath, extension, enc
   if (normalizedExtension === ".epub") {
     return normalizeTextForIndexing(await extractTextFromEpub(filePath));
   }
+  if (AUDIO_EXTENSIONS.has(normalizedExtension)) {
+    if (typeof options.audioTranscriptionHandler === "function") {
+      const transcriptionResult = await options.audioTranscriptionHandler({
+        filePath,
+        extension: normalizedExtension,
+        relativePath: options.relativePath,
+      });
+      if (transcriptionResult && typeof transcriptionResult === "object") {
+        const text = normalizeTextForIndexing(typeof transcriptionResult.text === "string" ? transcriptionResult.text : "");
+        return {
+          text,
+          metadata: {
+            detectedLanguage: typeof transcriptionResult.detectedLanguage === "string"
+              ? transcriptionResult.detectedLanguage
+              : null,
+          },
+        };
+      }
+      return normalizeTextForIndexing(typeof transcriptionResult === "string" ? transcriptionResult : "");
+    }
+    return "";
+  }
 
   const rawContent = fs.readFileSync(filePath, encoding);
   return normalizeIndexableTextByExtension(rawContent, normalizedExtension);
@@ -804,10 +828,16 @@ export async function readTextFilesRecursively(
 
       try {
         const relativePath = path.relative(dirPath, itemPath);
-        const content = await normalizeIndexableFileByExtension(itemPath, ext, encoding, {
+        const extraction = await normalizeIndexableFileByExtension(itemPath, ext, encoding, {
           ...options,
           relativePath,
         });
+        const content = extraction && typeof extraction === "object" && !Array.isArray(extraction)
+          ? String(extraction.text || "")
+          : String(extraction || "");
+        const metadata = extraction && typeof extraction === "object" && !Array.isArray(extraction)
+          ? extraction.metadata || null
+          : null;
 
         if (!content || content.length === 0) {
           console.log(`Skipping file with no indexable text: ${itemPath}`);
@@ -820,6 +850,7 @@ export async function readTextFilesRecursively(
           filename: path.basename(itemPath),
           extension: ext,
           content,
+          detectedLanguage: metadata?.detectedLanguage || null,
           hash: buildIndexRelevantHash(content),
           size: stats.size,
           lastModified: stats.mtimeMs,
