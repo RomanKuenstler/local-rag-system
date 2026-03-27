@@ -1442,20 +1442,86 @@ body {
 .personalization-settings-card {
   gap: 0;
 }
+.personalization-section-card h4,
+.personalization-settings-card h4 {
+  color: #111827;
+  font-size: 1.03rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.personalization-settings-card h4 {
+  margin-bottom: 0.2rem;
+}
+.personalization-section-divider {
+  height: 1px;
+  width: 100%;
+  background: #e5e7eb;
+  margin: 0.2rem 0 0.35rem;
+}
 .personalization-subheadline {
-  margin: 0.4rem 0 0.1rem;
-  color: #475569;
-  font-size: 0.78rem;
+  margin: 0;
+  color: #334155;
+  font-size: 0.92rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+}
+.personalization-subheadline-block {
+  margin-top: 0.65rem;
+  margin-bottom: 0.1rem;
+}
+.personalization-subheadline-description {
+  margin: 0.2rem 0 0;
+  color: #6b7280;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+.personalization-settings-card .general-setting-row {
+  min-height: 52px;
+  border-top: none;
+  padding: 0.35rem 0;
+}
+.personalization-settings-card .general-setting-label {
+  font-weight: 500;
+  color: #1f2937;
+}
+.personalization-settings-card .general-setting-description {
+  color: #6b7280;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.personalization-settings-card .general-dropdown-trigger {
+  min-width: 122px;
+  border-color: #d1d5db;
+  background: #ffffff;
+}
+.personalization-settings-card .general-dropdown-trigger:hover {
+  border-color: #9ca3af;
 }
 .personalization-custom-instructions-row {
   display: block;
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
 }
 .personalization-custom-instructions-row:first-of-type {
-  margin-top: 0.35rem;
+  margin-top: 0.15rem;
+}
+.personalization-about-you-row {
+  margin-top: 0.55rem;
+}
+.personalization-about-you-row:first-of-type {
+  margin-top: 0.3rem;
+}
+.personalization-field-label {
+  display: inline-block;
+  margin: 0 0 0.28rem;
+  color: #374151;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.personalization-option-heading {
+  margin: 0;
+  color: #1f2937;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.25;
 }
 .personalization-custom-instructions-input-shell {
   position: relative;
