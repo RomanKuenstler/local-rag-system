@@ -2,15 +2,16 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json ./
-COPY scripts ./scripts
+RUN npm install
+
 COPY index.html ./
+COPY styles.css ./
 COPY app.js ./
 COPY app-shared.js ./
 COPY api-client.js ./
 COPY utils.js ./
 COPY panel-content.js ./
 COPY chat-export.js ./
-COPY styles.css ./
 
 RUN npm run build
 

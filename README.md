@@ -18,7 +18,7 @@ This stack runs with Docker Compose and ships as multiple focused services:
 - `ocr-scanner` – OCR + layout-aware extraction for PDFs/images from library files and prompt uploads.
 - `qdrant` – vector database for similarity search.
 - `postgres` – persistence for users, sessions, chats, messages, settings, tags, and runtime metadata.
-- `webui` – multi-stage built static browser UI (Node build -> nginx runtime) with backend API proxying.
+- `webui` – Vite-bundled React browser UI (Node build -> nginx runtime) with backend API proxying.
 
 ## Quick start
 
@@ -78,7 +78,7 @@ Extraction behavior:
 │   ├── retriever/        # retrieval + chat orchestration + assistant behavior
 │   ├── embedder/         # background embedding/index worker + health route
 │   ├── ocr-scanner/      # Python OCR microservice
-│   └── webui/            # static browser client + Node build script + nginx runtime config
+│   └── webui/            # React browser client + Vite build + nginx runtime config
 ├── shared/
 │   ├── src/              # reusable runtime modules
 │   ├── config/           # env/runtime constants
