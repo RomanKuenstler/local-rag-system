@@ -1274,12 +1274,13 @@ body {
 .panel-modal {
   width: min(920px, calc(100vw - 2rem));
   height: min(76vh, 760px);
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid rgba(203, 213, 225, 0.8);
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.2);
+  background: #ffffff;
+  border: 1px solid #d6dae2;
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .panel-modal-head {
@@ -1312,38 +1313,69 @@ body {
   align-content: start;
 }
 .panel-modal-with-tabs {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 .panel-modal-tab-layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
 }
 .panel-tab-nav {
   border-right: 1px solid #e5e7eb;
-  background: #f8fafc;
-  padding: 0.75rem 0.6rem;
+  background: #f3f4f6;
+  padding: 0.7rem 0.45rem;
   display: grid;
-  gap: 0.35rem;
+  gap: 0.2rem;
   align-content: start;
+}
+.panel-tab-nav-top {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 0.2rem;
 }
 .panel-tab-button {
   width: 100%;
   border: 1px solid transparent;
   background: transparent;
-  border-radius: 10px;
+  border-radius: 11px;
   text-align: left;
   padding: 0.55rem 0.6rem;
   color: #111827;
   cursor: pointer;
-  font-weight: 520;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 40px;
 }
 .panel-tab-button:hover:not(:disabled) {
-  background: #eef2f7;
+  background: #e9eaed;
 }
 .panel-tab-button.active {
   border-color: transparent;
-  background: #e2e8f0;
+  background: #e5e7eb;
+}
+.panel-tab-button-icon {
+  width: 1rem;
+  height: 1rem;
+  color: #374151;
+  display: inline-flex;
+}
+.panel-tab-button-icon .icon {
+  width: 1rem;
+  height: 1rem;
+}
+.panel-close-sidebar {
+  background: transparent;
+  color: #111827;
+  width: 1.9rem;
+  height: 1.9rem;
+}
+.panel-close-sidebar:hover {
+  background: #e5e7eb;
+}
+.panel-modal-with-tabs .panel-modal-content {
+  padding: 1rem 1.1rem 1rem;
 }
 .panel-modal-loading,
 .panel-modal-error {
