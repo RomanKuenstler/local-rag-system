@@ -13,7 +13,9 @@ COPY utils.js ./
 COPY panel-content.js ./
 COPY chat-export.js ./
 
-RUN npm run build
+RUN npm run build \
+  && mkdir -p /app/dist/licenses \
+  && cp /app/node_modules/@fontsource-variable/inter/OFL.txt /app/dist/licenses/INTER-OFL.txt
 
 FROM nginx:1.27-alpine
 

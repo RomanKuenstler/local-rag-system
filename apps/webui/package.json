@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.7",
     "dompurify": "^3.3.0",
     "marked": "^16.4.0",
     "react": "^18.3.1",
