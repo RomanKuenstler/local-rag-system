@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-03-27 (documentation refresh + docs cleanup)
+
+### Documentation
+- Rewrote `README.md` to reflect the current service architecture, auth/admin capabilities, managed-library routes, OCR behavior, and developer validation commands.
+- Reworked `docs/DOCUMENTATION.md` with a current architecture overview, runtime/index/OCR flows, API surface summary, and storage responsibility map.
+- Reworked `docs/DEVELOPERS.md` with an updated repository map, service boundaries, high-impact module ownership, safe change strategy, and doc maintenance policy.
+
+### Cleanup
+- Removed `docs/NEXTSTEPS.md` (no longer part of the maintained documentation set).
+
 ## 2026-03-22 (service-boundary cleanup)
 
 ### Refactor

@@ -1,516 +1,140 @@
-# Local RAG AI System (Beginner Friendly)
+# Local RAG AI System Documentation
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
-![Docker](https://img.shields.io/badge/docker-required-blue)
-![Node](https://img.shields.io/badge/node.js-20+-green)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Beginner Friendly](https://img.shields.io/badge/beginner-friendly-success)
-
-A **small local Retrieval Augmented Generation (RAG) AI system** designed for learning, experimentation, and understanding how modern AI systems work.
-
-The system runs **entirely locally using Docker**, embeds your own files into a vector database, and allows a local LLM to answer questions based on those files.
-
-The goal of this project is **simplicity and transparency**, so you can easily understand and extend the system.
-
-```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│                           local RAG AI-System                                 │
-│                                                                               │
-│  User                                                                         │
-│   │                                                                           │
-│   │ user prompt                                                               │
-│   ▼                                                                           │
-│  ┌───────────────┐                                                            │
-│  │   Retriever   │                                                            │
-│  │               │                                                            │
-│  │  - similarity │─────── search ───────────────┐                             │
-│  │    search     │                              │                             │
-│  └───────┬───────┘                              ▼                             │
-│          │                               ┌──────────────┐                     │
-│          │ actual prompt / context       │   Qdrant DB  │                     │
-│          ▼                               │  (Vector DB) │                     │
-│  ┌───────────────┐                       └──────┬───────┘                     │
-│  │   LLM         │                              │                             │
-│  │ (chat model)  │                              │                             │
-│  └───────────────┘                              │                             │
-│          ▲                                      │                             │
-│          │ running models                       │ embed files                 │
-│  ┌───────────────┐                              ▼                             │
-│  │ Docker Model  │                     ┌─────────────────┐                    │
-│  │    Runner     │                     │   Embedding     │                    │
-│  └───────────────┘                     │     Service     │                    │
-│                                        │                 │                    │
-│                                        │ uses embedding  │                    │
-│                                        │ LLM model       │                    │
-│                                        └───────┬─────────┘                    │
-│                                                │                              │
-│                                                │ takes files                  │
-│                                                ▼                              │
-│                                            ┌─────────┐                        │
-│                                            │  Files  │                        │
-│                                            └─────────┘                        │
-│                                                                               │
-│  Docker Containers                                                            │
-│  ├─ retriever container → chat + retrieval                                    │
-│  ├─ embedder container  → indexing + embeddings                               │
-│  └─ qdrant container  → vector database                                       │
-│                                                                               │
-└───────────────────────────────────────────────────────────────────────────────┘
-```
+This document describes the **current runtime architecture** and **data flow** of the project.
 
 ---
 
-# Explanation of the System
+## 1) Architecture overview
 
-This project implements a **basic RAG pipeline**.
+The system is composed of seven services coordinated by Docker Compose:
 
-RAG stands for **Retrieval Augmented Generation**, meaning the AI does not rely only on its training data. Instead, it retrieves relevant information from your own files and uses that information to generate an answer.
-
-The workflow looks like this:
-
-1. **User asks a question**
-2. The system **searches similar content** in a vector database
-3. The **relevant context is added to the prompt**
-4. The **LLM generates an answer using that context**
-
-Your personal files become the **knowledge base** of the system.
+- `webui` → Browser client (nginx + static JS app).
+- `backend` → Public API entrypoint, auth/session, admin/user endpoints, library-management endpoints, and retriever proxying.
+- `retriever` → Retrieval and answer orchestration (RAG pipeline, prompt building, assistant modes, personalization, chat logic).
+- `embedder` → Background indexing pipeline that reads source files, chunks text, computes embeddings, and updates vector store metadata.
+- `ocr-scanner` → Python OCR and PDF extraction service used by both retriever and embedder.
+- `qdrant` → Vector database for semantic similarity search.
+- `postgres` → Durable storage for auth/session data, chats/messages, settings, metadata, tags, and runtime state.
 
 ---
 
-## Project Structure
+## 2) Runtime flow
 
-```text
-.
-├── compose.yml                    # Docker Compose configuration (containers, models, configs)
-├── Dockerfile                     # Shared Node image for backend/retriever/embedder
-├── package.json                   # Node.js dependencies + scripts
-│
-├── apps/
-│   ├── backend/api.js             # Frontend-facing API gateway
-│   ├── backend/library-service.js # Backend-only managed-library helpers
-│   ├── retriever/api.js           # Retriever API (prompt orchestration)
-│   ├── retriever/cli.js           # Terminal retriever mode
-│   ├── retriever/ui.js            # CLI-only UI helpers
-│   ├── embedder/worker.js         # Embedder service loop
-│   └── webui/                     # Browser client assets + nginx config
-│
-├── shared/
-│   ├── src/                       # Shared business logic used by multiple services
-│   ├── config/index.js            # Runtime/env config constants
-│   ├── db/index.js                # Postgres readiness + migration helpers
-│   └── prompts/guardrails.md      # System guardrails markdown
-│
-├── data/                          # Knowledge base files indexed into Qdrant
-├── upload/                        # One-time prompt uploads consumed via API
-└── docs/                          # Project documentation set
-```
+### Request flow (chat)
 
-> For a maintainer-grade service and module responsibility map, see **`docs/DEVELOPERS.md`**.
----
+1. User interacts with `webui`.
+2. `webui` calls `backend` (`/api/*`).
+3. `backend` validates session/auth and proxies chat/prompt routes to `retriever` internal routes.
+4. `retriever` resolves chat/session state from `postgres`, reads retrieval candidates from `qdrant`, assembles final model messages, and calls the chat model.
+5. Response is persisted and returned to `webui` via `backend`.
 
-# System Architecture
+### Indexing flow
 
-The system consists of several components:
+1. `embedder` scans content under `data/` on interval.
+2. For supported files, text is extracted (with OCR delegation for PDF/image cases).
+3. Content is chunked and embedded.
+4. Embeddings + payload metadata are written to `qdrant`.
+5. Index/file status and metadata are written to `postgres` and shared state files.
 
-### User
+### OCR flow
 
-The user can interact with the system via:
-- the browser WebUI (`webui` service), or
-- API calls to the backend/retriever services.
-
-Terminal usage is still supported for local debugging workflows.
+- `embedder` uses OCR service for library extraction of difficult PDFs/images.
+- `retriever` uses OCR service for prompt-time uploads (PDF/image attachments).
+- OCR responses carry extraction metadata and explicit error codes for robust skip/failure handling.
 
 ---
 
-### Data Sources (Knowledge Base)
+## 3) API surface (high-level)
 
-Files placed inside the `data/` directory are used as knowledge sources.
+### Backend (public entrypoint)
 
-Currently supported formats include:
+- Auth/session:
+  - `POST /api/auth/login`
+  - `POST /api/auth/change-password`
+  - `GET /api/auth/session`
+  - `POST /api/auth/logout`
+- Admin:
+  - `GET/POST /api/admin/users`
+  - `PATCH/DELETE /api/admin/users/:username`
+- RAG/chat proxy routes:
+  - `GET /api/status`
+  - `GET /api/files`
+  - `PATCH /api/files/tags`
+  - `GET/PATCH /api/files/tag-filters`
+  - `GET /api/messages`
+  - `GET/POST /api/chats`
+  - `PATCH/DELETE /api/chats/:chatId`
+  - `GET /api/chats/:chatId/download`
+  - `GET/PATCH /api/personalization`
+  - `POST /api/prompt`
+- Managed library routes:
+  - `GET/POST/PATCH/DELETE /api/library/files`
+- Health:
+  - `GET /healthz`
 
-```
-.md
-.txt
-.html
-.htm
-.pdf
-.epub
-```
+### Retriever (internal/public in dev)
 
-These files are:
+- Internal equivalents of the core chat/file/prompt/personalization routes under `/internal/retriever/*`.
+- Also supports `/api/*` path variants for local/direct usage.
+- Health: `GET /healthz`.
 
-1. Read by the system
-2. Split into chunks
-3. Embedded into vectors
-4. Stored in a vector database
+### Embedder
 
-For one-time prompt attachments in chat, `.csv` is also supported (prompt-level, not long-term library indexing).
+- Status endpoint used by backend status aggregation:
+  - `GET /internal/embedder/status`
 
----
+### OCR scanner
 
-### Embedding Model
-
-The embedding model converts text into **vector embeddings**.
-
-Vectors are numerical representations of meaning.
-
-Example:
-
-```
-"How to install Docker"
-→ embedding vector
-```
-
-These vectors are stored in the database and used for **similarity search**.
-
----
-
-### Vector Database (Qdrant)
-
-The system uses **Qdrant** as a vector database.
-
-Qdrant stores:
-
-* text chunks
-* embeddings
-* metadata
-
-When the user asks a question, the system:
-
-1. Converts the question into an embedding
-2. Searches the database for similar vectors
-3. Returns the most relevant pieces of text
+- `GET /healthz`
+- `POST /ocr/scan`
 
 ---
 
-### Retriever
+## 4) Data model and storage responsibilities
 
-The retriever is responsible for:
-
-* searching the vector database
-* selecting the best matching chunks
-* injecting them into the prompt as **context**
-
-This is what enables the AI to answer based on your data.
-
----
-
-### LLM (Chat Model)
-
-The LLM generates the final answer.
-
-It receives:
-
-```
-User Prompt
-+ Retrieved Context
-+ System Instructions
-```
-
-Then it produces a structured response.
-
-The default model used is:
-
-```
-Qwen2.5-Coder-3B-Instruct
-```
-
-via Docker Model Runner.
+- **Postgres** stores:
+  - users/roles/credentials
+  - sessions and expiry windows
+  - chat entities and message history
+  - session/user settings (including personalization and UI mode)
+  - file metadata + tag state + managed library flags
+- **Qdrant** stores:
+  - chunk vectors
+  - chunk text and associated metadata for retrieval/evidence packaging
+- **Filesystem state (`/app/state`)** stores:
+  - index status map
+  - embedding status map
 
 ---
 
-# Docker in this Project
+## 5) File support
 
-Docker is used to **containerize the system**.
+### Library/indexing support
 
-This means every component runs in an isolated environment.
+Primary embeddable formats include markdown/text/html/pdf/epub sources from `data/`.
 
-Benefits:
+### Prompt attachment support
 
-* easy installation
-* no dependency conflicts
-* reproducible environment
-* simple startup
+Prompt-time upload handling supports:
 
-This project uses **Docker Compose** to orchestrate multiple services.
-
-Containers used:
-
-| Container | Purpose                                            |
-| --------- | -------------------------------------------------- |
-| `retriever` | Interactive assistant (retrieval + answering) |
-| `embedder`  | Background indexing and embedding worker |
-| `qdrant`  | Vector database                                    |
-| `postgres` | Runtime state, chat history, and file/index metadata |
-| `backend` | Frontend-facing API orchestrating retriever/embedder |
-| `webui` | Browser chat interface with `/api` reverse proxy |
-
-Docker also runs the **LLM models** through Docker Model Runner.
+- `.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`
+- OCR image types: `.png`, `.jpg`, `.jpeg`, `.webp`
 
 ---
 
-# Installation
+## 6) Config and runtime notes
 
-## Prerequisites
-
-You need the following software installed:
-
-* **Docker**
-* **Docker Compose**
-* **Git (optional)**
-
-Recommended system:
-
-```
-8GB RAM minimum
-16GB recommended
-```
-
-CPU-only usage works.
+- Node containers share one base image (`Dockerfile`) and choose startup entrypoint by `APP_ROLE`.
+- Retriever and embedder use explicit shared state file paths:
+  - `INDEX_STATE_FILE=/app/state/index-state.json`
+  - `EMBEDDING_STATUS_FILE=/app/state/embedding-status.json`
+- Models are configured in `compose.yml` under top-level `models` (`chat-model`, `embedding-model`).
 
 ---
 
-## Install the System
-
-### 1. Clone or download the project
-
-```
-git clone <your-repo>
-cd <repo>
-```
-
-Or simply download the files and extract them.
-
----
-
-### 2. Add your knowledge files
-
-Place your files inside:
-
-```
-./data
-```
-
-Example:
-
-```
-data/
-  docker.md
-  networking.md
-  rag_notes.txt
-```
-
-Optional one-time upload files (used only with `/upload <prompt>`):
-
-```
-upload/
-  incident-notes.md
-  todo.txt
-```
-
-After `/upload` is used, consumed `.md` and `.txt` files are removed from `upload/`.
-
-Because `./upload` is bind-mounted into the retriever container as `/app/upload`, users can drop files in from the host machine directly.
-
----
-
-### 3. Build the containers
-
-```
-docker compose build
-```
-
-Optional clean rebuild:
-
-```
-docker compose build --no-cache
-```
-
----
-
-### 4. Start the system
-
-```
-docker compose up -d
-```
-
-This will start:
-
-* the application container
-* the Qdrant database
-
----
-
-# Usage
-
-## Start the System
-
-If the containers are not running:
-
-```
-docker compose up -d
-```
-
----
-
-## Stop the System
-
-To shut everything down:
-
-```
-docker compose down
-```
-
----
-
-## Update / Change the System
-
-If you modify the code or configuration:
-
-```
-docker compose build
-docker compose up -d
-```
-
-If models or dependencies changed:
-
-```
-docker compose build --no-cache
-```
-
----
-
-## Use the AI System
-
-Start all services:
-
-```
-docker compose up -d retriever embedder qdrant postgres backend webui
-```
-
-Open the interactive retriever shell:
-
-```
-docker compose exec retriever /bin/bash
-```
-
-Monitor background embedding:
-
-```
-docker compose logs -f embedder
-```
-
-### WebUI prompt attachments (normal chat view)
-
-In the browser UI (`http://localhost:5173`), the chat composer includes an **Attach** control next to the prompt input.
-
-Supported prompt-level attachment types:
-
-- `.md`
-- `.txt`
-- `.html`
-- `.htm`
-- `.pdf`
-
-Limits:
-
-- max **3 files** per prompt
-- attachments are included only for that single prompt submission
-- slash commands are still text-only (no attachments)
-
-### WebUI `/info` dialog
-
-Use `/info` from the WebUI chat to open the info dialog. It now groups operational details into:
-
-- App (ui mode, assistant mode, profile)
-- Models (chat + embedding model names)
-- Storage (Qdrant + Postgres connection target, collection, content path)
-- State (index state file, embedding status file, chat history path)
-
-You can now interact with the retriever.
-
-Example:
-
-```
-What is Docker?
-Explain RAG.
-Summarize the file docker.md
-```
-
----
-
-### Exit the Chat
-
-Inside the chat:
-
-```
-/bye
-```
-
-Then exit the container shell:
-
-```
-exit
-```
-
----
-
-# Configuration
-
-Important configuration values are inside:
-
-```
-compose.yml
-```
-
-Examples:
-
-### Similarity Search
-
-```
-MAX_SIMILARITIES
-COSINE_LIMIT
-```
-
-These control how many relevant chunks are retrieved.
-
----
-
-### Model Parameters
-
-Examples:
-
-```
-OPTION_TEMPERATURE
-OPTION_TOP_P
-OPTION_PRESENCE_PENALTY
-```
-
-These influence the LLM behavior.
-
----
-
-### Global Guardrails
-
-Located in:
-
-```
-compose.yml
-guardrails.md
-```
-
-These guardrails are always active system rules for retrieval behavior and cannot be overridden by user prompts.
-
----
-
-
-# Purpose of this Project
-
-This system is designed to:
-
-* learn how RAG works
-* experiment with local AI
-* understand vector search
-* explore LLM architecture
-
-It is **not meant as a production system**, but as a **playground for experimentation**.
+## 7) Related docs
+
+- `docs/DEVELOPERS.md` – where to change what safely.
+- `docs/PROMPTS.md` – prompt policy principles.
+- `docs/PROMPTBUILDING.md` – end-to-end prompt assembly internals.
+- `docs/CHANGELOG.md` – release history.
