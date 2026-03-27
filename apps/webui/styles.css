@@ -2198,59 +2198,26 @@ button.send .icon {
 button:disabled { opacity: .5; cursor: not-allowed; }
 
 .config-sections { display: grid; gap: 0.7rem; }
-.config-section {
-  background: linear-gradient(180deg, #fcfdff 0%, #f8fafd 100%);
-  border: 1px solid #e5eaf2;
-  border-radius: 12px;
-  padding: 0.65rem 0.7rem;
+.config-live-table-card { gap: 0; }
+.config-live-table {
+  max-height: none;
 }
-.config-section h4 {
-  margin: 0 0 0.2rem;
-  font-size: 0.82rem;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.045em;
+.config-live-table-head,
+.config-live-table-row {
+  grid-template-columns: minmax(170px, 2fr) minmax(220px, 1.5fr) 90px;
 }
-.config-table-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-}
-.config-table-card { display: grid; gap: 0.5rem; }
-.config-table {
-  border: none;
-  border-radius: 10px;
-  background: #fff;
-  overflow: hidden;
-}
-.config-table-head,
-.config-table-row {
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.5rem 0.6rem;
-}
-.config-table-head {
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border-bottom: 1px solid #e5eaf2;
-}
-.config-table-row {
-  align-items: center;
-  border-top: 1px solid #f1f5f9;
-}
-.config-table-row:first-of-type { border-top: none; }
 .config-setting-cell {
   display: grid;
   gap: 0.1rem;
 }
 .config-setting-cell strong { font-size: 0.84rem; text-transform: capitalize; color: #0f172a; }
 .config-setting-cell small { color: #64748b; font-size: 0.73rem; }
+.config-live-table-head span:last-child,
+.config-live-table-row > :last-child {
+  justify-self: center;
+}
 .config-row-ready {
-  justify-self: start;
+  justify-self: center;
   border: 1px solid rgba(22,163,74,.25);
   color: #166534;
   background: rgba(22,163,74,.09);
@@ -2258,15 +2225,6 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   padding: 0.18rem 0.5rem;
   font-size: 0.72rem;
 }
-.config-static-value {
-  word-break: break-word;
-  font-size: 0.86rem;
-}
-.config-table-row.static {
-  grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr);
-}
-.config-table-row:not(.static),
-.config-table-head { grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr) 80px; }
 .config-edit-form { display: flex; gap: 0.45rem; align-items: center; }
 .config-settings-error {
   margin: 0;

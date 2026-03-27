@@ -393,95 +393,62 @@ export function renderPanelContent({
         : null,
       React.createElement(
         "section",
-        { className: "config-section config-table-card" },
-        React.createElement("h4", null, "Change now (no restart)"),
+        { className: "library-table-card config-live-table-card" },
         React.createElement(
           "div",
-          { className: "config-table" },
+          { className: "library-table config-live-table", role: "table", "aria-label": "Settings that apply immediately" },
           React.createElement(
             "div",
-            { className: "config-table-head" },
+            { className: "library-table-head config-live-table-head", role: "row" },
             React.createElement("span", null, "Setting"),
             React.createElement("span", null, "Value"),
             React.createElement("span", null, "Save")
           ),
-          ...editableConfigRows.map((entry) => React.createElement(
+          React.createElement(
             "div",
-            { key: `editable-${entry.section}-${entry.key}`, className: "config-table-row" },
-            React.createElement(
+            { className: "library-table-body", role: "rowgroup" },
+            ...editableConfigRows.map((entry) => React.createElement(
               "div",
-              { className: "config-setting-cell" },
-              React.createElement("strong", null, entry.key),
-              React.createElement("small", null, entry.section)
-            ),
-            React.createElement(
-              "form",
-              {
-                className: "config-edit-form",
-                key: `config-form-${String(entry.key || "").trim().toLowerCase()}-${settingsInputResetTokenByKey[String(entry.key || "").trim().toLowerCase()] || 0}`,
-                onSubmit: async (event) => {
-                  event.preventDefault();
-                  const formData = new FormData(event.currentTarget);
-                  await submitConfigChange(entry.key, formData.get("value"));
-                },
-              },
-              React.createElement("input", {
-                name: "value",
-                defaultValue: String(entry.value),
-                className: "config-input",
-                disabled: isSending || !isEmbeddingReady,
-                onChange: () => clearSettingsTabError(),
-              }),
+              { key: `editable-${entry.section}-${entry.key}`, className: "library-table-row config-live-table-row", role: "row" },
               React.createElement(
-                "button",
+                "div",
+                { className: "config-setting-cell" },
+                React.createElement("strong", null, entry.key),
+                React.createElement("small", null, entry.section)
+              ),
+              React.createElement(
+                "form",
                 {
-                  type: "submit",
-                  className: "personalization-custom-save-button active config-apply-save-button",
-                  disabled: isSending || !isEmbeddingReady,
-                  "aria-label": `Save ${entry.key}`,
-                  title: `Save ${entry.key}`,
+                  className: "config-edit-form",
+                  key: `config-form-${String(entry.key || "").trim().toLowerCase()}-${settingsInputResetTokenByKey[String(entry.key || "").trim().toLowerCase()] || 0}`,
+                  onSubmit: async (event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    await submitConfigChange(entry.key, formData.get("value"));
+                  },
                 },
-                icon(saveIconPath)
-              )
-            ),
-            React.createElement("span", { className: "config-row-ready" }, "Live")
-          ))
-        )
-      ),
-      React.createElement(
-        "section",
-        { className: "config-section config-table-card" },
-        React.createElement(
-          "div",
-          { className: "config-table-header" },
-          React.createElement("h4", null, "Restart required"),
-          React.createElement(
-            "button",
-            { type: "button", className: "restart-button", disabled: true },
-            icon("M12 6V3l-4 4 4 4V8c2.8 0 5 2.2 5 5a5 5 0 0 1-8.7 3.3l-1.4 1.4A7 7 0 0 0 19 13c0-3.9-3.1-7-7-7"),
-            "Restart"
+                React.createElement("input", {
+                  name: "value",
+                  defaultValue: String(entry.value),
+                  className: "config-input",
+                  disabled: isSending || !isEmbeddingReady,
+                  onChange: () => clearSettingsTabError(),
+                }),
+                React.createElement(
+                  "button",
+                  {
+                    type: "submit",
+                    className: "personalization-custom-save-button active config-apply-save-button",
+                    disabled: isSending || !isEmbeddingReady,
+                    "aria-label": `Save ${entry.key}`,
+                    title: `Save ${entry.key}`,
+                  },
+                  icon(saveIconPath)
+                )
+              ),
+              React.createElement("span", { className: "config-row-ready" }, "Live")
+            ))
           )
-        ),
-        React.createElement(
-          "div",
-          { className: "config-table" },
-          React.createElement(
-            "div",
-            { className: "config-table-head" },
-            React.createElement("span", null, "Setting"),
-            React.createElement("span", null, "Value")
-          ),
-          ...restartConfigRows.map((entry) => React.createElement(
-            "div",
-            { key: `restart-${entry.section}-${entry.key}`, className: "config-table-row static" },
-            React.createElement(
-              "div",
-              { className: "config-setting-cell" },
-              React.createElement("strong", null, entry.key),
-              React.createElement("small", null, entry.section)
-            ),
-            React.createElement("strong", { className: "config-static-value" }, String(entry.value))
-          ))
         )
       ),
       React.createElement("p", { className: "config-help" }, panelData.configView.help)
