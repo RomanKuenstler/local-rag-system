@@ -1495,7 +1495,6 @@ function App() {
     if (existingPanel && !forceReload) return;
 
     if (!isEmbeddingReady) return;
-    ensureAuthenticatedForPreferencesApi(`${selectedTab.label} preferences`);
     setIsSending(true);
     setIsDialogTabLoading(true);
 
@@ -2374,7 +2373,6 @@ function App() {
   }
 
   async function downloadChat(chat) {
-    ensureAuthenticatedForPreferencesApi("Archive preferences");
     if (!chat?.id) return;
     if (volatileChat?.id === chat.id) {
       throw new Error("Send at least one message to save this chat before downloading.");
