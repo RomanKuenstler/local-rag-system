@@ -1528,6 +1528,27 @@ body {
   font-size: 0.9rem;
   font-weight: 500;
 }
+.general-setting-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.general-play-button {
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #111827;
+  border-radius: 999px;
+  height: 2rem;
+  padding: 0 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.general-play-button:hover {
+  background: #e5e7eb;
+}
 .general-dropdown { position: relative; }
 .general-dropdown > summary::-webkit-details-marker { display: none; }
 .general-dropdown-trigger {
@@ -1542,6 +1563,9 @@ body {
   background: transparent;
   cursor: pointer;
   min-width: 92px;
+}
+.general-dropdown-voice .general-dropdown-trigger {
+  min-width: 110px;
 }
 .general-dropdown[open] .general-dropdown-trigger {
   background: rgba(241, 245, 249, 0.9);
