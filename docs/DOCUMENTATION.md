@@ -16,6 +16,39 @@ The system is composed of seven services coordinated by Docker Compose:
 - `qdrant` → Vector database for semantic similarity search.
 - `postgres` → Durable storage for auth/session data, chats/messages, settings, metadata, tags, and runtime state.
 
+### Graphical overview
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                             Local RAG AI System                             │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ User                                                                         │
+│  │                                                                           │
+│  ▼                                                                           │
+│ WebUI (nginx + static app)                                                   │
+│  │  /api/*                                                                   │
+│  ▼                                                                           │
+│ Backend API                                                                  │
+│  ├─ Auth/session + admin/user management                                     │
+│  ├─ Managed library routes                                                    │
+│  └─ Proxies chat/retrieval routes                                            │
+│       │                                                                      │
+│       ▼                                                                      │
+│ Retriever API                                                                │
+│  ├─ Prompt assembly (guardrails + mode + personalization + history)          │
+│  ├─ Retrieval orchestration                                                   │
+│  └─ Chat lifecycle                                                            │
+│      │                         │                                              │
+│      │ vector search           │ persistence                                  │
+│      ▼                         ▼                                              │
+│   Qdrant                    Postgres                                          │
+│                                                                              │
+│ Embedder worker ──► OCR scanner ──► extracted text ──► embeddings ──► Qdrant │
+│      │                      ▲                                                 │
+│      └──────── reads data/ ─┴─ reads upload/ for prompt file OCR             │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 2) Runtime flow

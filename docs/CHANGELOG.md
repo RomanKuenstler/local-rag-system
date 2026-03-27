@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-03-27 (documentation follow-up)
+
+### Documentation
+- Added a graphical architecture overview diagram back to `docs/DOCUMENTATION.md` under the architecture section for faster system orientation.
+
 ## 2026-03-27 (documentation refresh + docs cleanup)
 
 ### Documentation
