@@ -894,16 +894,25 @@ function App() {
 
   function resolveEvidenceMenuLayout(triggerElement) {
     if (!triggerElement || typeof window === "undefined") {
-      return { placement: "up", maxHeight: 320 };
+      return { placement: "up", maxHeight: 360 };
     }
     const triggerRect = triggerElement.getBoundingClientRect();
-    const viewportPadding = 12;
-    const spaceAbove = Math.max(120, triggerRect.top - viewportPadding);
-    const spaceBelow = Math.max(120, window.innerHeight - triggerRect.bottom - viewportPadding);
-    const minimumComfortableDownwardSpace = 220;
-    const placement = spaceBelow >= minimumComfortableDownwardSpace || spaceBelow > spaceAbove ? "down" : "up";
+    const viewportPadding = 16;
+    const spaceAbove = Math.max(0, triggerRect.top - viewportPadding);
+    const spaceBelow = Math.max(0, window.innerHeight - triggerRect.bottom - viewportPadding);
+    const comfortableMenuHeight = 320;
+
+    let placement = "up";
+    if (spaceBelow >= comfortableMenuHeight && spaceBelow >= spaceAbove) {
+      placement = "down";
+    } else if (spaceAbove >= comfortableMenuHeight) {
+      placement = "up";
+    } else {
+      placement = spaceBelow > spaceAbove ? "down" : "up";
+    }
+
     const availableSpace = placement === "down" ? spaceBelow : spaceAbove;
-    const maxHeight = Math.max(160, Math.min(420, Math.floor(availableSpace)));
+    const maxHeight = Math.max(220, Math.min(460, Math.floor(availableSpace)));
     return { placement, maxHeight };
   }
 
