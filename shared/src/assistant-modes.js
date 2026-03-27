@@ -308,11 +308,6 @@ export function buildThinkingDraftPassMessages({ originalPrompt, analysisPlan })
       [
         "Original user prompt:",
         String(originalPrompt || "").trim(),
-      ].join("\n"),
-    ],
-    [
-      "assistant",
-      [
         "Step 1 output (analysis/plan):",
         String(analysisPlan || "(empty analysis/plan)").trim() || "(empty analysis/plan)",
       ].join("\n"),
@@ -327,18 +322,8 @@ export function buildThinkingRefinePassMessages({ originalPrompt, analysisPlan, 
       [
         "Original user prompt:",
         String(originalPrompt || "").trim(),
-      ].join("\n"),
-    ],
-    [
-      "assistant",
-      [
         "Step 1 output (analysis/plan):",
         String(analysisPlan || "(empty analysis/plan)").trim() || "(empty analysis/plan)",
-      ].join("\n"),
-    ],
-    [
-      "assistant",
-      [
         "Step 2 output (draft):",
         String(draftAnswer || "(empty draft)").trim() || "(empty draft)",
       ].join("\n"),
