@@ -585,7 +585,7 @@ export function renderPanelContent({
           return React.createElement(
             "section",
             { key: section.id, className: "info-group-card personalization-section-card" },
-            React.createElement("h4", null, section.title),
+            React.createElement("h5", { className: "personalization-option-heading" }, section.title),
             React.createElement(
               "div",
               { className: "personalization-custom-instructions-row" },

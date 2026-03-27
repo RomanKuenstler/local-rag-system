@@ -1480,7 +1480,7 @@ body {
   padding: 0.35rem 0;
 }
 .personalization-settings-card .general-setting-label {
-  font-weight: 600;
+  font-weight: 500;
   color: #1f2937;
 }
 .personalization-settings-card .general-setting-description {
@@ -1515,6 +1515,13 @@ body {
   color: #374151;
   font-size: 0.85rem;
   font-weight: 600;
+}
+.personalization-option-heading {
+  margin: 0;
+  color: #1f2937;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.25;
 }
 .personalization-custom-instructions-input-shell {
   position: relative;
