@@ -152,6 +152,23 @@ async function getSessionUiMode(sessionId) {
   });
 }
 
+function parseBooleanPreference(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+async function getSessionStreamingAnswersEnabled(sessionId) {
+  const rawValue = await getSessionSetting({
+    sessionId,
+    settingName: "streaming_answers_enabled",
+    fallbackValue: false,
+  });
+  return parseBooleanPreference(rawValue, false);
+}
+
 function extractAssistantTextContent(response) {
   const rawContent = response?.content;
   if (typeof rawContent === "string") {
@@ -187,6 +204,38 @@ function finalizeAssistantAnswer(response, { fallbackText = "" } = {}) {
     return String(fallbackText).trim();
   }
   return "I’m sorry—I couldn’t generate a complete answer this time. Please try again.";
+}
+
+async function runAssistantCall(messages, { streamAnswer = false, onToken } = {}) {
+  if (!streamAnswer || typeof onToken !== "function") {
+    const response = await chatModel.invoke(messages);
+    return finalizeAssistantAnswer(response);
+  }
+
+  const stream = await chatModel.stream(messages);
+  let answer = "";
+  for await (const chunk of stream) {
+    const nextToken = extractAssistantTextContent(chunk);
+    if (!nextToken) continue;
+    answer += nextToken;
+    onToken(nextToken);
+  }
+  return answer.trim();
+}
+
+function beginPromptStream(res) {
+  res.writeHead(200, {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+  });
+}
+
+function writePromptStreamEvent(res, event) {
+  res.write(`${JSON.stringify(event)}\n`);
 }
 
 function setAssistantChainProgress(sessionId, progress) {
@@ -1017,6 +1066,9 @@ async function handlePrompt(req, res) {
   const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
   const requestedChatId = String(body.chatId || "").trim() || null;
   const uploadedFiles = Array.isArray(body.uploadedFiles) ? body.uploadedFiles : [];
+  const requestedStream = parseBooleanPreference(body.stream, false);
+  const streamAnswersEnabled = await getSessionStreamingAnswersEnabled(sessionId);
+  const streamResponse = requestedStream && streamAnswersEnabled;
   const requestedAttachedFiles = Array.isArray(body.attachedFiles)
     ? body.attachedFiles.map((name) => String(name || "").trim()).filter(Boolean)
     : [];
@@ -1118,6 +1170,14 @@ async function handlePrompt(req, res) {
   });
 
   let answer = "";
+  if (streamResponse) {
+    beginPromptStream(res);
+    writePromptStreamEvent(res, { type: "start", sessionId, chatId, chatName });
+  }
+  const streamToken = (token) => {
+    if (!streamResponse) return;
+    writePromptStreamEvent(res, { type: "delta", token });
+  };
   try {
     if (currentAssistantMode === "refine") {
       setAssistantChainProgress(sessionId, {
@@ -1126,7 +1186,7 @@ async function handlePrompt(req, res) {
         stage: "drafting",
       });
 
-      const draftResponse = await chatModel.invoke([
+      const draftAnswer = await runAssistantCall([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
@@ -1142,15 +1202,13 @@ async function handlePrompt(req, res) {
         ...chatHistory,
         ["human", promptForAssistant],
       ]);
-
-      const draftAnswer = finalizeAssistantAnswer(draftResponse);
       setAssistantChainProgress(sessionId, {
         active: true,
         mode: currentAssistantMode,
         stage: "refining",
       });
 
-      const refinedResponse = await chatModel.invoke([
+      answer = await runAssistantCall([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
@@ -1168,11 +1226,10 @@ async function handlePrompt(req, res) {
           originalPrompt: promptForAssistant,
           draftAnswer,
         }),
-      ]);
-
-      answer = finalizeAssistantAnswer(refinedResponse, {
-        fallbackText: draftAnswer,
-      });
+      ], { streamAnswer: streamResponse, onToken: streamToken });
+      if (!String(answer || "").trim()) {
+        answer = draftAnswer;
+      }
       markAssistantChainCompleted(sessionId, currentAssistantMode);
     } else if (currentAssistantMode === "thinking") {
       setAssistantChainProgress(sessionId, {
@@ -1181,7 +1238,7 @@ async function handlePrompt(req, res) {
         stage: "analyse_plan",
       });
 
-      const analysisResponse = await chatModel.invoke([
+      const analysisPlan = await runAssistantCall([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
@@ -1198,15 +1255,13 @@ async function handlePrompt(req, res) {
         ["human", promptForAssistant],
       ]);
 
-      const analysisPlan = finalizeAssistantAnswer(analysisResponse);
-
       setAssistantChainProgress(sessionId, {
         active: true,
         mode: currentAssistantMode,
         stage: "drafting",
       });
 
-      const draftResponse = await chatModel.invoke([
+      const draftAnswer = await runAssistantCall([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
@@ -1226,15 +1281,13 @@ async function handlePrompt(req, res) {
         }),
       ]);
 
-      const draftAnswer = finalizeAssistantAnswer(draftResponse);
-
       setAssistantChainProgress(sessionId, {
         active: true,
         mode: currentAssistantMode,
         stage: "refining",
       });
 
-      const refinedResponse = await chatModel.invoke([
+      answer = await runAssistantCall([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
@@ -1253,11 +1306,10 @@ async function handlePrompt(req, res) {
           analysisPlan,
           draftAnswer,
         }),
-      ]);
-
-      answer = finalizeAssistantAnswer(refinedResponse, {
-        fallbackText: draftAnswer,
-      });
+      ], { streamAnswer: streamResponse, onToken: streamToken });
+      if (!String(answer || "").trim()) {
+        answer = draftAnswer;
+      }
       markAssistantChainCompleted(sessionId, currentAssistantMode);
     } else {
       setAssistantChainProgress(sessionId, {
@@ -1265,7 +1317,7 @@ async function handlePrompt(req, res) {
         mode: currentAssistantMode,
         stage: "single_pass",
       });
-      const assistantResponse = await chatModel.invoke([
+      answer = await runAssistantCall([
         ...buildSystemPromptLayers({
           guardrailsText,
           ragContextPackage: searchResult.ragContextPackage,
@@ -1275,12 +1327,15 @@ async function handlePrompt(req, res) {
         }),
         ...chatHistory,
         ["human", promptForAssistant],
-      ]);
-      answer = finalizeAssistantAnswer(assistantResponse);
+      ], { streamAnswer: streamResponse, onToken: streamToken });
       markAssistantChainCompleted(sessionId, currentAssistantMode);
     }
   } catch (error) {
     clearAssistantChainProgress(sessionId);
+    if (streamResponse) {
+      writePromptStreamEvent(res, { type: "error", error: error.message || "Streaming failed" });
+      res.end();
+    }
     throw error;
   }
   const pendingWeakAnswerKey = getPendingWeakAnswerKey(sessionId, chatId);
@@ -1313,7 +1368,7 @@ async function handlePrompt(req, res) {
       },
     });
 
-    json(res, 200, {
+    const weakPayload = {
       sessionId,
       chatId,
       chatName,
@@ -1327,7 +1382,13 @@ async function handlePrompt(req, res) {
       },
       upload: uploadInfo,
       retrieval: retrievalDetails,
-    });
+    };
+    if (streamResponse) {
+      writePromptStreamEvent(res, { type: "done", payload: weakPayload });
+      res.end();
+      return;
+    }
+    json(res, 200, weakPayload);
     return;
   }
 
@@ -1352,7 +1413,7 @@ async function handlePrompt(req, res) {
     },
   });
 
-  json(res, 200, {
+  const finalPayload = {
     sessionId,
     chatId,
     chatName,
@@ -1361,7 +1422,13 @@ async function handlePrompt(req, res) {
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
     upload: uploadInfo,
     retrieval: hasUploadedContext ? null : retrievalDetails,
-  });
+  };
+  if (streamResponse) {
+    writePromptStreamEvent(res, { type: "done", payload: finalPayload });
+    res.end();
+    return;
+  }
+  json(res, 200, finalPayload);
 }
 
 async function handleMessages(req, res) {
@@ -1669,6 +1736,9 @@ async function handleStatus(_req, res) {
   const personalizationSettings = sessionId
     ? await getSessionPersonalizationSettings(sessionId)
     : null;
+  const streamingAnswers = sessionId
+    ? await getSessionStreamingAnswersEnabled(sessionId)
+    : false;
   const readiness = await getEmbeddingReadiness();
   const embeddingStatus = await readEmbeddingStatus();
 
@@ -1681,6 +1751,7 @@ async function handleStatus(_req, res) {
     },
     assistant: {
       mode: currentAssistantMode,
+      streamingAnswers,
       personalization: personalizationSettings,
       chainProgress: sessionId ? (assistantChainProgressBySession.get(sessionId) || null) : null,
       availableModes: listAssistantModes().map((mode) => ({ id: mode.id, label: mode.label })),
@@ -1742,6 +1813,46 @@ async function handlePersonalization(req, res) {
       settings,
     });
   }
+}
+
+async function handleGeneralPreferences(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  if (req.method === "GET") {
+    const sessionId = String(url.searchParams.get("sessionId") || "default-session").trim() || "default-session";
+    const streamingAnswers = await getSessionStreamingAnswersEnabled(sessionId);
+    json(res, 200, {
+      sessionId,
+      settings: {
+        streamingAnswers,
+      },
+    });
+    return;
+  }
+
+  if (req.method === "PATCH") {
+    const body = await readJsonBody(req);
+    const sessionId = String(body.sessionId || "default-session").trim() || "default-session";
+    const hasStreamingAnswers = Object.prototype.hasOwnProperty.call(body, "streamingAnswers");
+    if (!hasStreamingAnswers) {
+      json(res, 400, { error: "Missing 'streamingAnswers' in request body." });
+      return;
+    }
+    const streamingAnswers = parseBooleanPreference(body.streamingAnswers, false);
+    await updateSessionSetting({
+      sessionId,
+      settingName: "streaming_answers_enabled",
+      value: streamingAnswers,
+    });
+    json(res, 200, {
+      sessionId,
+      settings: {
+        streamingAnswers,
+      },
+    });
+    return;
+  }
+
+  json(res, 405, { error: "Method not allowed" });
 }
 
 async function handleFiles(req, res, url) {
@@ -1857,6 +1968,7 @@ const handleRequest = createRetrieverRequestHandler({
   handleListChats,
   handleCreateChat,
   handlePersonalization,
+  handleGeneralPreferences,
   handlePatchChat,
   handleDownloadChat,
   handleDeleteChat,
@@ -1868,6 +1980,12 @@ const server = http.createServer(async (req, res) => {
     await handleRequest(req, res);
   } catch (error) {
     console.error(error);
+    if (res.headersSent) {
+      if (!res.writableEnded) {
+        res.end();
+      }
+      return;
+    }
 
     if (error.message === "Invalid JSON payload") {
       json(res, 400, { error: error.message });
@@ -1908,6 +2026,6 @@ setRuntimeConfigValue("cosine limit", persistedRuntimeConfig.cosineLimit);
 server.listen(PORT, HOST, () => {
   console.log(`Retriever API listening on http://${HOST}:${PORT}`);
   console.log(
-    "Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, PATCH /internal/retriever/files/tags, GET|PATCH /internal/retriever/files/tag-filters, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, POST /internal/retriever/prompt"
+    "Endpoints: GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|PATCH /api/preferences/general, POST /api/prompt, GET /internal/retriever/status, GET /internal/retriever/files, PATCH /internal/retriever/files/tags, GET|PATCH /internal/retriever/files/tag-filters, GET|POST /internal/retriever/chats, PATCH|DELETE /internal/retriever/chats/:chatId, GET /internal/retriever/chats/:chatId/download, GET /internal/retriever/messages, GET|PATCH /internal/retriever/personalization, GET|PATCH /internal/retriever/preferences/general, POST /internal/retriever/prompt"
   );
 });

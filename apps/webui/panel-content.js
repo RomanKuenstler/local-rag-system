@@ -231,7 +231,40 @@ function VoiceSettingRow({ currentId, options, onSelectOption, chevron, check })
   );
 }
 
-function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderModeDropdown, chevron, check }) {
+function GeneralSwitchRow({ label, description, checked, onToggle, disabled }) {
+  return React.createElement(
+    "div",
+    { className: "general-setting-row", key: `setting-switch-${label}` },
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, label),
+      description ? React.createElement("small", { className: "general-setting-description" }, description) : null
+    ),
+    React.createElement(
+      "label",
+      { className: "filter-switch", title: checked ? "Disable setting" : "Enable setting" },
+      React.createElement("input", {
+        type: "checkbox",
+        checked,
+        disabled,
+        onChange: () => onToggle?.(!checked),
+      }),
+      React.createElement("span", { className: "filter-switch-slider", "aria-hidden": "true" })
+    )
+  );
+}
+
+function GeneralPreviewSettings({
+  assistantModes,
+  currentAssistantMode,
+  streamingAnswersEnabled,
+  onToggleStreamingAnswers,
+  interactionDisabled,
+  renderModeDropdown,
+  chevron,
+  check,
+}) {
   const [appearance, setAppearance] = React.useState("system");
   const [language, setLanguage] = React.useState("auto-detect");
   const [spokenLanguage, setSpokenLanguage] = React.useState("auto-detect");
@@ -258,6 +291,13 @@ function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderMo
   return React.createElement(
     "section",
     { className: "info-group-card general-settings-card" },
+    React.createElement(GeneralSwitchRow, {
+      label: "Streaming answers",
+      description: "Stream assistant replies token by token.",
+      checked: streamingAnswersEnabled === true,
+      onToggle: onToggleStreamingAnswers,
+      disabled: interactionDisabled,
+    }),
     renderModeDropdown({
       label: "Assistant mode",
       currentId: currentAssistantMode,
@@ -351,6 +391,8 @@ export function renderPanelContent({
   settingsTabError = "",
   clearSettingsTabError = () => {},
   settingsInputResetTokenByKey = {},
+  streamingAnswersEnabled = false,
+  toggleStreamingAnswers = null,
 }) {
   const interactionDisabled = isSending || !isEmbeddingReady;
   const disabledAssistantModeSet = new Set(
@@ -633,6 +675,9 @@ export function renderPanelContent({
       React.createElement(GeneralPreviewSettings, {
         assistantModes,
         currentAssistantMode,
+        streamingAnswersEnabled,
+        onToggleStreamingAnswers: toggleStreamingAnswers,
+        interactionDisabled,
         chevron,
         check,
         renderModeDropdown: ({ label, currentId, options, kind }) => renderModeDropdown({

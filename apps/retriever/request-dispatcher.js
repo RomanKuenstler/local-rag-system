@@ -6,6 +6,7 @@ export function getRouteMatches(pathname) {
     isTagFiltersRoute: ["/api/files/tag-filters", "/internal/retriever/files/tag-filters"].includes(pathname),
     isMessagesRoute: ["/api/messages", "/internal/retriever/messages"].includes(pathname),
     isPromptRoute: ["/api/prompt", "/internal/retriever/prompt"].includes(pathname),
+    isGeneralPreferencesRoute: ["/api/preferences/general", "/internal/retriever/preferences/general"].includes(pathname),
     isChatsRoute: ["/api/chats", "/internal/retriever/chats"].includes(pathname),
     isPersonalizationRoute: ["/api/personalization", "/internal/retriever/personalization"].includes(pathname),
     chatRouteMatch: pathname.match(/^\/(?:api|internal\/retriever)\/chats\/([^/]+)$/),
@@ -27,6 +28,7 @@ export function createRetrieverRequestHandler({
   handleDownloadChat,
   handleDeleteChat,
   handlePrompt,
+  handleGeneralPreferences,
 }) {
   return async function handleRequest(req, res) {
     if (!req.url) {
@@ -48,6 +50,7 @@ export function createRetrieverRequestHandler({
       isTagFiltersRoute,
       isMessagesRoute,
       isPromptRoute,
+      isGeneralPreferencesRoute,
       isChatsRoute,
       isPersonalizationRoute,
       chatRouteMatch,
@@ -91,6 +94,11 @@ export function createRetrieverRequestHandler({
 
     if ((req.method === "GET" || req.method === "PATCH") && isPersonalizationRoute) {
       await handlePersonalization(req, res);
+      return;
+    }
+
+    if ((req.method === "GET" || req.method === "PATCH") && isGeneralPreferencesRoute) {
+      await handleGeneralPreferences(req, res);
       return;
     }
 

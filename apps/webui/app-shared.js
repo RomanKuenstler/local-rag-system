@@ -224,7 +224,12 @@ export function mergeAssistantModes(parsedAssistantModes = [], availableModes = 
   return Array.from(normalizedById.values());
 }
 
-export function buildGeneralAssistantPanelContent(assistantAnswer, statusData, currentAssistantMode) {
+export function buildGeneralAssistantPanelContent(
+  assistantAnswer,
+  statusData,
+  currentAssistantMode,
+  streamingAnswersEnabled = false
+) {
   const parsedAssistant = parseAssistantModeContent(assistantAnswer || "");
   const assistantModes = mergeAssistantModes(parsedAssistant.modes, statusData?.assistant?.availableModes);
   const parsedCurrentMode = String(parsedAssistant.currentMode || "").trim().toLowerCase();
@@ -240,6 +245,7 @@ export function buildGeneralAssistantPanelContent(assistantAnswer, statusData, c
   return {
     currentMode: resolvedCurrentMode,
     modes: assistantModes,
+    streamingAnswers: statusData?.assistant?.streamingAnswers === true || streamingAnswersEnabled === true,
   };
 }
 

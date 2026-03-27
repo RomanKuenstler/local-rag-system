@@ -134,7 +134,6 @@ async function proxyRetriever({ req, res, targetPath, sessionId }) {
     body,
   });
 
-  const text = await upstreamResponse.text();
   const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json";
 
   res.writeHead(upstreamResponse.status, {
@@ -143,7 +142,15 @@ async function proxyRetriever({ req, res, targetPath, sessionId }) {
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
   });
-  res.end(text);
+  if (!upstreamResponse.body) {
+    res.end();
+    return;
+  }
+
+  for await (const chunk of upstreamResponse.body) {
+    res.write(chunk);
+  }
+  res.end();
 }
 
 async function fetchJson(url) {
@@ -852,5 +859,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|PATCH /api/preferences/general, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
 });
