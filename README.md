@@ -56,6 +56,7 @@ docker compose up -d --build
   - Managed library upload/toggle/delete/list (`/api/library/files`).
 - **Prompt file attachments** (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`, and OCR image formats).
 - **OCR integration path** for both indexing-time and prompt-time extraction.
+- **Library audio ingestion** for `.wav`, `.mp3`, `.m4a` via audio transcription prep flow.
 
 ## OCR scanner behavior
 

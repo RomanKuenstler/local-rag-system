@@ -12,6 +12,9 @@ const ATTACHMENT_EXTENSION_COLOR_CLASS = {
   jpeg: "is-purple",
   webp: "is-purple",
   csv: "is-green",
+  wav: "is-yellow",
+  mp3: "is-yellow",
+  m4a: "is-yellow",
 };
 
 function getExtensionColorClass(extensionValue) {

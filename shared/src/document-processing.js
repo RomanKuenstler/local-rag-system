@@ -11,6 +11,8 @@ import {
   PDF_MIN_EXTRACTED_CHARS,
 } from "../config/index.js";
 
+const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a"]);
+
 function sha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
@@ -744,6 +746,17 @@ export async function normalizeIndexableFileByExtension(filePath, extension, enc
   }
   if (normalizedExtension === ".epub") {
     return normalizeTextForIndexing(await extractTextFromEpub(filePath));
+  }
+  if (AUDIO_EXTENSIONS.has(normalizedExtension)) {
+    if (typeof options.audioTranscriptionHandler === "function") {
+      const transcribedText = await options.audioTranscriptionHandler({
+        filePath,
+        extension: normalizedExtension,
+        relativePath: options.relativePath,
+      });
+      return normalizeTextForIndexing(typeof transcribedText === "string" ? transcribedText : "");
+    }
+    return "";
   }
 
   const rawContent = fs.readFileSync(filePath, encoding);

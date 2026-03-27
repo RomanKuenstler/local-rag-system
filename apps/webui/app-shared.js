@@ -62,10 +62,13 @@ const ATTACHMENT_EXTENSION_COLOR_CLASS = {
   jpeg: "is-purple",
   webp: "is-purple",
   csv: "is-green",
+  wav: "is-yellow",
+  mp3: "is-yellow",
+  m4a: "is-yellow",
 };
 export const LIBRARY_UPLOAD_RULES = {
   maxFiles: 5,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub", ".wav", ".mp3", ".m4a"],
 };
 export const SESSION_ID_STORAGE_KEY = "rag-session-id";
 export const CHAT_ID_STORAGE_KEY = "rag-chat-id";
