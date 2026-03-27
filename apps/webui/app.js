@@ -793,6 +793,25 @@ function App() {
     setLoginError("");
   }
 
+  function openInfoFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openUnifiedDialog("info");
+  }
+
+  function openHelpFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openUnifiedDialog("help");
+  }
+
+  function handleDeleteFromUserMenu() {
+    setIsUserMenuOpen(false);
+    setMessages((prev) => prev.concat(createMessage(
+      "assistant",
+      "Self-service account deletion is not available yet. Please contact an administrator.",
+      { isVolatile: true, evidenceSeverity: "warn" }
+    )));
+  }
+
   useEffect(() => {
     restoreActiveSession().catch(() => {
       clearAuthenticatedSessionState();
@@ -3382,6 +3401,37 @@ function App() {
                     type: "button",
                     className: "chat-item-actions-option",
                     role: "menuitem",
+                    onClick: openInfoFromUserMenu,
+                  },
+                  icon(infoIconPath),
+                  React.createElement("span", null, "Info")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openHelpFromUserMenu,
+                  },
+                  icon(questionIconPath),
+                  React.createElement("span", null, "Help")
+                )
+              ),
+              React.createElement("li", { className: "side-nav-user-menu-divider", role: "separator", "aria-hidden": "true" }),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
                     onClick: openChangePasswordFlow,
                   },
                   icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
@@ -3397,10 +3447,10 @@ function App() {
                     type: "button",
                     className: "chat-item-actions-option delete",
                     role: "menuitem",
-                    onClick: handleLogout,
+                    onClick: handleDeleteFromUserMenu,
                   },
-                  icon("M17 7V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2h-2v2H7V5h8v2zM11 8l1.4-1.4L18.8 13l-6.4 6.4L11 18l4-4z"),
-                  React.createElement("span", null, "Logout")
+                  icon(trashIconPath),
+                  React.createElement("span", null, "Delete")
                 )
               )
             )
@@ -4569,70 +4619,74 @@ function App() {
                       { className: "archive-table-wrapper" },
                       React.createElement(
                         "div",
-                        { className: "archive-table", role: "table", "aria-label": "Archived chats" },
+                        { className: "library-table archive-table", role: "table", "aria-label": "Archived chats" },
                         React.createElement(
                           "div",
-                          { className: "archive-table-head", role: "row" },
+                          { className: "library-table-head archive-table-head", role: "row" },
                           React.createElement("strong", { role: "columnheader" }, "Chat name"),
                           React.createElement("strong", { role: "columnheader" }, "Archived at"),
                           React.createElement("strong", { role: "columnheader" }, "Actions")
                         ),
-                        archivedChatRows.length === 0
-                          ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
-                          : archivedChatRows.map((chat) => React.createElement(
-                            "div",
-                            { key: chat.id, className: "archive-table-row", role: "row" },
-                            React.createElement("strong", { className: "archive-chat-name" }, chat.name),
-                            React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
-                            React.createElement(
+                        React.createElement(
+                          "div",
+                          { className: "library-table-body", role: "rowgroup" },
+                          archivedChatRows.length === 0
+                            ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
+                            : archivedChatRows.map((chat) => React.createElement(
                               "div",
-                              { className: "library-row-actions archive-row-actions" },
+                              { key: chat.id, className: "library-table-row archive-table-row", role: "row" },
+                              React.createElement("strong", { className: "library-path archive-chat-name" }, chat.name),
+                              React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
                               React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-toggle-button",
-                                  title: "Download chat",
-                                  "aria-label": `Download ${chat.name}`,
-                                  onClick: async () => {
-                                    try {
-                                      await downloadChat(chat);
-                                    } catch (error) {
-                                      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-                                        evidenceSeverity: "error",
-                                        isVolatile: true,
-                                      })));
-                                    }
+                                "div",
+                                { className: "library-row-actions archive-row-actions" },
+                                React.createElement(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "library-toggle-button",
+                                    title: "Download chat",
+                                    "aria-label": `Download ${chat.name}`,
+                                    onClick: async () => {
+                                      try {
+                                        await downloadChat(chat);
+                                      } catch (error) {
+                                        setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                                          evidenceSeverity: "error",
+                                          isVolatile: true,
+                                        })));
+                                      }
+                                    },
                                   },
-                                },
-                                icon(downloadIconPath)
-                              ),
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-toggle-button",
-                                  title: "Unarchive chat",
-                                  "aria-label": `Unarchive ${chat.name}`,
-                                  onClick: () => unarchiveChat(chat.id),
-                                  disabled: isChatActionPending,
-                                },
-                                icon(keepIconPath)
-                              ),
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-delete-button",
-                                  title: "Delete chat",
-                                  "aria-label": `Delete ${chat.name}`,
-                                  onClick: () => setDeleteConfirmChat(chat),
-                                  disabled: isChatActionPending,
-                                },
-                                icon(trashIconPath)
+                                  icon(downloadIconPath)
+                                ),
+                                React.createElement(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "library-toggle-button",
+                                    title: "Unarchive chat",
+                                    "aria-label": `Unarchive ${chat.name}`,
+                                    onClick: () => unarchiveChat(chat.id),
+                                    disabled: isChatActionPending,
+                                  },
+                                  icon(keepIconPath)
+                                ),
+                                React.createElement(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "library-delete-button",
+                                    title: "Delete chat",
+                                    "aria-label": `Delete ${chat.name}`,
+                                    onClick: () => setDeleteConfirmChat(chat),
+                                    disabled: isChatActionPending,
+                                  },
+                                  icon(trashIconPath)
+                                )
                               )
-                            )
-                          ))
+                            ))
+                        )
                       )
                     )
                     : activeModalPanel
