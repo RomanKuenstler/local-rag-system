@@ -576,6 +576,9 @@ body {
   gap: 0.75rem;
   padding-bottom: 0.4rem;
 }
+.chat-column:not(.library-column) {
+  min-height: calc(100vh - 12.8rem);
+}
 .library-column {
   width: min(calc(100% - 8rem), 1220px);
   gap: 0.85rem;
@@ -1284,7 +1287,8 @@ body {
   flex-direction: column;
   gap: 0.95rem;
   scroll-behavior: smooth;
-  min-height: 40vh;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .info-panel {
