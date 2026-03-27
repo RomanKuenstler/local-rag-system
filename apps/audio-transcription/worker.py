@@ -6,16 +6,24 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+import librosa
 from flask import Flask, jsonify, request
+from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a"}
 REQUEST_TYPES = {"chat_input", "audio_embedding"}
+DEFAULT_MODEL_ID = os.getenv("AUDIO_MODEL_ID", "openai/whisper-small").strip() or "openai/whisper-small"
+DEFAULT_SAMPLE_RATE = int(os.getenv("AUDIO_TRANSCRIPTION_SAMPLE_RATE", "16000"))
+MAX_TRANSCRIPTION_SECONDS = float(os.getenv("AUDIO_MAX_DURATION_SECONDS", "300"))
 
 app = Flask(__name__)
+_model_bundle: dict[str, object] = {}
+_model_lock = threading.Lock()
 
 
 def utc_timestamp() -> str:
@@ -68,12 +76,59 @@ def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, st
         return Path(tmp.name), request_type, True
 
 
+def get_model_bundle() -> tuple[WhisperProcessor, WhisperForConditionalGeneration]:
+    if "processor" in _model_bundle and "model" in _model_bundle:
+        return _model_bundle["processor"], _model_bundle["model"]
+
+    with _model_lock:
+        if "processor" in _model_bundle and "model" in _model_bundle:
+            return _model_bundle["processor"], _model_bundle["model"]
+
+        model_id = DEFAULT_MODEL_ID
+        log_event("audio.model_loading_started", model_id=model_id)
+        processor = WhisperProcessor.from_pretrained(model_id)
+        model = WhisperForConditionalGeneration.from_pretrained(model_id)
+        model.config.forced_decoder_ids = None
+        _model_bundle["processor"] = processor
+        _model_bundle["model"] = model
+        log_event("audio.model_loading_finished", model_id=model_id)
+
+    return _model_bundle["processor"], _model_bundle["model"]
+
+
 def transcribe_audio(_audio_path: Path) -> dict[str, object]:
-    # Placeholder implementation: model wiring will be added in follow-up changes.
+    processor, model = get_model_bundle()
+
+    audio_array, sampling_rate = librosa.load(
+        str(_audio_path),
+        sr=DEFAULT_SAMPLE_RATE,
+        mono=True,
+    )
+
+    if audio_array.size == 0:
+        raise ValueError("Audio file has no decodable samples")
+
+    duration_seconds = float(audio_array.shape[0]) / float(DEFAULT_SAMPLE_RATE)
+    if duration_seconds > MAX_TRANSCRIPTION_SECONDS:
+        raise ValueError(
+            f"Audio duration {duration_seconds:.2f}s exceeds maximum {MAX_TRANSCRIPTION_SECONDS:.2f}s"
+        )
+
+    input_features = processor(
+        audio_array,
+        sampling_rate=sampling_rate,
+        return_tensors="pt",
+    ).input_features
+    predicted_ids = model.generate(input_features)
+    transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)
+    text = transcription[0].strip() if transcription else ""
+
     return {
-        "text": "",
-        "language": None,
+        "text": text,
+        "language": "unknown",
         "segments": [],
+        "duration_seconds": round(duration_seconds, 3),
+        "sample_rate": DEFAULT_SAMPLE_RATE,
     }
 
 

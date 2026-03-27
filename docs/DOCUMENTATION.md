@@ -13,7 +13,7 @@ The system is composed of eight services coordinated by Docker Compose:
 - `retriever` → Retrieval and answer orchestration (RAG pipeline, prompt building, assistant modes, personalization, chat logic).
 - `embedder` → Background indexing pipeline that reads source files, chunks text, computes embeddings, and updates vector store metadata.
 - `ocr-scanner` → Python OCR and PDF extraction service used by both retriever and embedder.
-- `audio-transcription` → Python audio transcription service scaffold for chat input and embedding audio jobs.
+- `audio-transcription` → Python audio transcription service for chat input and embedding audio jobs.
 - `qdrant` → Vector database for semantic similarity search.
 - `postgres` → Durable storage for auth/session data, chats/messages, settings, metadata, tags, and runtime state.
 

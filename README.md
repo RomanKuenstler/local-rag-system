@@ -16,7 +16,7 @@ This stack runs with Docker Compose and ships as multiple focused services:
 - `retriever` – prompt orchestration, retrieval, chat lifecycle, assistant modes, personalization.
 - `embedder` – background indexing + embedding worker for `data/`.
 - `ocr-scanner` – OCR + layout-aware extraction for PDFs/images from library files and prompt uploads.
-- `audio-transcription` – Python transcription microservice scaffold for chat and embedding audio jobs.
+- `audio-transcription` – Python transcription microservice for chat and embedding audio jobs.
 - `qdrant` – vector database for similarity search.
 - `postgres` – persistence for users, sessions, chats, messages, settings, tags, and runtime metadata.
 - `webui` – Vite-bundled React browser UI (Node build -> nginx runtime) with backend API proxying.
@@ -80,11 +80,11 @@ Extraction behavior:
 - `chat_input` (from `upload/` using `chat_audio_relative_path` or inline `audio_base64`)
 - `audio_embedding` (from `data/` using `audio_relative_path`)
 
-Current scaffold behavior:
+Current behavior:
 
 - Accepts `.wav`, `.mp3`, and `.m4a` files.
 - Validates request type + payload shape and returns normalized response metadata.
-- Includes model wiring placeholders via compose model-runner variables (`MODEL_RUNNER_BASE_URL` / `MODEL_RUNNER_LLM_AUDIO`).
+- Runs Whisper Small (`openai/whisper-small`) to transcribe audio to text for downstream embedding.
 
 ## Repository layout
 
