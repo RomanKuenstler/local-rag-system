@@ -28,6 +28,7 @@ import { createApiClient } from "./api-client.js";
 import {
   ADMIN_PAGE_HASH,
   ADMIN_PROTECTED_USERNAMES,
+  ASSISTANT_MODE_STORAGE_KEY,
   ASSISTANT_MODE_OPTIONS,
   AUTH_SESSION_TOKEN_STORAGE_KEY,
   CHAT_ID_STORAGE_KEY,
@@ -84,6 +85,18 @@ function App() {
       next[normalizedTag] = false;
     }
     return next;
+  };
+  const getInitialAssistantMode = () => {
+    const fallback = ASSISTANT_MODE_OPTIONS[0].id;
+    try {
+      const storedMode = String(window.localStorage.getItem(ASSISTANT_MODE_STORAGE_KEY) || "").trim().toLowerCase();
+      if (isKnownAssistantMode(storedMode)) {
+        return storedMode;
+      }
+    } catch {
+      return fallback;
+    }
+    return fallback;
   };
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
@@ -150,7 +163,7 @@ function App() {
   const [openEvidenceMenuMessageId, setOpenEvidenceMenuMessageId] = useState(null);
   const [openEvidenceMenuPlacement, setOpenEvidenceMenuPlacement] = useState("up");
   const [openEvidenceMenuMaxHeight, setOpenEvidenceMenuMaxHeight] = useState(320);
-  const [currentAssistantMode, setCurrentAssistantMode] = useState(ASSISTANT_MODE_OPTIONS[0].id);
+  const [currentAssistantMode, setCurrentAssistantMode] = useState(getInitialAssistantMode);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
   const [customInstructionsDraft, setCustomInstructionsDraft] = useState("");
@@ -528,6 +541,16 @@ function App() {
     const timerId = window.setInterval(pollSession, 60_000);
     return () => window.clearInterval(timerId);
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    try {
+      if (isKnownAssistantMode(currentAssistantMode)) {
+        window.localStorage.setItem(ASSISTANT_MODE_STORAGE_KEY, currentAssistantMode);
+      }
+    } catch {
+      // ignore localStorage write issues (private mode, quota, etc.)
+    }
+  }, [currentAssistantMode]);
 
   async function refreshStatus() {
     try {
@@ -1344,13 +1367,24 @@ function App() {
       }
     )));
     const fallbackStepTimers = [];
-    if (String(currentAssistantMode || "").trim().toLowerCase() === "refine") {
+    const normalizedAssistantMode = String(currentAssistantMode || "").trim().toLowerCase();
+    if (normalizedAssistantMode === "refine") {
       fallbackStepTimers.push(window.setTimeout(() => {
         appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "drafting"));
       }, 550));
       fallbackStepTimers.push(window.setTimeout(() => {
         appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "refining"));
       }, 1300));
+    } else if (normalizedAssistantMode === "thinking") {
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("thinking", "analyse_plan"));
+      }, 450));
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("thinking", "drafting"));
+      }, 1100));
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("thinking", "refining"));
+      }, 1900));
     } else {
       fallbackStepTimers.push(window.setTimeout(() => {
         appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("simple", "single_pass"));

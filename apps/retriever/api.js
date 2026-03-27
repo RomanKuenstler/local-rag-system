@@ -30,9 +30,11 @@ import {
 import { buildSystemPromptLayers, loadGuardrails } from "../../shared/src/guardrails.js";
 import { createChatModel } from "../../shared/src/model-clients.js";
 import {
+  buildThinkingDraftPassMessages,
+  buildThinkingRefinePassMessages,
   DEFAULT_ASSISTANT_MODE,
+  getAssistantChainSystemPrompt,
   buildRefineFinalPassMessages,
-  getRefineChainSystemPrompt,
   isAssistantModeSupported,
   listAssistantModes,
   normalizeAssistantMode,
@@ -1135,7 +1137,7 @@ async function handlePrompt(req, res) {
         }),
         [
           "system",
-          getRefineChainSystemPrompt("drafting"),
+          getAssistantChainSystemPrompt("refine", "drafting"),
         ],
         ...chatHistory,
         ["human", promptForAssistant],
@@ -1159,11 +1161,96 @@ async function handlePrompt(req, res) {
         }),
         [
           "system",
-          getRefineChainSystemPrompt("refining"),
+          getAssistantChainSystemPrompt("refine", "refining"),
         ],
         ...chatHistory,
         ...buildRefineFinalPassMessages({
           originalPrompt: promptForAssistant,
+          draftAnswer,
+        }),
+      ]);
+
+      answer = finalizeAssistantAnswer(refinedResponse, {
+        fallbackText: draftAnswer,
+      });
+      markAssistantChainCompleted(sessionId, currentAssistantMode);
+    } else if (currentAssistantMode === "thinking") {
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "analyse_plan",
+      });
+
+      const analysisResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          sessionId,
+          personalizationSettings,
+          includeAssistantModeLayer: false,
+        }),
+        [
+          "system",
+          getAssistantChainSystemPrompt("thinking", "analyse_plan"),
+        ],
+        ...chatHistory,
+        ["human", promptForAssistant],
+      ]);
+
+      const analysisPlan = finalizeAssistantAnswer(analysisResponse);
+
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "drafting",
+      });
+
+      const draftResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          sessionId,
+          personalizationSettings,
+          includeAssistantModeLayer: false,
+        }),
+        [
+          "system",
+          getAssistantChainSystemPrompt("thinking", "drafting"),
+        ],
+        ...chatHistory,
+        ...buildThinkingDraftPassMessages({
+          originalPrompt: promptForAssistant,
+          analysisPlan,
+        }),
+      ]);
+
+      const draftAnswer = finalizeAssistantAnswer(draftResponse);
+
+      setAssistantChainProgress(sessionId, {
+        active: true,
+        mode: currentAssistantMode,
+        stage: "refining",
+      });
+
+      const refinedResponse = await chatModel.invoke([
+        ...buildSystemPromptLayers({
+          guardrailsText,
+          ragContextPackage: searchResult.ragContextPackage,
+          assistantMode: currentAssistantMode,
+          sessionId,
+          personalizationSettings,
+          includeAssistantModeLayer: false,
+        }),
+        [
+          "system",
+          getAssistantChainSystemPrompt("thinking", "refining"),
+        ],
+        ...chatHistory,
+        ...buildThinkingRefinePassMessages({
+          originalPrompt: promptForAssistant,
+          analysisPlan,
           draftAnswer,
         }),
       ]);

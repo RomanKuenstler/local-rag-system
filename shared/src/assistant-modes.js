@@ -5,6 +5,9 @@ const ASSISTANT_MODE_SIMPLE_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-mode-simp
 const ASSISTANT_MODE_THINKING_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-mode-thinking.md`;
 const ASSISTANT_REFINE_DRAFT_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-refine-draft.md`;
 const ASSISTANT_REFINE_REFINING_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-refine-refining.md`;
+const ASSISTANT_THINKING_ANALYSE_PLAN_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-thinking-analyse-plan.md`;
+const ASSISTANT_THINKING_DRAFT_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-thinking-draft.md`;
+const ASSISTANT_THINKING_REFINING_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-thinking-refining.md`;
 
 const SHARED_EVIDENCE_RULES = [
   "Use retrieved evidence as your primary basis for claims.",
@@ -46,6 +49,121 @@ const REFINE_DRAFT_PROMPT = loadPromptFile({
   filePath: ASSISTANT_REFINE_DRAFT_PATH,
   fallback: REFINE_DRAFT_PROMPT_DEFAULT,
   label: "Assistant refine draft prompt",
+});
+
+const THINKING_ANALYSE_PLAN_PROMPT = loadPromptFile({
+  filePath: ASSISTANT_THINKING_ANALYSE_PLAN_PATH,
+  fallback: [
+    "You are the planning step for the assistant's thinking mode.",
+    "",
+    "Your task is to create a short internal plan for answering the user's question using the provided retrieved evidence, recent conversation context, and uploaded prompt files if any.",
+    "",
+    "Do not answer the user's question yet.",
+    "",
+    "Your plan must help the next step produce a correct, complete, evidence-grounded answer.",
+    "",
+    "Instructions:",
+    "",
+    "1. Identify what the user is actually asking for.",
+    "2. Break the user request into the main parts that need to be addressed.",
+    "3. Determine which parts appear supported by the retrieved evidence.",
+    "4. Identify any gaps, uncertainties, or missing information.",
+    "5. Create a short answer plan in a logical order.",
+    "6. Prefer evidence-grounded coverage over speculation.",
+    "7. Do not invent unsupported facts.",
+    "8. Do not write the final answer.",
+    "",
+    "Output format:",
+    "Return only a short structured plan with these sections:",
+    "",
+    "Question intent:",
+    "- ...",
+    "",
+    "Answer plan:",
+    "- ...",
+    "- ...",
+    "- ...",
+    "",
+    "Evidence coverage:",
+    "- Supported: ...",
+    "- Uncertain or missing: ...",
+    "",
+    "Keep the plan concise and useful for the next step.",
+    "Do not include chain-of-thought, long explanations, or a final answer.",
+  ].join("\n"),
+  label: "Assistant thinking analyse/plan prompt",
+});
+
+const THINKING_DRAFT_PROMPT = loadPromptFile({
+  filePath: ASSISTANT_THINKING_DRAFT_PATH,
+  fallback: [
+    "You are the draft-generation step for the assistant's thinking mode.",
+    "",
+    "Your task is to write a first draft answer to the user's question using:",
+    "- the retrieved evidence",
+    "- the recent conversation context",
+    "- any uploaded prompt files",
+    "- and the provided internal plan",
+    "",
+    "Your goal is to produce a useful, evidence-grounded draft that covers the user's request as completely as the evidence allows.",
+    "",
+    "Instructions:",
+    "",
+    "1. Follow the provided plan.",
+    "2. Answer the user's actual question directly.",
+   " 3. Use retrieved evidence as the primary basis for claims.",
+    "4. Cover all supported parts of the question.",
+    "5. If some parts are only partially supported, say so clearly.",
+    "6. If some parts are not supported by the evidence, clearly identify them as missing or uncertain.",
+    "7. Do not invent unsupported facts.",
+    "8. If additional general knowledge is used, label it explicitly as general knowledge.",
+    "9. Focus first on correctness, relevance, and completeness.",
+    "10. Do not include internal reasoning, planning notes, or meta commentary.",
+    "",
+    "Output:",
+    "Return only the draft answer text.",
+    "Do not return the plan again.",
+    "Do not explain your process.",
+  ].join("\n"),
+  label: "Assistant thinking draft prompt",
+});
+
+const THINKING_REFINING_PROMPT = loadPromptFile({
+  filePath: ASSISTANT_THINKING_REFINING_PATH,
+  fallback: [
+    "You are the refinement step for the assistant's thinking mode.",
+    "",
+    "Your task is to improve the draft answer using:",
+    "- the original user question",
+    "- the retrieved evidence",
+    "- the internal plan",
+    "- the draft answer",
+    "",
+    "You must refine the draft, not answer the question from scratch.",
+    "",
+    "Your goals are:",
+    "- ensure the answer fully addresses the user's request as far as the evidence allows",
+    "- ensure the draft follows the plan",
+    "- ensure the answer is faithful to the evidence",
+    "- improve clarity, structure, and readability",
+    "",
+    "Instructions:",
+    "",
+    "1. Check whether all important parts of the plan are addressed in the draft.",
+    "2. If something is missing and is supported by the evidence, add it.",
+    "3. If something is missing and is not supported by the evidence, clearly mark it as missing or uncertain.",
+    "4. Remove or rewrite any unsupported or overstated claims.",
+    "5. Keep the answer aligned with the user's actual question.",
+    "6. Improve structure, clarity, flow, and conciseness.",
+    "7. Preserve useful content from the draft where it is correct.",
+    "8. Do not invent new unsupported information.",
+    "9. If additional general knowledge is included, label it explicitly as general knowledge.",
+    "10. Do not output critique, notes, or internal reasoning.",
+    "",
+    "Output:",
+    "Return only the final improved answer.",
+  ].join("\n"),
+  label: "Assistant thinking refining prompt",
 });
 
 const ASSISTANT_MODE_DEFINITIONS = {
@@ -156,6 +274,21 @@ const REFINE_CHAIN_PROMPTS = {
   ].join("\n"),
 };
 
+const THINKING_CHAIN_PROMPTS = {
+  analyse_plan: [
+    "[CHAIN STEP: ANALYSE_PLAN]",
+    THINKING_ANALYSE_PLAN_PROMPT,
+  ].join("\n"),
+  drafting: [
+    "[CHAIN STEP: DRAFT]",
+    THINKING_DRAFT_PROMPT,
+  ].join("\n"),
+  refining: [
+    "[CHAIN STEP: REFINE]",
+    THINKING_REFINING_PROMPT,
+  ].join("\n"),
+};
+
 export const DEFAULT_ASSISTANT_MODE = "simple";
 
 export function listAssistantModes() {
@@ -194,8 +327,19 @@ export function buildAssistantModeSystemLayer(modeId) {
   ];
 }
 
-export function getRefineChainSystemPrompt(step) {
+export function getAssistantChainSystemPrompt(modeId, step) {
+  const normalizedMode = String(modeId || "").trim().toLowerCase();
   const normalizedStep = String(step || "").trim().toLowerCase();
+  if (normalizedMode === "thinking") {
+    if (normalizedStep === "analyse_plan") {
+      return THINKING_CHAIN_PROMPTS.analyse_plan;
+    }
+    if (normalizedStep === "drafting") {
+      return THINKING_CHAIN_PROMPTS.drafting;
+    }
+    return THINKING_CHAIN_PROMPTS.refining;
+  }
+
   if (normalizedStep === "drafting") {
     return REFINE_CHAIN_PROMPTS.drafting;
   }
@@ -212,5 +356,35 @@ export function buildRefineFinalPassMessages({ originalPrompt, draftAnswer }) {
       ].join("\n"),
     ],
     ["assistant", String(draftAnswer || "(empty draft)").trim() || "(empty draft)"],
+  ];
+}
+
+export function buildThinkingDraftPassMessages({ originalPrompt, analysisPlan }) {
+  return [
+    [
+      "human",
+      [
+        "Original user prompt:",
+        String(originalPrompt || "").trim(),
+        "Step 1 output (analysis/plan):",
+        String(analysisPlan || "(empty analysis/plan)").trim() || "(empty analysis/plan)",
+      ].join("\n"),
+    ],
+  ];
+}
+
+export function buildThinkingRefinePassMessages({ originalPrompt, analysisPlan, draftAnswer }) {
+  return [
+    [
+      "human",
+      [
+        "Original user prompt:",
+        String(originalPrompt || "").trim(),
+        "Step 1 output (analysis/plan):",
+        String(analysisPlan || "(empty analysis/plan)").trim() || "(empty analysis/plan)",
+        "Step 2 output (draft):",
+        String(draftAnswer || "(empty draft)").trim() || "(empty draft)",
+      ].join("\n"),
+    ],
   ];
 }
