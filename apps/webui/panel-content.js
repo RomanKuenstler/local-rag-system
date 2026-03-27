@@ -1,5 +1,24 @@
 import React from "https://esm.sh/react@18";
 
+const ATTACHMENT_EXTENSION_COLOR_CLASS = {
+  pdf: "is-red",
+  epub: "is-red",
+  md: "is-gray",
+  txt: "is-gray",
+  html: "is-blue",
+  htm: "is-blue",
+  png: "is-purple",
+  jpg: "is-purple",
+  jpeg: "is-purple",
+  webp: "is-purple",
+  csv: "is-green",
+};
+
+function getExtensionColorClass(extensionValue) {
+  const normalized = String(extensionValue || "").trim().replace(/^\./, "").toLowerCase();
+  return ATTACHMENT_EXTENSION_COLOR_CLASS[normalized] || "is-gray";
+}
+
 function GeneralDropdown({
   label,
   description = "",
@@ -300,6 +319,7 @@ export function renderPanelContent({
   restartConfigRows,
   retrieverStatus,
   embedderStatus,
+  serviceStatuses = {},
   isSending,
   isEmbeddingReady,
   disabledAssistantModes = [],
@@ -453,6 +473,55 @@ export function renderPanelContent({
   }
 
   if (panelData.command === "/info") {
+    const storageGroup = parsedInfoGroups.find((group) => String(group?.title || "").trim().toLowerCase() === "storage");
+    const appGroupTitle = "app";
+    const vectorDbValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "vector db")?.value || "";
+    const postgresValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "postgres")?.value || "";
+    const embeddableExtensionsValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "embeddable extensions")?.value || "";
+    const embeddableExtensions = embeddableExtensionsValue
+      .split(",")
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
+    const normalizeStorageStatus = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (!normalized || normalized === "n/a" || normalized === "not configured") {
+        return "disconnected";
+      }
+      return "active";
+    };
+    const infoServiceRows = [
+      {
+        key: "backend",
+        label: "backend",
+        status: serviceStatuses.backend || "active",
+        description: "Web API gateway handling authentication, sessions, and orchestration.",
+      },
+      {
+        key: "retriever",
+        label: "retriever",
+        status: serviceStatuses.retriever || retrieverStatus,
+        description: "Runs retrieval, prompt assembly, and /info /config command handling.",
+      },
+      {
+        key: "embedder",
+        label: "embedder",
+        status: serviceStatuses.embedder || embedderStatus,
+        description: "Processes library documents and generates embeddings for semantic search.",
+      },
+      {
+        key: "vector-db",
+        label: "vector db",
+        status: normalizeStorageStatus(vectorDbValue),
+        description: "Stores vector embeddings used for nearest-neighbor retrieval.",
+      },
+      {
+        key: "postgres",
+        label: "postgres",
+        status: normalizeStorageStatus(postgresValue),
+        description: "Stores chat/session data, app metadata, and relational state.",
+      },
+    ];
+
     return React.createElement(
       "div",
       { className: "info-groups" },
@@ -460,33 +529,64 @@ export function renderPanelContent({
         "section",
         { className: "info-group-card" },
         React.createElement("h4", null, "Status"),
-        React.createElement(
+        ...infoServiceRows.map((service) => React.createElement(
           "div",
-          { className: "info-row" },
-          React.createElement("span", null, "retriever"),
+          { key: service.key, className: "info-row info-service-row" },
+          React.createElement(
+            "span",
+            { className: "info-service-meta" },
+            React.createElement("strong", null, service.label),
+            React.createElement("small", null, service.description)
+          ),
           React.createElement(
             "strong",
             null,
-            React.createElement("span", { className: `status-badge ${retrieverStatus}` }, retrieverStatus)
+            React.createElement("span", { className: `status-badge ${service.status}` }, service.status)
           )
-        ),
-        React.createElement(
-          "div",
-          { className: "info-row" },
-          React.createElement("span", null, "embedder"),
-          React.createElement(
-            "strong",
-            null,
-            React.createElement("span", { className: `status-badge ${embedderStatus}` }, embedderStatus)
-          )
-        ),
-        React.createElement(
-          "p",
-          { className: "config-help" },
-          "Includes runtime model selection, vector/postgres storage wiring, and state-file paths."
-        )
+        ))
       ),
-      ...parsedInfoGroups.map((group) => React.createElement(
+      ...parsedInfoGroups
+        .filter((group) => {
+          const normalizedTitle = String(group?.title || "").trim().toLowerCase();
+          return normalizedTitle !== appGroupTitle && normalizedTitle !== "state";
+        })
+        .map((group) => {
+          if (String(group.title || "").trim().toLowerCase() === "storage") {
+            return React.createElement(
+              "section",
+              { key: group.title, className: "info-group-card" },
+              React.createElement("h4", null, group.title),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Knowledge base"),
+                React.createElement("strong", null, "Qdrant")
+              ),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Persistent storage"),
+                React.createElement("strong", null, "Postgres")
+              ),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Embeddable files"),
+                React.createElement(
+                  "strong",
+                  { className: "info-extension-chip-row" },
+                  ...(embeddableExtensions.length
+                    ? embeddableExtensions.map((extension) => React.createElement(
+                      "span",
+                      { key: `embeddable-${extension}`, className: `library-extension-chip ${getExtensionColorClass(extension)}` },
+                      extension
+                    ))
+                    : [React.createElement("span", { key: "embeddable-empty" }, "n/a")])
+                )
+              )
+            );
+          }
+          return React.createElement(
         "section",
         { key: group.title, className: "info-group-card" },
         React.createElement("h4", null, group.title),
@@ -496,7 +596,8 @@ export function renderPanelContent({
           React.createElement("span", null, item.key),
           React.createElement("strong", null, item.value)
         ))
-      ))
+          );
+        })
     );
   }
 
