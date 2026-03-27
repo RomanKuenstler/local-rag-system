@@ -97,13 +97,15 @@ const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
 const LOGIN_PAGE_HASH = "#login";
 const LIBRARY_PAGE_HASH = "#library";
 const ADMIN_PAGE_HASH = "#admin";
-const MENU_DIALOG_TABS = [
+const PREFERENCES_DIALOG_TABS = [
   { id: "general", label: "General", command: "/general" },
   { id: "personalization", label: "Personalization", command: "/personalization" },
   { id: "settings", label: "Settings", command: "/config" },
   { id: "filter", label: "Filter" },
-  { id: "info", label: "Info", command: "/info" },
   { id: "archive", label: "Archive" },
+];
+const AUXILIARY_DIALOG_TABS = [
+  { id: "info", label: "Info", command: "/info" },
   { id: "help", label: "Help", command: "/help" },
 ];
 const DEFAULT_FILE_TAG_LABEL = "default";
@@ -196,8 +198,8 @@ function getCurrentUiModeFromInfoText(infoText) {
   return uiModeEntry?.value || "clean";
 }
 
-function getMenuTabById(tabId) {
-  return MENU_DIALOG_TABS.find((tab) => tab.id === tabId) || MENU_DIALOG_TABS[0];
+function getDialogTabById(tabId) {
+  return PREFERENCES_DIALOG_TABS.concat(AUXILIARY_DIALOG_TABS).find((tab) => tab.id === tabId) || PREFERENCES_DIALOG_TABS[0];
 }
 
 function getAssistantModeMeta(modeId) {
@@ -769,6 +771,7 @@ function App() {
   }
 
   function handleLogout() {
+    setIsUserMenuOpen(false);
     apiFetch(`/api/auth/logout?sessionId=${encodeURIComponent(sessionIdRef.current)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -791,6 +794,21 @@ function App() {
     setNewPassword("");
     setConfirmNewPassword("");
     setLoginError("");
+  }
+
+  function openInfoFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openUnifiedDialog("info");
+  }
+
+  function openHelpFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openUnifiedDialog("help");
+  }
+
+  function openPreferencesFromUserMenu() {
+    setIsUserMenuOpen(false);
+    openSettingsDialog();
   }
 
   useEffect(() => {
@@ -1779,7 +1797,7 @@ function App() {
   }
 
   async function loadUnifiedDialogTab(tabId, { forceReload = false } = {}) {
-    const selectedTab = getMenuTabById(tabId);
+    const selectedTab = getDialogTabById(tabId);
     const existingPanel = dialogTabPanels[selectedTab.id];
     setActiveDialogTab(selectedTab.id);
     setDialogTabError("");
@@ -2321,6 +2339,7 @@ function App() {
   const renameIconPath = "M4 17.2V20h2.8l8.2-8.2-2.8-2.8zm13.7-8.4a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1.2 1.2 2.8 2.8z";
   const filterIconPath = "M4 5h16l-6 7v6l-4 2v-8z";
   const archiveIconPath = "M3 6.5A2.5 2.5 0 0 1 5.5 4h13A2.5 2.5 0 0 1 21 6.5v2A2.5 2.5 0 0 1 18.5 11H18v7.5A2.5 2.5 0 0 1 15.5 21h-7A2.5 2.5 0 0 1 6 18.5V11h-.5A2.5 2.5 0 0 1 3 8.5zm2.5-.5a.5.5 0 0 0-.5.5v2a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-2a.5.5 0 0 0-.5-.5zM8 11v7.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V11zm2 2h4v2h-4z";
+  const unarchiveIconPath = "M3 8a2 2 0 0 1 2-2h5.2a2 2 0 0 1 1.4.6l1.1 1.1a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5zm7.8-4.8a2 2 0 0 1 1.4-.6h6.8v2h-6.8a2 2 0 0 1-1.4-.6L9.9 3h-4V1h4.4a2 2 0 0 1 1.4.6z";
   const infoIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 4a1.25 1.25 0 1 1-1.25 1.25A1.25 1.25 0 0 1 12 6m1.5 12h-3v-2h1V11h-1V9h3v7h1z";
   const questionIconPath = "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m0 16a1.25 1.25 0 1 1 1.25-1.25A1.25 1.25 0 0 1 12 18m2.2-7.3-.9.7c-.7.5-1 1-1 1.8V14h-2v-.8c0-1.2.5-2.2 1.6-2.9l1-.7c.6-.4 1-.9 1-1.5a2 2 0 1 0-4 0H8a4 4 0 1 1 8 0c0 1.1-.6 2-1.8 2.9";
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
@@ -2412,6 +2431,8 @@ function App() {
   };
 
   const activeUnifiedPanel = dialogTabPanels[activeDialogTab] || null;
+  const isAuxiliaryDialogTab = activeDialogTab === "info" || activeDialogTab === "help";
+  const activeDialogMeta = getDialogTabById(activeDialogTab);
   const activeModalPanel = isUnifiedDialogOpen ? activeUnifiedPanel : panelData;
   const panelTitle = isUnifiedDialogOpen ? "Preferences" : getPanelTitle(panelData?.command);
   const archivedChatRows = Array.isArray(activeUnifiedPanel?.content?.rows) ? activeUnifiedPanel.content.rows : [];
@@ -3184,17 +3205,6 @@ function App() {
           },
           icon("M12 2a5 5 0 0 1 5 5c0 2.7-2.1 4.8-4.7 5A7 7 0 0 1 19 19h-2a5 5 0 0 0-10 0H5a7 7 0 0 1 6.7-7c-2.6-.2-4.7-2.3-4.7-5a5 5 0 0 1 5-5"),
           React.createElement("span", null, "Personalization")
-        ),
-        React.createElement(
-          "button",
-          {
-            type: "button",
-            className: `side-nav-item${panelData?.command === "/config" || (isUnifiedDialogOpen && (activeDialogTab === "general" || activeDialogTab === "settings")) ? " active" : ""}`,
-            onClick: openSettingsDialog,
-            disabled: isNavigationLocked || !isEmbeddingReady,
-          },
-          icon(settingsIconPath),
-          React.createElement("span", null, "Preferences")
         )
       ),
       React.createElement("h3", { className: "side-nav-headline" }, "Your chats"),
@@ -3382,10 +3392,56 @@ function App() {
                     type: "button",
                     className: "chat-item-actions-option",
                     role: "menuitem",
+                    onClick: openInfoFromUserMenu,
+                  },
+                  icon(infoIconPath),
+                  React.createElement("span", null, "Info")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openHelpFromUserMenu,
+                  },
+                  icon(questionIconPath),
+                  React.createElement("span", null, "Help")
+                )
+              ),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
+                    onClick: openPreferencesFromUserMenu,
+                  },
+                  icon(settingsIconPath),
+                  React.createElement("span", null, "Preferences")
+                )
+              ),
+              React.createElement("li", { className: "side-nav-user-menu-divider", role: "separator", "aria-hidden": "true" }),
+              React.createElement(
+                "li",
+                { role: "none" },
+                React.createElement(
+                  "button",
+                  {
+                    type: "button",
+                    className: "chat-item-actions-option",
+                    role: "menuitem",
                     onClick: openChangePasswordFlow,
                   },
                   icon("M12 17a1 1 0 0 1-1-1v-3.6a4 4 0 1 1 2 0V16a1 1 0 0 1-1 1m-5-7a5 5 0 1 1 10 0v2h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2h1z"),
-                  React.createElement("span", null, "Change password")
+                  React.createElement("span", null, "Change Password")
                 )
               ),
               React.createElement(
@@ -4516,170 +4572,249 @@ function App() {
         React.createElement(
           "section",
           {
-            className: "panel-modal panel-modal-with-tabs",
+            className: `panel-modal${isAuxiliaryDialogTab ? "" : " panel-modal-with-tabs"}`,
             role: "dialog",
             "aria-modal": "true",
-            "aria-label": "Preferences dialog",
+            "aria-label": isAuxiliaryDialogTab ? `${activeDialogMeta.label} dialog` : "Preferences dialog",
             onClick: (event) => event.stopPropagation(),
           },
-          React.createElement(
-            "div",
-            { className: "panel-modal-tab-layout" },
-            React.createElement(
-              "nav",
-              { className: "panel-tab-nav", "aria-label": "Preferences sections" },
+          isAuxiliaryDialogTab
+            ? React.createElement(
+              React.Fragment,
+              null,
               React.createElement(
                 "div",
-                { className: "panel-tab-nav-top" },
+                { className: "panel-modal-head" },
+                React.createElement("strong", null, activeDialogMeta.label),
                 React.createElement(
-                  "button",
-                  {
-                    className: "panel-close panel-close-sidebar",
-                    type: "button",
-                    onClick: () => setIsUnifiedDialogOpen(false),
-                    "aria-label": "Close preferences dialog",
-                  },
-                  "×"
+                  "div",
+                  { className: "panel-modal-head-actions" },
+                  React.createElement(
+                    "button",
+                    {
+                      className: "panel-close",
+                      type: "button",
+                      onClick: () => setIsUnifiedDialogOpen(false),
+                      "aria-label": `Close ${activeDialogMeta.label} dialog`,
+                    },
+                    "×"
+                  )
                 )
               ),
-              ...MENU_DIALOG_TABS.map((tab) => React.createElement(
-                "button",
-                {
-                  key: tab.id,
-                  type: "button",
-                  className: `panel-tab-button${tab.id === activeDialogTab ? " active" : ""}`,
-                  onClick: () => loadUnifiedDialogTab(tab.id),
-                  disabled: isDialogTabLoading && tab.id === activeDialogTab,
-                  "aria-current": tab.id === activeDialogTab ? "page" : undefined,
-                },
-                React.createElement("span", { className: "panel-tab-button-icon", "aria-hidden": "true" }, getDialogTabIcon(tab.id)),
-                React.createElement("span", null, tab.label)
-              ))
-            ),
-            React.createElement(
+              React.createElement(
+                "div",
+                { className: "panel-modal-content" },
+                dialogTabError
+                  ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
+                  : isDialogTabLoading && !activeModalPanel
+                    ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
+                    : activeModalPanel
+                      ? renderPanelContent({
+                        panelData: activeModalPanel,
+                        parsedInfoGroups,
+                        parsedAssistantPanel,
+                        parsedHelpPanel,
+                        editableConfigRows,
+                        restartConfigRows,
+                        retrieverStatus,
+                        embedderStatus,
+                        isSending,
+                        isEmbeddingReady,
+                        disabledAssistantModes: disabledAssistantModesList,
+                        submitConfigChange,
+                        applyPersonalizationChange,
+                        customInstructionsDraft,
+                        isCustomInstructionsDirty,
+                        updateCustomInstructionsDraft,
+                        saveCustomInstructions,
+                        nicknameDraft,
+                        occupationDraft,
+                        moreAboutUserDraft,
+                        isNicknameDirty,
+                        isOccupationDirty,
+                        isMoreAboutUserDirty,
+                        updateNicknameDraft,
+                        updateOccupationDraft,
+                        updateMoreAboutUserDraft,
+                        saveNickname,
+                        saveOccupation,
+                        saveMoreAboutUser,
+                        tagFilterRows,
+                        tagFilterEnabledByTag,
+                        globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                        filterScope: "global",
+                        toggleTagFilter,
+                        isTagFilterSaving,
+                        icon,
+                        settingsTabError,
+                        clearSettingsTabError: () => setSettingsTabError(""),
+                        settingsInputResetTokenByKey,
+                      })
+                      : React.createElement("p", null, "No content available.")
+              )
+            )
+            : React.createElement(
               "div",
-              { className: "panel-modal-content" },
-              dialogTabError
-                ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
-                : isDialogTabLoading && !activeModalPanel
-                  ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
-                  : activeDialogTab === "archive"
-                    ? React.createElement(
-                      "section",
-                      { className: "archive-table-wrapper" },
-                      React.createElement(
-                        "div",
-                        { className: "archive-table", role: "table", "aria-label": "Archived chats" },
+              { className: "panel-modal-tab-layout" },
+              React.createElement(
+                "nav",
+                { className: "panel-tab-nav", "aria-label": "Preferences sections" },
+                React.createElement(
+                  "div",
+                  { className: "panel-tab-nav-top" },
+                  React.createElement(
+                    "button",
+                    {
+                      className: "panel-close panel-close-sidebar",
+                      type: "button",
+                      onClick: () => setIsUnifiedDialogOpen(false),
+                      "aria-label": "Close preferences dialog",
+                    },
+                    "×"
+                  )
+                ),
+                ...PREFERENCES_DIALOG_TABS.map((tab) => React.createElement(
+                  "button",
+                  {
+                    key: tab.id,
+                    type: "button",
+                    className: `panel-tab-button${tab.id === activeDialogTab ? " active" : ""}`,
+                    onClick: () => loadUnifiedDialogTab(tab.id),
+                    disabled: isDialogTabLoading && tab.id === activeDialogTab,
+                    "aria-current": tab.id === activeDialogTab ? "page" : undefined,
+                  },
+                  React.createElement("span", { className: "panel-tab-button-icon", "aria-hidden": "true" }, getDialogTabIcon(tab.id)),
+                  React.createElement("span", null, tab.label)
+                ))
+              ),
+              React.createElement(
+                "div",
+                { className: "panel-modal-content" },
+                dialogTabError
+                  ? React.createElement("p", { className: "panel-modal-error" }, `Error: ${dialogTabError}`)
+                  : isDialogTabLoading && !activeModalPanel
+                    ? React.createElement("p", { className: "panel-modal-loading" }, "Loading section…")
+                    : activeDialogTab === "archive"
+                      ? React.createElement(
+                        "section",
+                        { className: "archive-table-wrapper" },
                         React.createElement(
                           "div",
-                          { className: "archive-table-head", role: "row" },
-                          React.createElement("strong", { role: "columnheader" }, "Chat name"),
-                          React.createElement("strong", { role: "columnheader" }, "Archived at"),
-                          React.createElement("strong", { role: "columnheader" }, "Actions")
-                        ),
-                        archivedChatRows.length === 0
-                          ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
-                          : archivedChatRows.map((chat) => React.createElement(
+                          { className: "library-table archive-table", role: "table", "aria-label": "Archived chats" },
+                          React.createElement(
                             "div",
-                            { key: chat.id, className: "archive-table-row", role: "row" },
-                            React.createElement("strong", { className: "archive-chat-name" }, chat.name),
-                            React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
-                            React.createElement(
-                              "div",
-                              { className: "library-row-actions archive-row-actions" },
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-toggle-button",
-                                  title: "Download chat",
-                                  "aria-label": `Download ${chat.name}`,
-                                  onClick: async () => {
-                                    try {
-                                      await downloadChat(chat);
-                                    } catch (error) {
-                                      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
-                                        evidenceSeverity: "error",
-                                        isVolatile: true,
-                                      })));
-                                    }
-                                  },
-                                },
-                                icon(downloadIconPath)
-                              ),
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-toggle-button",
-                                  title: "Unarchive chat",
-                                  "aria-label": `Unarchive ${chat.name}`,
-                                  onClick: () => unarchiveChat(chat.id),
-                                  disabled: isChatActionPending,
-                                },
-                                icon(keepIconPath)
-                              ),
-                              React.createElement(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "library-delete-button",
-                                  title: "Delete chat",
-                                  "aria-label": `Delete ${chat.name}`,
-                                  onClick: () => setDeleteConfirmChat(chat),
-                                  disabled: isChatActionPending,
-                                },
-                                icon(trashIconPath)
-                              )
-                            )
-                          ))
+                            { className: "library-table-head archive-table-head", role: "row" },
+                            React.createElement("strong", { role: "columnheader" }, "Chat name"),
+                            React.createElement("strong", { role: "columnheader" }, "Archived at"),
+                            React.createElement("strong", { role: "columnheader" }, "Actions")
+                          ),
+                          React.createElement(
+                            "div",
+                            { className: "library-table-body", role: "rowgroup" },
+                            archivedChatRows.length === 0
+                              ? React.createElement("p", { className: "archive-empty" }, "No archived chats yet.")
+                              : archivedChatRows.map((chat) => React.createElement(
+                                "div",
+                                { key: chat.id, className: "library-table-row archive-table-row", role: "row" },
+                                React.createElement("strong", { className: "library-path archive-chat-name" }, chat.name),
+                                React.createElement("span", { className: "archive-chat-date" }, chat.archivedAt ? new Date(chat.archivedAt).toLocaleString() : "n/a"),
+                                React.createElement(
+                                  "div",
+                                  { className: "library-row-actions archive-row-actions" },
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "library-toggle-button",
+                                      title: "Download chat",
+                                      "aria-label": `Download ${chat.name}`,
+                                      onClick: async () => {
+                                        try {
+                                          await downloadChat(chat);
+                                        } catch (error) {
+                                          setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+                                            evidenceSeverity: "error",
+                                            isVolatile: true,
+                                          })));
+                                        }
+                                      },
+                                    },
+                                    icon(downloadIconPath)
+                                  ),
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "library-toggle-button",
+                                      title: "Unarchive chat",
+                                      "aria-label": `Unarchive ${chat.name}`,
+                                      onClick: () => unarchiveChat(chat.id),
+                                      disabled: isChatActionPending,
+                                    },
+                                    icon(unarchiveIconPath)
+                                  ),
+                                  React.createElement(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "library-delete-button",
+                                      title: "Delete chat",
+                                      "aria-label": `Delete ${chat.name}`,
+                                      onClick: () => setDeleteConfirmChat(chat),
+                                      disabled: isChatActionPending,
+                                    },
+                                    icon(trashIconPath)
+                                  )
+                                )
+                              ))
+                          )
+                        )
                       )
-                    )
-                    : activeModalPanel
-                    ? renderPanelContent({
-                      panelData: activeModalPanel,
-                      parsedInfoGroups,
-                      parsedAssistantPanel,
-                      parsedHelpPanel,
-                      editableConfigRows,
-                      restartConfigRows,
-                      retrieverStatus,
-                      embedderStatus,
-                      isSending,
-                      isEmbeddingReady,
-                      disabledAssistantModes: disabledAssistantModesList,
-                      submitConfigChange,
-                      applyPersonalizationChange,
-                      customInstructionsDraft,
-                      isCustomInstructionsDirty,
-                      updateCustomInstructionsDraft,
-                      saveCustomInstructions,
-                      nicknameDraft,
-                      occupationDraft,
-                      moreAboutUserDraft,
-                      isNicknameDirty,
-                      isOccupationDirty,
-                      isMoreAboutUserDirty,
-                      updateNicknameDraft,
-                      updateOccupationDraft,
-                      updateMoreAboutUserDraft,
-                      saveNickname,
-                      saveOccupation,
-                      saveMoreAboutUser,
-                      tagFilterRows,
-                      tagFilterEnabledByTag,
-                      globalTagFilterEnabledByTag: tagFilterEnabledByTag,
-                      filterScope: "global",
-                      toggleTagFilter,
-                      isTagFilterSaving,
-                      icon,
-                      settingsTabError,
-                      clearSettingsTabError: () => setSettingsTabError(""),
-                      settingsInputResetTokenByKey,
-                    })
-                    : React.createElement("p", null, "Select a section.")
+                      : activeModalPanel
+                      ? renderPanelContent({
+                        panelData: activeModalPanel,
+                        parsedInfoGroups,
+                        parsedAssistantPanel,
+                        parsedHelpPanel,
+                        editableConfigRows,
+                        restartConfigRows,
+                        retrieverStatus,
+                        embedderStatus,
+                        isSending,
+                        isEmbeddingReady,
+                        disabledAssistantModes: disabledAssistantModesList,
+                        submitConfigChange,
+                        applyPersonalizationChange,
+                        customInstructionsDraft,
+                        isCustomInstructionsDirty,
+                        updateCustomInstructionsDraft,
+                        saveCustomInstructions,
+                        nicknameDraft,
+                        occupationDraft,
+                        moreAboutUserDraft,
+                        isNicknameDirty,
+                        isOccupationDirty,
+                        isMoreAboutUserDirty,
+                        updateNicknameDraft,
+                        updateOccupationDraft,
+                        updateMoreAboutUserDraft,
+                        saveNickname,
+                        saveOccupation,
+                        saveMoreAboutUser,
+                        tagFilterRows,
+                        tagFilterEnabledByTag,
+                        globalTagFilterEnabledByTag: tagFilterEnabledByTag,
+                        filterScope: "global",
+                        toggleTagFilter,
+                        isTagFilterSaving,
+                        icon,
+                        settingsTabError,
+                        clearSettingsTabError: () => setSettingsTabError(""),
+                        settingsInputResetTokenByKey,
+                      })
+                      : React.createElement("p", null, "Select a section.")
+              )
             )
-          )
         )
       )
       : null,
