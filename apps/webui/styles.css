@@ -1450,13 +1450,13 @@ body {
   letter-spacing: 0;
 }
 .personalization-settings-card h4 {
-  margin-bottom: 0.45rem;
+  margin-bottom: 0.2rem;
 }
-.personalization-section-description {
-  margin: 0 0 0.4rem;
-  color: #6b7280;
-  font-size: 0.82rem;
-  line-height: 1.35;
+.personalization-section-divider {
+  height: 1px;
+  width: 100%;
+  background: #e5e7eb;
+  margin: 0.2rem 0 0.35rem;
 }
 .personalization-subheadline {
   margin: 0;
@@ -1476,7 +1476,8 @@ body {
 }
 .personalization-settings-card .general-setting-row {
   min-height: 52px;
-  border-top: 1px solid #e5e7eb;
+  border-top: none;
+  padding: 0.35rem 0;
 }
 .personalization-settings-card .general-setting-label {
   font-weight: 600;
@@ -1497,10 +1498,23 @@ body {
 }
 .personalization-custom-instructions-row {
   display: block;
-  margin-top: 0.5rem;
+  margin-top: 0.4rem;
 }
 .personalization-custom-instructions-row:first-of-type {
-  margin-top: 0.35rem;
+  margin-top: 0.15rem;
+}
+.personalization-about-you-row {
+  margin-top: 0.55rem;
+}
+.personalization-about-you-row:first-of-type {
+  margin-top: 0.3rem;
+}
+.personalization-field-label {
+  display: inline-block;
+  margin: 0 0 0.28rem;
+  color: #374151;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 .personalization-custom-instructions-input-shell {
   position: relative;

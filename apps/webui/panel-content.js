@@ -625,19 +625,21 @@ export function renderPanelContent({
         if (section.id === "about-you") {
           return React.createElement(
             "section",
-            { key: section.id, className: "info-group-card personalization-section-card" },
+            { key: section.id, className: "info-group-card personalization-section-card personalization-about-you-card" },
             React.createElement("h4", null, section.title),
-            React.createElement("h5", { className: "personalization-subheadline" }, "Personal details"),
+            React.createElement("div", { className: "personalization-section-divider", "aria-hidden": "true" }),
             React.createElement(
               "div",
-              { className: "personalization-custom-instructions-row" },
+              { className: "personalization-custom-instructions-row personalization-about-you-row" },
+              React.createElement("label", { className: "personalization-field-label", htmlFor: "personalization-nickname-input" }, "Nickname"),
               React.createElement(
                 "div",
                 { className: "personalization-custom-instructions-input-shell" },
                 React.createElement("input", {
+                  id: "personalization-nickname-input",
                   className: "personalization-custom-instructions-input",
                   value: nicknameValue,
-                  placeholder: "Nickname",
+                  placeholder: "What should the assistant call you?",
                   onChange: (event) => updateNicknameDraft(event.currentTarget.value),
                   disabled: interactionDisabled,
                   "aria-label": "Nickname",
@@ -658,14 +660,16 @@ export function renderPanelContent({
             ),
             React.createElement(
               "div",
-              { className: "personalization-custom-instructions-row" },
+              { className: "personalization-custom-instructions-row personalization-about-you-row" },
+              React.createElement("label", { className: "personalization-field-label", htmlFor: "personalization-occupation-input" }, "Occupation"),
               React.createElement(
                 "div",
                 { className: "personalization-custom-instructions-input-shell" },
                 React.createElement("input", {
+                  id: "personalization-occupation-input",
                   className: "personalization-custom-instructions-input",
                   value: occupationValue,
-                  placeholder: "Occupation",
+                  placeholder: "What do you do?",
                   onChange: (event) => updateOccupationDraft(event.currentTarget.value),
                   disabled: interactionDisabled,
                   "aria-label": "Occupation",
@@ -686,14 +690,16 @@ export function renderPanelContent({
             ),
             React.createElement(
               "div",
-              { className: "personalization-custom-instructions-row" },
+              { className: "personalization-custom-instructions-row personalization-about-you-row" },
+              React.createElement("label", { className: "personalization-field-label", htmlFor: "personalization-about-user-input" }, "More about you"),
               React.createElement(
                 "div",
                 { className: "personalization-custom-instructions-input-shell" },
                 React.createElement("textarea", {
+                  id: "personalization-about-user-input",
                   className: "personalization-custom-instructions-input",
                   value: moreAboutUserValue,
-                  placeholder: "More about you",
+                  placeholder: "Anything else that helps personalize responses",
                   rows: 1,
                   onChange: (event) => {
                     autoResizeTextarea(event.currentTarget);
@@ -733,14 +739,10 @@ export function renderPanelContent({
           "section",
           { key: section.id, className: "info-group-card general-settings-card personalization-settings-card" },
           React.createElement("h4", null, section.title),
-          React.createElement(
-            "p",
-            { className: "personalization-section-description" },
-            "Set the style and tone of how the assistant responds to you."
-          ),
+          React.createElement("div", { className: "personalization-section-divider", "aria-hidden": "true" }),
           renderModeDropdown({
             label: section.settings.baseStyleTone.label,
-            description: "This doesn't impact core capabilities.",
+            description: "Set the style and tone of how the assistant responds to you.",
             currentId: section.settings.baseStyleTone.currentId,
             options: section.settings.baseStyleTone.options,
             kind: "personalization:baseStyleTone",
