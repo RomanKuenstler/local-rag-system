@@ -2,6 +2,7 @@ import React from "https://esm.sh/react@18";
 
 function GeneralDropdown({
   label,
+  description = "",
   currentId,
   options,
   kind,
@@ -45,7 +46,12 @@ function GeneralDropdown({
   return React.createElement(
     "div",
     { className: "general-setting-row", key: `setting-${kind}-${label}` },
-    React.createElement("span", { className: "general-setting-label" }, label),
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, label),
+      description ? React.createElement("small", { className: "general-setting-description" }, description) : null
+    ),
     React.createElement(
       "details",
       {
@@ -138,7 +144,12 @@ function VoiceSettingRow({ currentId, options, onSelectOption, chevron, check })
   return React.createElement(
     "div",
     { className: "general-setting-row", key: "setting-general-voice" },
-    React.createElement("span", { className: "general-setting-label" }, "Voice"),
+    React.createElement(
+      "span",
+      { className: "general-setting-label-wrap" },
+      React.createElement("span", { className: "general-setting-label" }, "Voice"),
+      React.createElement("small", { className: "general-setting-description" }, "Currently under development")
+    ),
     React.createElement(
       "div",
       { className: "general-setting-controls", ref: rootRef },
@@ -236,6 +247,7 @@ function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderMo
     }),
     React.createElement(GeneralDropdown, {
       label: "Appearance",
+      description: "Currently under development",
       currentId: appearance,
       options: appearanceOptions,
       kind: "appearance",
@@ -247,6 +259,7 @@ function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderMo
     }),
     React.createElement(GeneralDropdown, {
       label: "Language",
+      description: "Currently under development",
       currentId: language,
       options: languageOptions,
       kind: "language",
@@ -258,6 +271,7 @@ function GeneralPreviewSettings({ assistantModes, currentAssistantMode, renderMo
     }),
     React.createElement(GeneralDropdown, {
       label: "Spoken language",
+      description: "Currently under development",
       currentId: spokenLanguage,
       options: languageOptions,
       kind: "spoken-language",
