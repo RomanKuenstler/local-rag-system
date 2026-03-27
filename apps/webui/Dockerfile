@@ -15,7 +15,12 @@ COPY chat-export.js ./
 
 RUN npm run build \
   && mkdir -p /app/dist/licenses \
-  && cp /app/node_modules/@fontsource-variable/inter/OFL.txt /app/dist/licenses/INTER-OFL.txt
+  && LICENSE_SOURCE="$(find /app/node_modules/@fontsource-variable/inter -maxdepth 2 -type f \( -iname 'OFL*' -o -iname 'LICENSE*' \) | head -n 1)" \
+  && if [ -n "$LICENSE_SOURCE" ]; then \
+      cp "$LICENSE_SOURCE" /app/dist/licenses/INTER-LICENSE.txt; \
+    else \
+      printf '%s\n' 'Inter font license file not found in package tree. See package metadata for license details.' > /app/dist/licenses/INTER-LICENSE.txt; \
+    fi
 
 FROM nginx:1.27-alpine
 
