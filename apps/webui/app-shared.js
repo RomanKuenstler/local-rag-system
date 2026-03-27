@@ -45,7 +45,7 @@ export const DEFAULT_PERSONALIZATION_PREFERENCES = {
   occupation: "",
   moreAboutUser: "",
 };
-export const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
+export const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set([]);
 export const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
@@ -258,6 +258,17 @@ export function getPendingAssistantMessage(modeId, chainStage) {
       return "Refining the final answer…";
     }
     return "Drafting an answer…";
+  }
+  if (normalizedMode === "thinking") {
+    if (normalizedStage === "analyse_plan") {
+      return "Analyzing and planning the response…";
+    }
+    if (normalizedStage === "drafting") {
+      return "Drafting an answer…";
+    }
+    if (normalizedStage === "refining") {
+      return "Refining the final answer…";
+    }
   }
   return "Assistant is thinking…";
 }

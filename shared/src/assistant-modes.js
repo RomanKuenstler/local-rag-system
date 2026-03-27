@@ -5,6 +5,9 @@ const ASSISTANT_MODE_SIMPLE_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-mode-simp
 const ASSISTANT_MODE_THINKING_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-mode-thinking.md`;
 const ASSISTANT_REFINE_DRAFT_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-refine-draft.md`;
 const ASSISTANT_REFINE_REFINING_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-refine-refining.md`;
+const ASSISTANT_THINKING_ANALYSE_PLAN_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-thinking-analyse-plan.md`;
+const ASSISTANT_THINKING_DRAFT_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-thinking-draft.md`;
+const ASSISTANT_THINKING_REFINING_PATH = `${ASSISTANT_PROMPTS_DIR}/assistant-thinking-refining.md`;
 
 const SHARED_EVIDENCE_RULES = [
   "Use retrieved evidence as your primary basis for claims.",
@@ -46,6 +49,63 @@ const REFINE_DRAFT_PROMPT = loadPromptFile({
   filePath: ASSISTANT_REFINE_DRAFT_PATH,
   fallback: REFINE_DRAFT_PROMPT_DEFAULT,
   label: "Assistant refine draft prompt",
+});
+
+const THINKING_ANALYSE_PLAN_PROMPT = loadPromptFile({
+  filePath: ASSISTANT_THINKING_ANALYSE_PLAN_PATH,
+  fallback: [
+    "You are step 1 (analyse/plan) of the assistant's thinking chain.",
+    "",
+    "Your job is to analyze the user request and produce a concise plan grounded in retrieved evidence.",
+    "",
+    "Rules:",
+    "1. Focus on what must be answered and what evidence is available.",
+    "2. Identify key sub-questions, constraints, and missing evidence.",
+    "3. Do not produce the final user-facing answer.",
+    "4. Do not expose hidden chain-of-thought; return only a concise structured plan.",
+    "",
+    "Output:",
+    "- return only an analysis/plan text that can be used by the next chain step",
+  ].join("\n"),
+  label: "Assistant thinking analyse/plan prompt",
+});
+
+const THINKING_DRAFT_PROMPT = loadPromptFile({
+  filePath: ASSISTANT_THINKING_DRAFT_PATH,
+  fallback: [
+    "You are step 2 (draft) of the assistant's thinking chain.",
+    "",
+    "Your job is to create a draft answer using the user prompt, retrieved evidence, and the step 1 analysis/plan output.",
+    "",
+    "Rules:",
+    "1. Follow the analysis/plan output from step 1.",
+    "2. Base claims on retrieved evidence.",
+    "3. If evidence is partial or missing, state limits clearly.",
+    "4. Produce a complete draft answer for refinement in step 3.",
+    "",
+    "Output:",
+    "- return only the draft answer text",
+  ].join("\n"),
+  label: "Assistant thinking draft prompt",
+});
+
+const THINKING_REFINING_PROMPT = loadPromptFile({
+  filePath: ASSISTANT_THINKING_REFINING_PATH,
+  fallback: [
+    "You are step 3 (refine) of the assistant's thinking chain.",
+    "",
+    "Your job is to refine the draft using the user prompt, retrieved evidence, step 1 analysis/plan, and step 2 draft.",
+    "",
+    "Rules:",
+    "1. Preserve supported claims and remove unsupported ones.",
+    "2. Improve clarity, precision, and structure.",
+    "3. Keep uncertainty and evidence limits explicit.",
+    "4. Return a final user-facing response with no meta commentary.",
+    "",
+    "Output:",
+    "- return only the final refined answer",
+  ].join("\n"),
+  label: "Assistant thinking refining prompt",
 });
 
 const ASSISTANT_MODE_DEFINITIONS = {
@@ -156,6 +216,21 @@ const REFINE_CHAIN_PROMPTS = {
   ].join("\n"),
 };
 
+const THINKING_CHAIN_PROMPTS = {
+  analyse_plan: [
+    "[CHAIN STEP: ANALYSE_PLAN]",
+    THINKING_ANALYSE_PLAN_PROMPT,
+  ].join("\n"),
+  drafting: [
+    "[CHAIN STEP: DRAFT]",
+    THINKING_DRAFT_PROMPT,
+  ].join("\n"),
+  refining: [
+    "[CHAIN STEP: REFINE]",
+    THINKING_REFINING_PROMPT,
+  ].join("\n"),
+};
+
 export const DEFAULT_ASSISTANT_MODE = "simple";
 
 export function listAssistantModes() {
@@ -194,8 +269,19 @@ export function buildAssistantModeSystemLayer(modeId) {
   ];
 }
 
-export function getRefineChainSystemPrompt(step) {
+export function getAssistantChainSystemPrompt(modeId, step) {
+  const normalizedMode = String(modeId || "").trim().toLowerCase();
   const normalizedStep = String(step || "").trim().toLowerCase();
+  if (normalizedMode === "thinking") {
+    if (normalizedStep === "analyse_plan") {
+      return THINKING_CHAIN_PROMPTS.analyse_plan;
+    }
+    if (normalizedStep === "drafting") {
+      return THINKING_CHAIN_PROMPTS.drafting;
+    }
+    return THINKING_CHAIN_PROMPTS.refining;
+  }
+
   if (normalizedStep === "drafting") {
     return REFINE_CHAIN_PROMPTS.drafting;
   }
@@ -212,5 +298,50 @@ export function buildRefineFinalPassMessages({ originalPrompt, draftAnswer }) {
       ].join("\n"),
     ],
     ["assistant", String(draftAnswer || "(empty draft)").trim() || "(empty draft)"],
+  ];
+}
+
+export function buildThinkingDraftPassMessages({ originalPrompt, analysisPlan }) {
+  return [
+    [
+      "human",
+      [
+        "Original user prompt:",
+        String(originalPrompt || "").trim(),
+      ].join("\n"),
+    ],
+    [
+      "assistant",
+      [
+        "Step 1 output (analysis/plan):",
+        String(analysisPlan || "(empty analysis/plan)").trim() || "(empty analysis/plan)",
+      ].join("\n"),
+    ],
+  ];
+}
+
+export function buildThinkingRefinePassMessages({ originalPrompt, analysisPlan, draftAnswer }) {
+  return [
+    [
+      "human",
+      [
+        "Original user prompt:",
+        String(originalPrompt || "").trim(),
+      ].join("\n"),
+    ],
+    [
+      "assistant",
+      [
+        "Step 1 output (analysis/plan):",
+        String(analysisPlan || "(empty analysis/plan)").trim() || "(empty analysis/plan)",
+      ].join("\n"),
+    ],
+    [
+      "assistant",
+      [
+        "Step 2 output (draft):",
+        String(draftAnswer || "(empty draft)").trim() || "(empty draft)",
+      ].join("\n"),
+    ],
   ];
 }

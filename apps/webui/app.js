@@ -1344,13 +1344,24 @@ function App() {
       }
     )));
     const fallbackStepTimers = [];
-    if (String(currentAssistantMode || "").trim().toLowerCase() === "refine") {
+    const normalizedAssistantMode = String(currentAssistantMode || "").trim().toLowerCase();
+    if (normalizedAssistantMode === "refine") {
       fallbackStepTimers.push(window.setTimeout(() => {
         appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "drafting"));
       }, 550));
       fallbackStepTimers.push(window.setTimeout(() => {
         appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("refine", "refining"));
       }, 1300));
+    } else if (normalizedAssistantMode === "thinking") {
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("thinking", "analyse_plan"));
+      }, 450));
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("thinking", "drafting"));
+      }, 1100));
+      fallbackStepTimers.push(window.setTimeout(() => {
+        appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("thinking", "refining"));
+      }, 1900));
     } else {
       fallbackStepTimers.push(window.setTimeout(() => {
         appendPendingStatusStep(pendingMessageId, getPendingAssistantMessage("simple", "single_pass"));
