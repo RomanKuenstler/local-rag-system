@@ -6,13 +6,14 @@ This document describes the **current runtime architecture** and **data flow** o
 
 ## 1) Architecture overview
 
-The system is composed of seven services coordinated by Docker Compose:
+The system is composed of eight services coordinated by Docker Compose:
 
 - `webui` → Browser client (nginx + static JS app).
 - `backend` → Public API entrypoint, auth/session, admin/user endpoints, library-management endpoints, and retriever proxying.
 - `retriever` → Retrieval and answer orchestration (RAG pipeline, prompt building, assistant modes, personalization, chat logic).
 - `embedder` → Background indexing pipeline that reads source files, chunks text, computes embeddings, and updates vector store metadata.
 - `ocr-scanner` → Python OCR and PDF extraction service used by both retriever and embedder.
+- `audio-transcription` → Python audio transcription service scaffold for chat input and embedding audio jobs.
 - `qdrant` → Vector database for semantic similarity search.
 - `postgres` → Durable storage for auth/session data, chats/messages, settings, metadata, tags, and runtime state.
 
@@ -121,6 +122,11 @@ The system is composed of seven services coordinated by Docker Compose:
 - `GET /healthz`
 - `POST /ocr/scan`
 
+### Audio transcription
+
+- `GET /healthz`
+- `POST /audio/transcribe`
+
 ---
 
 ## 4) Data model and storage responsibilities
@@ -161,7 +167,7 @@ Prompt-time upload handling supports:
 - Retriever and embedder use explicit shared state file paths:
   - `INDEX_STATE_FILE=/app/state/index-state.json`
   - `EMBEDDING_STATUS_FILE=/app/state/embedding-status.json`
-- Models are configured in `compose.yml` under top-level `models` (`chat-model`, `embedding-model`).
+- Models are configured in `compose.yml` under top-level `models` (`chat-model`, `embedding-model`, `audio-model`).
 
 ---
 

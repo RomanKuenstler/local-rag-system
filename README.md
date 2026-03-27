@@ -16,6 +16,7 @@ This stack runs with Docker Compose and ships as multiple focused services:
 - `retriever` – prompt orchestration, retrieval, chat lifecycle, assistant modes, personalization.
 - `embedder` – background indexing + embedding worker for `data/`.
 - `ocr-scanner` – OCR + layout-aware extraction for PDFs/images from library files and prompt uploads.
+- `audio-transcription` – Python transcription microservice scaffold for chat and embedding audio jobs.
 - `qdrant` – vector database for similarity search.
 - `postgres` – persistence for users, sessions, chats, messages, settings, tags, and runtime metadata.
 - `webui` – Vite-bundled React browser UI (Node build -> nginx runtime) with backend API proxying.
@@ -33,12 +34,14 @@ docker compose up -d --build
 - Retriever API (internal): `http://retriever:3000`
 - Embedder health endpoint (internal): `http://embedder:3200/internal/embedder/status`
 - OCR scanner API: `http://localhost:3300`
+- Audio transcription API: `http://localhost:3400`
 
 ### Health checks
 
 - Backend: `GET /healthz`
 - Retriever: `GET /healthz`
 - OCR scanner: `GET /healthz`
+- Audio transcription: `GET /healthz`
 - Embedder: `GET /internal/embedder/status`
 
 ## Current feature set
@@ -69,6 +72,19 @@ Extraction behavior:
 - Image flow runs OCR directly.
 - Responses include status metadata (`status`, `extraction_details`, and `error_code` when relevant).
 
+## Audio transcription behavior
+
+`POST /audio/transcribe` supports:
+
+- `chat_input` (from `upload/` using `chat_audio_relative_path` or inline `audio_base64`)
+- `audio_embedding` (from `data/` using `audio_relative_path`)
+
+Current scaffold behavior:
+
+- Accepts `.wav`, `.mp3`, and `.m4a` files.
+- Validates request type + payload shape and returns normalized response metadata.
+- Includes model wiring placeholders via compose model-runner variables (`MODEL_RUNNER_BASE_URL` / `MODEL_RUNNER_LLM_AUDIO`).
+
 ## Repository layout
 
 ```text
@@ -78,6 +94,7 @@ Extraction behavior:
 │   ├── retriever/        # retrieval + chat orchestration + assistant behavior
 │   ├── embedder/         # background embedding/index worker + health route
 │   ├── ocr-scanner/      # Python OCR microservice
+│   ├── audio-transcription/ # Python audio transcription microservice
 │   └── webui/            # React browser client + Vite build + nginx runtime config
 ├── shared/
 │   ├── src/              # reusable runtime modules
