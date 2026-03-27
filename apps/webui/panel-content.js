@@ -908,11 +908,39 @@ export function renderPanelContent({
           const paragraphs = Array.isArray(section?.paragraphs) ? section.paragraphs : [];
           const userInputNotes = Array.isArray(section?.userInputNotes) ? section.userInputNotes : [];
           const sectionExtensions = Array.isArray(section?.extensions) ? section.extensions : [];
+          const assistantModes = Array.isArray(section?.assistantModes) ? section.assistantModes : [];
           return React.createElement(
             "section",
             { key: section?.id || `help-section-${sectionIndex}`, className: "info-group-card" },
             React.createElement("h4", null, section?.title || "Section"),
             ...paragraphs.map((line, idx) => React.createElement("p", { key: `help-section-${sectionIndex}-line-${idx}` }, line)),
+            assistantModes.length
+              ? React.createElement(
+                React.Fragment,
+                { key: `help-section-${sectionIndex}-assistant-modes` },
+                React.createElement("h5", null, "Assistant modes"),
+                React.createElement(
+                  "div",
+                  { className: "library-table help-assistant-modes-table", role: "table", "aria-label": "Assistant modes" },
+                  React.createElement(
+                    "div",
+                    { className: "library-table-head help-assistant-modes-head", role: "row" },
+                    React.createElement("span", null, "Mode"),
+                    React.createElement("span", null, "Description")
+                  ),
+                  React.createElement(
+                    "div",
+                    { className: "library-table-body", role: "rowgroup" },
+                    ...assistantModes.map((mode, idx) => React.createElement(
+                      "div",
+                      { key: `help-section-${sectionIndex}-assistant-mode-${idx}`, className: "library-table-row help-assistant-modes-row", role: "row" },
+                      React.createElement("strong", null, mode?.label || "n/a"),
+                      React.createElement("span", null, mode?.description || "")
+                    ))
+                  )
+                )
+              )
+              : null,
             userInputNotes.length
               ? React.createElement(
                 React.Fragment,

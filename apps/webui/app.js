@@ -384,6 +384,16 @@ function buildWebUiHelpContent() {
       {
         id: "personalization",
         title: "Personalization",
+        paragraphs: [
+          "Assistant modes let you choose how the assistant works through answers. Pick the mode that best fits the complexity of your task.",
+          "In Preferences → Personalization, you can tune base style and tone, warmth, enthusiasm, and how much the assistant uses headings and lists.",
+          "Custom instructions are persistent guidance for how the assistant should behave across your chats (for example tone or response format preferences).",
+          "Your user prompt is the message you type right now in the composer. It defines the immediate task, while custom instructions define your default behavior preferences.",
+        ],
+        assistantModes: ASSISTANT_MODE_OPTIONS.map((mode) => ({
+          label: mode.label,
+          description: mode.description,
+        })),
       },
       {
         id: "preferences",
