@@ -1,4 +1,4 @@
-import React from "https://esm.sh/react@18";
+import React from "react";
 
 const ATTACHMENT_EXTENSION_COLOR_CLASS = {
   pdf: "is-red",

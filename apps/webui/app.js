@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "https://esm.sh/react@18";
-import { createRoot } from "https://esm.sh/react-dom@18/client";
-import { marked } from "https://esm.sh/marked@13";
-import DOMPurify from "https://esm.sh/dompurify@3";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import {
   API_BASE_URL,
   PANEL_COMMANDS,

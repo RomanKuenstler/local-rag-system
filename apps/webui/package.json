@@ -1,0 +1,20 @@
+{
+  "name": "local-rag-webui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bundled React WebUI served by nginx",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "dompurify": "^3.3.0",
+    "marked": "^16.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "vite": "^7.1.12"
+  }
+}
