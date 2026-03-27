@@ -1,11 +1,14 @@
 # WebUI Fonts
 
-The WebUI uses **Inter** and bundles it at build time via `@fontsource-variable/inter`.
+The WebUI expects local Inter font files under:
 
-## Compliance and hosting
+- `apps/webui/fonts/inter/Inter-VariableFont_opsz,wght.ttf`
+- `apps/webui/fonts/inter/Inter-Italic-VariableFont_opsz,wght.ttf`
 
-- Font files are downloaded during the Node build stage from npm package dependencies.
-- Vite emits the Inter font assets into `dist/assets/` so nginx serves them locally from the container.
-- A license file (`OFL*` or `LICENSE*`) from the Inter package is copied into `dist/licenses/INTER-LICENSE.txt` during image build (with a fallback notice file if none is present).
+`styles.css` registers these with `@font-face`, and Vite bundles them into `dist/` so nginx serves them locally from the container.
 
-This keeps runtime fully offline-capable while preserving the Inter typography.
+## Quick setup
+
+1. Copy your downloaded Inter variable files into `apps/webui/fonts/inter/`.
+2. Ensure the two files use the exact names listed above.
+3. Rebuild the image: `docker compose build webui --no-cache`.
