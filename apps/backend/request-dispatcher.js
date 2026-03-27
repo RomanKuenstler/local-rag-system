@@ -150,6 +150,16 @@ export function createBackendRequestHandler({
       return true;
     }
 
+    if ((req.method === "GET" || req.method === "PATCH") && url.pathname === "/api/preferences/general") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return true;
+      await proxyRetrieverWithSession(req, res, url, session, {
+        fromPath: "/api/preferences/general",
+        toPath: "/internal/retriever/preferences/general",
+      });
+      return true;
+    }
+
     if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/chats") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return true;

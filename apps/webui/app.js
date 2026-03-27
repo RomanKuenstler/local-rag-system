@@ -164,6 +164,7 @@ function App() {
   const [openEvidenceMenuPlacement, setOpenEvidenceMenuPlacement] = useState("up");
   const [openEvidenceMenuMaxHeight, setOpenEvidenceMenuMaxHeight] = useState(320);
   const [currentAssistantMode, setCurrentAssistantMode] = useState(getInitialAssistantMode);
+  const [streamingAnswersEnabled, setStreamingAnswersEnabled] = useState(false);
   const [isAssistantModeMenuOpen, setIsAssistantModeMenuOpen] = useState(false);
   const [personalizationPreferences, setPersonalizationPreferences] = useState(DEFAULT_PERSONALIZATION_PREFERENCES);
   const [customInstructionsDraft, setCustomInstructionsDraft] = useState("");
@@ -373,6 +374,11 @@ function App() {
       setMoreAboutUserDraft(persistedMoreAboutUser);
     }
   }, [statusData, isCustomInstructionsDirty, isNicknameDirty, isOccupationDirty, isMoreAboutUserDirty]);
+
+  useEffect(() => {
+    const persistedStreamingAnswers = statusData?.assistant?.streamingAnswers === true;
+    setStreamingAnswersEnabled(persistedStreamingAnswers);
+  }, [statusData]);
 
   function getMessageBadge(message) {
     if (message.interaction?.type === "weak_confirmation") {
@@ -1407,6 +1413,7 @@ function App() {
       }
 
       const uploadedFilesPayload = isPanelCommand ? [] : await buildUploadedFilesPayload(selectedPromptFiles);
+      const shouldStreamAnswer = !isPanelCommand && streamingAnswersEnabled;
       const response = await apiFetch(`/api/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1414,17 +1421,69 @@ function App() {
           prompt,
           sessionId: sessionIdRef.current,
           chatId: chatIdRef.current,
+          stream: shouldStreamAnswer,
           attachedFiles: selectedPromptFiles.map((file) => file.name),
           uploadedFiles: uploadedFilesPayload,
         }),
       });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        if (response.status === 504) {
-          throw new Error("Request timed out before the assistant finished. Please retry or ask a shorter prompt.");
+      let payload = {};
+      if (shouldStreamAnswer) {
+        if (!response.ok) {
+          payload = await response.json().catch(() => ({}));
+          if (response.status === 504) {
+            throw new Error("Request timed out before the assistant finished. Please retry or ask a shorter prompt.");
+          }
+          throw new Error(payload?.error || `Request failed (${response.status})`);
         }
-        throw new Error(payload?.error || `Request failed (${response.status})`);
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("Streaming response unavailable.");
+        }
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let streamedAnswer = "";
+        let donePayload = null;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) continue;
+            let event;
+            try {
+              event = JSON.parse(trimmedLine);
+            } catch {
+              continue;
+            }
+            if (event.type === "delta") {
+              const token = String(event.token || "");
+              if (!token) continue;
+              streamedAnswer += token;
+              const nextAnswer = streamedAnswer;
+              setMessages((previous) => previous.map((message) => (
+                message.id !== pendingMessageId
+                  ? message
+                  : { ...message, text: nextAnswer, isPending: true }
+              )));
+            } else if (event.type === "done" && event.payload && typeof event.payload === "object") {
+              donePayload = event.payload;
+            } else if (event.type === "error") {
+              throw new Error(String(event.error || "Streaming request failed."));
+            }
+          }
+        }
+        payload = donePayload || { answer: streamedAnswer };
+      } else {
+        payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 504) {
+            throw new Error("Request timed out before the assistant finished. Please retry or ask a shorter prompt.");
+          }
+          throw new Error(payload?.error || `Request failed (${response.status})`);
+        }
       }
 
       if (isPanelCommand) {
@@ -1566,7 +1625,12 @@ function App() {
               currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
               modes: UI_MODE_OPTIONS,
             },
-            assistant: buildGeneralAssistantPanelContent(assistantPayload.answer || "", statusData, currentAssistantMode),
+            assistant: buildGeneralAssistantPanelContent(
+              assistantPayload.answer || "",
+              statusData,
+              currentAssistantMode,
+              streamingAnswersEnabled
+            ),
           },
           severity: null,
           responseType: null,
@@ -1692,6 +1756,39 @@ function App() {
     }
   }
 
+  async function toggleStreamingAnswers(nextEnabled) {
+    if (isSending || !isEmbeddingReady) return;
+    const normalizedNext = nextEnabled === true;
+    const previousValue = streamingAnswersEnabled;
+    setStreamingAnswersEnabled(normalizedNext);
+    try {
+      setIsSending(true);
+      const response = await apiFetchForPreferences(`/api/preferences/general`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: sessionIdRef.current,
+          streamingAnswers: normalizedNext,
+        }),
+      }, "General preferences");
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to save streaming setting");
+      }
+      const persistedValue = payload?.settings?.streamingAnswers === true;
+      setStreamingAnswersEnabled(persistedValue);
+      await refreshStatus();
+    } catch (error) {
+      setStreamingAnswersEnabled(previousValue);
+      setMessages((previous) => previous.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setIsSending(false);
+    }
+  }
+
   async function refreshCurrentPanel(activeCommand) {
     if (activeCommand === "/assistant") {
       const assistantPayload = await fetchPanelCommand("/assistant");
@@ -1722,7 +1819,12 @@ function App() {
             currentMode: getCurrentUiModeFromInfoText(infoPayload.answer || ""),
             modes: UI_MODE_OPTIONS,
           },
-          assistant: buildGeneralAssistantPanelContent(assistantPayload.answer || "", statusData, currentAssistantMode),
+          assistant: buildGeneralAssistantPanelContent(
+            assistantPayload.answer || "",
+            statusData,
+            currentAssistantMode,
+            streamingAnswersEnabled
+          ),
         },
         severity: null,
         responseType: null,
@@ -4355,6 +4457,8 @@ function App() {
               filterScope: "chat",
               toggleTagFilter: (tag) => toggleChatTagFilter(chatFilterDialogChat.id, tag),
               isTagFilterSaving: isChatFilterSaving,
+              streamingAnswersEnabled,
+              toggleStreamingAnswers,
               icon,
             })
           )
@@ -4445,6 +4549,8 @@ function App() {
                         filterScope: "global",
                         toggleTagFilter,
                         isTagFilterSaving,
+                        streamingAnswersEnabled,
+                        toggleStreamingAnswers,
                         icon,
                         settingsTabError,
                         clearSettingsTabError: () => setSettingsTabError(""),
@@ -4608,6 +4714,8 @@ function App() {
                         filterScope: "global",
                         toggleTagFilter,
                         isTagFilterSaving,
+                        streamingAnswersEnabled,
+                        toggleStreamingAnswers,
                         icon,
                         settingsTabError,
                         clearSettingsTabError: () => setSettingsTabError(""),
@@ -4701,6 +4809,8 @@ function App() {
               filterScope: "global",
               toggleTagFilter,
               isTagFilterSaving,
+              streamingAnswersEnabled,
+              toggleStreamingAnswers,
               icon,
               settingsTabError,
               clearSettingsTabError: () => setSettingsTabError(""),
