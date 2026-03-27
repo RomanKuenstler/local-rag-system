@@ -2457,6 +2457,11 @@ function App() {
     .map((entry) => ({ ...entry, section: section.label })));
   const retrieverStatus = normalizeStatusBadge(statusData?.services?.retriever?.role || statusData?.app?.role);
   const embedderStatus = normalizeStatusBadge(statusData?.embedding?.readiness?.status);
+  const serviceStatuses = {
+    backend: normalizeStatusBadge(statusData?.services?.backend?.role || "active"),
+    retriever: retrieverStatus,
+    embedder: embedderStatus,
+  };
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
   const defaultFileTag = String(filesData?.defaultTag || DEFAULT_FILE_TAG_LABEL).trim().toLowerCase() || DEFAULT_FILE_TAG_LABEL;
   const tagFilterRows = useMemo(() => {
@@ -4529,6 +4534,7 @@ function App() {
               restartConfigRows: [],
               retrieverStatus,
               embedderStatus,
+              serviceStatuses,
               isSending,
               isEmbeddingReady,
               disabledAssistantModes: disabledAssistantModesList,
@@ -4618,6 +4624,7 @@ function App() {
                         restartConfigRows,
                         retrieverStatus,
                         embedderStatus,
+                        serviceStatuses,
                         isSending,
                         isEmbeddingReady,
                         disabledAssistantModes: disabledAssistantModesList,
@@ -4780,6 +4787,7 @@ function App() {
                         restartConfigRows,
                         retrieverStatus,
                         embedderStatus,
+                        serviceStatuses,
                         isSending,
                         isEmbeddingReady,
                         disabledAssistantModes: disabledAssistantModesList,
@@ -4872,6 +4880,7 @@ function App() {
               restartConfigRows,
               retrieverStatus,
               embedderStatus,
+              serviceStatuses,
               isSending,
               isEmbeddingReady,
               disabledAssistantModes: disabledAssistantModesList,

@@ -300,6 +300,7 @@ export function renderPanelContent({
   restartConfigRows,
   retrieverStatus,
   embedderStatus,
+  serviceStatuses = {},
   isSending,
   isEmbeddingReady,
   disabledAssistantModes = [],
@@ -453,6 +454,49 @@ export function renderPanelContent({
   }
 
   if (panelData.command === "/info") {
+    const storageGroup = parsedInfoGroups.find((group) => String(group?.title || "").trim().toLowerCase() === "storage");
+    const vectorDbValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "vector db")?.value || "";
+    const postgresValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "postgres")?.value || "";
+    const normalizeStorageStatus = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (!normalized || normalized === "n/a" || normalized === "not configured") {
+        return "disconnected";
+      }
+      return "active";
+    };
+    const infoServiceRows = [
+      {
+        key: "backend",
+        label: "backend",
+        status: serviceStatuses.backend || "active",
+        description: "Web API gateway handling authentication, sessions, and orchestration.",
+      },
+      {
+        key: "retriever",
+        label: "retriever",
+        status: serviceStatuses.retriever || retrieverStatus,
+        description: "Runs retrieval, prompt assembly, and /info /config command handling.",
+      },
+      {
+        key: "embedder",
+        label: "embedder",
+        status: serviceStatuses.embedder || embedderStatus,
+        description: "Processes library documents and generates embeddings for semantic search.",
+      },
+      {
+        key: "vector-db",
+        label: "vector db",
+        status: normalizeStorageStatus(vectorDbValue),
+        description: "Stores vector embeddings used for nearest-neighbor retrieval.",
+      },
+      {
+        key: "postgres",
+        label: "postgres",
+        status: normalizeStorageStatus(postgresValue),
+        description: "Stores chat/session data, app metadata, and relational state.",
+      },
+    ];
+
     return React.createElement(
       "div",
       { className: "info-groups" },
@@ -460,31 +504,21 @@ export function renderPanelContent({
         "section",
         { className: "info-group-card" },
         React.createElement("h4", null, "Status"),
-        React.createElement(
+        ...infoServiceRows.map((service) => React.createElement(
           "div",
-          { className: "info-row" },
-          React.createElement("span", null, "retriever"),
+          { key: service.key, className: "info-row info-service-row" },
+          React.createElement(
+            "span",
+            { className: "info-service-meta" },
+            React.createElement("strong", null, service.label),
+            React.createElement("small", null, service.description)
+          ),
           React.createElement(
             "strong",
             null,
-            React.createElement("span", { className: `status-badge ${retrieverStatus}` }, retrieverStatus)
+            React.createElement("span", { className: `status-badge ${service.status}` }, service.status)
           )
-        ),
-        React.createElement(
-          "div",
-          { className: "info-row" },
-          React.createElement("span", null, "embedder"),
-          React.createElement(
-            "strong",
-            null,
-            React.createElement("span", { className: `status-badge ${embedderStatus}` }, embedderStatus)
-          )
-        ),
-        React.createElement(
-          "p",
-          { className: "config-help" },
-          "Includes runtime model selection, vector/postgres storage wiring, and state-file paths."
-        )
+        ))
       ),
       ...parsedInfoGroups.map((group) => React.createElement(
         "section",
