@@ -1163,27 +1163,7 @@ body {
   margin-top: -0.15rem;
 }
 .dialog-delete-chat-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  border-radius: 999px;
-  padding: 0.34rem 0.58rem;
-  color: #111827;
-  max-width: 100%;
-}
-.dialog-delete-chat-chip-icon .icon {
-  width: 0.9rem;
-  height: 0.9rem;
-  color: #64748b;
-}
-.dialog-delete-chat-chip-name {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 600;
+  width: 100%;
 }
 .status-badge.with-spinner {
   gap: 0.35rem;
@@ -2203,6 +2183,7 @@ body {
   fill: #fff;
 }
 .composer-attachment-icon.is-red { background: #ef4444; }
+.composer-attachment-icon.is-black { background: #111827; }
 .composer-attachment-icon.is-gray { background: #6b7280; }
 .composer-attachment-icon.is-blue { background: #2563eb; }
 .composer-attachment-icon.is-purple { background: #8b5cf6; }

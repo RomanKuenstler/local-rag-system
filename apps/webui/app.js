@@ -4180,9 +4180,22 @@ function App() {
           ),
           React.createElement(
             "div",
-            { className: "dialog-delete-chat-chip" },
-            React.createElement("span", { className: "dialog-delete-chat-chip-icon", "aria-hidden": "true" }, icon(chatIconPath)),
-            React.createElement("span", { className: "dialog-delete-chat-chip-name" }, deleteConfirmChat.name)
+            { className: "composer-attachment-chip dialog-delete-chip dialog-delete-chat-chip" },
+            React.createElement(
+              "span",
+              { className: "composer-attachment-icon is-black", "aria-hidden": "true" },
+              React.createElement(
+                "svg",
+                { viewBox: "0 0 24 24", className: "composer-attachment-icon-svg" },
+                React.createElement("path", { d: chatIconPath })
+              )
+            ),
+            React.createElement(
+              "span",
+              { className: "composer-attachment-meta" },
+              React.createElement("p", { className: "composer-attachment-name" }, deleteConfirmChat.name),
+              React.createElement("p", { className: "composer-attachment-ext" }, "chat")
+            )
           ),
           React.createElement(
             "div",
