@@ -900,6 +900,56 @@ export function renderPanelContent({
     );
   }
   if ((panelData.command === "/help" || panelData.command === "?") && parsedHelpPanel) {
+    if (Array.isArray(parsedHelpPanel.sections)) {
+      return React.createElement(
+        "div",
+        { className: "help-grid" },
+        ...parsedHelpPanel.sections.map((section, sectionIndex) => {
+          const paragraphs = Array.isArray(section?.paragraphs) ? section.paragraphs : [];
+          const composerNotes = Array.isArray(section?.composerNotes) ? section.composerNotes : [];
+          const attachmentExtensions = Array.isArray(section?.attachmentExtensions) ? section.attachmentExtensions : [];
+          return React.createElement(
+            "section",
+            { key: section?.id || `help-section-${sectionIndex}`, className: "info-group-card" },
+            React.createElement("h4", null, section?.title || "Section"),
+            ...paragraphs.map((line, idx) => React.createElement("p", { key: `help-section-${sectionIndex}-line-${idx}` }, line)),
+            composerNotes.length
+              ? React.createElement(
+                React.Fragment,
+                { key: `help-section-${sectionIndex}-composer` },
+                React.createElement("h5", null, "Composer"),
+                React.createElement(
+                  "ul",
+                  { className: "help-tips" },
+                  ...composerNotes.map((note, idx) => React.createElement("li", { key: `help-section-${sectionIndex}-composer-note-${idx}` }, note))
+                )
+              )
+              : null,
+            attachmentExtensions.length
+              ? React.createElement(
+                React.Fragment,
+                { key: `help-section-${sectionIndex}-attachments` },
+                React.createElement("h5", null, "Attachable file extensions"),
+                React.createElement(
+                  "div",
+                  { className: "info-extension-chip-row" },
+                  ...attachmentExtensions.map((extension, idx) => {
+                    const normalized = String(extension || "").trim().replace(/^\./, "").toLowerCase();
+                    const colorClass = getExtensionColorClass(normalized);
+                    return React.createElement(
+                      "span",
+                      { key: `help-section-${sectionIndex}-extension-${idx}`, className: `library-extension-chip ${colorClass}`.trim() },
+                      `.${normalized}`
+                    );
+                  })
+                )
+              )
+              : null
+          );
+        })
+      );
+    }
+
     return React.createElement(
       "div",
       { className: "help-grid" },

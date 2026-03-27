@@ -351,25 +351,36 @@ function buildPersonalizationContent(preferences) {
 }
 
 function buildWebUiHelpContent() {
-  return [
-    "Quick help",
-    "",
-    "This guide is for the Web UI experience for regular users.",
-    "Use it to understand where your answers come from and how to tune the assistant for your day-to-day work.",
-    "",
-    "Commands:",
-    "- Library  Your library is the document set the assistant searches before answering. Keep files focused, well titled, and up to date for better results.",
-    "- Preferences  Open Preferences from the user menu to control chat behavior, filters, and archive options used across the Web UI.",
-    "- Personalization  Personalization changes tone and response style (for example concise vs. detailed) without changing the factual source of answers.",
-    "- Global vs chat filtering  Global filters apply everywhere. Chat filters only narrow context for the current chat and cannot override globally disabled tags.",
-    "- Prompt attachments  You can attach files to a single message when asking a question. Those files are used only for that request and do not replace your library.",
-    "- Chats and answer sources  Each chat keeps its own history. Assistant answers use both chat context and matched library evidence, and source snippets show what was used.",
-    "",
-    "Tips:",
-    "- Start a new chat when switching to a different topic to keep retrieval focused.",
-    "- If an answer feels off, check filters first, then rephrase with specific keywords from your documents.",
-    "- Prefer smaller, topic-specific files over one very large mixed document for more reliable matches.",
-  ].join("\n");
+  return {
+    sections: [
+      {
+        id: "chat-usage",
+        title: "Chat Usage",
+        paragraphs: [
+          "Create a chat with the + New Chat button in the sidebar. Use separate chats for separate topics so answers stay focused.",
+          "Open the chat menu (⋯) to rename chats, archive chats you no longer need, or remove chats.",
+        ],
+        composerNotes: [
+          "Use the composer field at the bottom to type your question or instruction.",
+          "Press Enter to send, or Shift+Enter for a new line.",
+          "You can attach up to 3 files to a single prompt.",
+        ],
+        attachmentExtensions: PROMPT_ATTACHMENT_RULES.allowedExtensions,
+      },
+      {
+        id: "library",
+        title: "Library",
+      },
+      {
+        id: "personalization",
+        title: "Personalization",
+      },
+      {
+        id: "preferences",
+        title: "Preferences",
+      },
+    ],
+  };
 }
 
 marked.setOptions({
@@ -2476,7 +2487,9 @@ function App() {
     ? parseSystemInfoContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
     : [];
   const parsedHelpPanel = activeModalPanel?.command === "/help" || activeModalPanel?.command === "?"
-    ? parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || ""))
+    ? (activeModalPanel?.content && typeof activeModalPanel.content === "object" && Array.isArray(activeModalPanel.content.sections)
+      ? activeModalPanel.content
+      : parseHelpContent(Array.isArray(activeModalPanel.content) ? activeModalPanel.content.join("\n") : String(activeModalPanel.content || "")))
     : null;
   const configSections = activeModalPanel?.command === "/config" && activeModalPanel.configView
     ? activeModalPanel.configView.sections
