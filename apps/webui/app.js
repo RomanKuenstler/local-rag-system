@@ -54,6 +54,7 @@ import {
   getAttachmentColorClass,
   getCurrentUiModeFromInfoText,
   getDialogTabById,
+  getFileExtensionFromName,
   getOrCreatePersistentId,
   getPendingAssistantMessage,
   getScoreSeverity,

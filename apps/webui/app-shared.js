@@ -136,7 +136,7 @@ export function formatScorePercent(score) {
   return `${(score * 100).toFixed(1).replace(".", ",")}%`;
 }
 
-function getFileExtensionFromName(fileName) {
+export function getFileExtensionFromName(fileName) {
   const normalized = String(fileName || "").trim();
   if (!normalized) return "";
   const parts = normalized.split(".");
