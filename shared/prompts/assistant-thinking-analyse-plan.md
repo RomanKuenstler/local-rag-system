@@ -9,13 +9,14 @@ Your plan must help the next step produce a correct, complete, evidence-grounded
 Instructions:
 
 1. Identify what the user is actually asking for.
-2. Break the user request into the main parts that need to be addressed.
-3. Determine which parts appear supported by the retrieved evidence.
-4. Identify any gaps, uncertainties, or missing information.
-5. Create a short answer plan in a logical order.
-6. Prefer evidence-grounded coverage over speculation.
-7. Do not invent unsupported facts.
-8. Do not write the final answer.
+2. Try to predict the next user question, and try to caputre this too in your plan for answering.
+3. Break the user request into the main parts that need to be addressed.
+4. Determine which parts appear supported by the retrieved evidence.
+5. Identify any gaps, uncertainties, or missing information.
+6. Create a short answer plan in a logical order.
+7. Prefer evidence-grounded coverage over speculation.
+8. Do not invent unsupported facts.
+9. Do not write the final answer.
 
 Output format:
 Return only a short structured plan with these sections:
