@@ -358,11 +358,11 @@ function buildWebUiHelpContent() {
         title: "Chat Usage",
         paragraphs: [
           "Create a chat with the + New Chat button in the sidebar. Use separate chats for separate topics so answers stay focused.",
-          "Open the chat menu (⋯) to rename chats, archive chats you no longer need, or remove chats.",
+          "Open the chat menu (⋯) to rename chats, download chats, archive chats you no longer need, or remove chats. Here you can also filter the applied knowledge base for this specific chat by the provided tags.",
         ],
         userInputHeading: "User input",
         userInputNotes: [
-          "Use the composer field at the bottom to type your question or instruction.",
+          "Use the input field at the bottom to type your question or instruction, make sure to be percise and think of good prompting and give the needed context.",
           "Press Enter to send, or Shift+Enter for a new line.",
           "You can attach up to 3 files to a single prompt.",
         ],
@@ -385,10 +385,7 @@ function buildWebUiHelpContent() {
         id: "personalization",
         title: "Personalization",
         paragraphs: [
-          "Assistant modes let you choose how the assistant works through answers. Pick the mode that best fits the complexity of your task.",
-          "In Preferences → Personalization, you can tune base style and tone, warmth, enthusiasm, and how much the assistant uses headings and lists.",
           "Custom instructions are persistent guidance for how the assistant should behave across your chats (for example tone or response format preferences).",
-          "Your user prompt is the message you type right now in the composer. It defines the immediate task, while custom instructions define your default behavior preferences.",
         ],
         assistantModes: ASSISTANT_MODE_OPTIONS.map((mode) => ({
           label: mode.label,
@@ -399,10 +396,9 @@ function buildWebUiHelpContent() {
         id: "preferences",
         title: "Preferences",
         paragraphs: [
-          "In the General tab, you can choose the UI mode and the assistant mode used for your chats. This controls how answers are presented and how much retrieval detail you see in the interface.",
-          "In the Settings tab, you can adjust runtime retrieval settings that affect how many matches are considered and how strict matching should be, helping you tune recall versus precision.",
-          "In the Filter tab, you manage global tag filters for your session. Tags disabled here are excluded in all chats, and chat-level filters cannot re-enable globally disabled tags.",
-          "In the Archive tab, you can review archived chats and restore or permanently remove them. This helps keep the active chat list clean while still keeping older work accessible when needed.",
+          "Settings Tab: you can adjust runtime retrieval settings that affect how many matches are considered and how strict matching should be, helping you tune recall versus precision.",
+          "Filter Tab: you manage global tag filters for your session. Tags disabled here are excluded in all chats, and chat-level filters cannot re-enable globally disabled tags.",
+          "Archive Tab: you can review archived chats and restore or permanently remove them. This helps keep the active chat list clean while still keeping older work accessible when needed.",
         ],
       },
     ],
