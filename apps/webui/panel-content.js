@@ -518,6 +518,12 @@ export function renderPanelContent({
         description: "Extracts text from scanned PDFs and images for retrieval and embedding.",
       },
       {
+        key: "audio-transcription",
+        label: "audio transcription",
+        status: serviceStatuses.audioTranscription || "disconnected",
+        description: "Transcribes uploaded/library audio into text for embedding and chat workflows.",
+      },
+      {
         key: "vector-db",
         label: "vector db",
         status: normalizeStorageStatus(vectorDbValue),

@@ -21,6 +21,8 @@ const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
 const RETRIEVER_BASE_URL = process.env.RETRIEVER_BASE_URL || "http://retriever:3000";
 const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "http://embedder:3200";
 const OCR_SCANNER_BASE_URL = process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300";
+const AUDIO_TRANSCRIPTION_BASE_URL =
+  process.env.AUDIO_TRANSCRIPTION_BASE_URL || "http://audio-transcription:3400";
 const MAX_API_BODY_BYTES = Number.parseInt(process.env.MAX_API_BODY_BYTES || String(25 * 1024 * 1024), 10);
 const ADMIN_EDIT_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
@@ -251,11 +253,13 @@ async function handleStatus(req, res, sessionId) {
   const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
   const ocrScannerStatusPromise = fetchJson(`${OCR_SCANNER_BASE_URL}/healthz`).catch(() => null);
+  const audioTranscriptionStatusPromise = fetchJson(`${AUDIO_TRANSCRIPTION_BASE_URL}/healthz`).catch(() => null);
 
-  const [retrieverStatus, embedderStatus, ocrScannerStatus] = await Promise.all([
+  const [retrieverStatus, embedderStatus, ocrScannerStatus, audioTranscriptionStatus] = await Promise.all([
     retrieverStatusPromise,
     embedderStatusPromise,
     ocrScannerStatusPromise,
+    audioTranscriptionStatusPromise,
   ]);
   const responsePayload = {
     ...(retrieverStatus || {}),
@@ -281,6 +285,11 @@ async function handleStatus(req, res, sessionId) {
         role: ocrScannerStatus?.service || "ocr-scanner",
         baseUrl: OCR_SCANNER_BASE_URL,
         status: ocrScannerStatus?.status || (ocrScannerStatus ? "active" : "disconnected"),
+      },
+      audioTranscription: {
+        role: audioTranscriptionStatus?.service || "audio-transcription",
+        baseUrl: AUDIO_TRANSCRIPTION_BASE_URL,
+        status: audioTranscriptionStatus?.status || (audioTranscriptionStatus ? "active" : "disconnected"),
       },
     },
   };

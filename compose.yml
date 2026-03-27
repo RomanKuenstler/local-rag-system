@@ -19,6 +19,7 @@ services:
       BACKEND_API_PORT: 3100
       RETRIEVER_BASE_URL: http://retriever:3000
       EMBEDDER_BASE_URL: http://embedder:3200
+      AUDIO_TRANSCRIPTION_BASE_URL: http://audio-transcription:3400
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: rag
