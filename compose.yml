@@ -159,6 +159,9 @@ services:
           ignore:
             - Dockerfile
             - nginx.conf.template
+            - package.json
+            - scripts/
+            - dist/
     depends_on:
       - backend
 

@@ -1,0 +1,9 @@
+{
+  "name": "local-rag-webui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Build step for static WebUI assets served by nginx",
+  "scripts": {
+    "build": "node ./scripts/build.mjs"
+  }
+}
