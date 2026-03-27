@@ -45,7 +45,7 @@ export const DEFAULT_PERSONALIZATION_PREFERENCES = {
   occupation: "",
   moreAboutUser: "",
 };
-export const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set(["thinking"]);
+export const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set([]);
 export const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
   allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
@@ -69,6 +69,7 @@ export const LIBRARY_UPLOAD_RULES = {
 };
 export const SESSION_ID_STORAGE_KEY = "rag-session-id";
 export const CHAT_ID_STORAGE_KEY = "rag-chat-id";
+export const ASSISTANT_MODE_STORAGE_KEY = "rag-assistant-mode";
 export const AUTH_SESSION_TOKEN_STORAGE_KEY = "rag-auth-session-token";
 export const LOGIN_PAGE_HASH = "#login";
 export const LIBRARY_PAGE_HASH = "#library";
@@ -258,6 +259,17 @@ export function getPendingAssistantMessage(modeId, chainStage) {
       return "Refining the final answer…";
     }
     return "Drafting an answer…";
+  }
+  if (normalizedMode === "thinking") {
+    if (normalizedStage === "analyse_plan") {
+      return "Analyzing and planning the response…";
+    }
+    if (normalizedStage === "drafting") {
+      return "Drafting an answer…";
+    }
+    if (normalizedStage === "refining") {
+      return "Refining the final answer…";
+    }
   }
   return "Assistant is thinking…";
 }
