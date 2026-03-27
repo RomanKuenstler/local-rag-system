@@ -1707,11 +1707,13 @@ body {
 .info-row span { color: #6b7280; text-transform: capitalize; }
 .info-row strong { word-break: break-word; font-weight: 570; color: #111827; }
 .info-service-row {
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
 }
 .info-service-meta {
   display: grid;
   gap: 0.12rem;
+  min-width: 0;
 }
 .info-service-meta strong {
   color: #374151;
@@ -1724,12 +1726,23 @@ body {
   line-height: 1.3;
   text-transform: none;
 }
+.info-service-row > strong {
+  justify-self: end;
+}
+.info-extension-chip-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
 .status-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   padding: 0.2rem 0.55rem;
+  min-width: 72px;
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;

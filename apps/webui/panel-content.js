@@ -1,5 +1,24 @@
 import React from "https://esm.sh/react@18";
 
+const ATTACHMENT_EXTENSION_COLOR_CLASS = {
+  pdf: "is-red",
+  epub: "is-red",
+  md: "is-gray",
+  txt: "is-gray",
+  html: "is-blue",
+  htm: "is-blue",
+  png: "is-purple",
+  jpg: "is-purple",
+  jpeg: "is-purple",
+  webp: "is-purple",
+  csv: "is-green",
+};
+
+function getExtensionColorClass(extensionValue) {
+  const normalized = String(extensionValue || "").trim().replace(/^\./, "").toLowerCase();
+  return ATTACHMENT_EXTENSION_COLOR_CLASS[normalized] || "is-gray";
+}
+
 function GeneralDropdown({
   label,
   description = "",
@@ -455,8 +474,14 @@ export function renderPanelContent({
 
   if (panelData.command === "/info") {
     const storageGroup = parsedInfoGroups.find((group) => String(group?.title || "").trim().toLowerCase() === "storage");
+    const appGroupTitle = "app";
     const vectorDbValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "vector db")?.value || "";
     const postgresValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "postgres")?.value || "";
+    const embeddableExtensionsValue = storageGroup?.items?.find((item) => String(item?.key || "").trim().toLowerCase() === "embeddable extensions")?.value || "";
+    const embeddableExtensions = embeddableExtensionsValue
+      .split(",")
+      .map((entry) => String(entry || "").trim())
+      .filter(Boolean);
     const normalizeStorageStatus = (value) => {
       const normalized = String(value || "").trim().toLowerCase();
       if (!normalized || normalized === "n/a" || normalized === "not configured") {
@@ -520,7 +545,45 @@ export function renderPanelContent({
           )
         ))
       ),
-      ...parsedInfoGroups.map((group) => React.createElement(
+      ...parsedInfoGroups
+        .filter((group) => String(group?.title || "").trim().toLowerCase() !== appGroupTitle)
+        .map((group) => {
+          if (String(group.title || "").trim().toLowerCase() === "storage") {
+            return React.createElement(
+              "section",
+              { key: group.title, className: "info-group-card" },
+              React.createElement("h4", null, group.title),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Knowledge base"),
+                React.createElement("strong", null, "Qdrant")
+              ),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Persistent storage"),
+                React.createElement("strong", null, "Postgres")
+              ),
+              React.createElement(
+                "div",
+                { className: "info-row" },
+                React.createElement("span", null, "Embeddable files"),
+                React.createElement(
+                  "strong",
+                  { className: "info-extension-chip-row" },
+                  ...(embeddableExtensions.length
+                    ? embeddableExtensions.map((extension) => React.createElement(
+                      "span",
+                      { key: `embeddable-${extension}`, className: `library-extension-chip ${getExtensionColorClass(extension)}` },
+                      extension
+                    ))
+                    : [React.createElement("span", { key: "embeddable-empty" }, "n/a")])
+                )
+              )
+            );
+          }
+          return React.createElement(
         "section",
         { key: group.title, className: "info-group-card" },
         React.createElement("h4", null, group.title),
@@ -530,7 +593,8 @@ export function renderPanelContent({
           React.createElement("span", null, item.key),
           React.createElement("strong", null, item.value)
         ))
-      ))
+          );
+        })
     );
   }
 
