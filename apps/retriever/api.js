@@ -91,6 +91,7 @@ import {
   normalizeIndexableTextByExtension,
 } from "../../shared/src/document-processing.js";
 import { createRuntimeConfigManager, parseConfigSetCommand } from "../../shared/src/runtime-config.js";
+import { createRetrieverRequestHandler } from "./request-dispatcher.js";
 
 validateRetrievalConfig();
 
