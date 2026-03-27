@@ -753,13 +753,6 @@ export function renderPanelContent({
       "section",
       { className: "filter-table-wrapper" },
       React.createElement(
-        "p",
-        { className: "filter-scope-note" },
-        isChatScopedFilter
-          ? "Note: Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
-          : "Note: Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
-      ),
-      React.createElement(
         "div",
         { className: "filter-table", role: "table", "aria-label": "Tag filters" },
         React.createElement(
@@ -767,7 +760,7 @@ export function renderPanelContent({
           { className: "filter-table-head", role: "row" },
           React.createElement("strong", { role: "columnheader" }, "Tag"),
           React.createElement("strong", { role: "columnheader" }, "Files"),
-          React.createElement("strong", { role: "columnheader" }, "Action")
+          React.createElement("strong", { role: "columnheader", className: "filter-action-header" }, "Action")
         ),
         rows.length === 0
           ? React.createElement("p", { className: "archive-empty" }, "No tags available yet.")
@@ -795,6 +788,13 @@ export function renderPanelContent({
               )
             );
           })
+      ),
+      React.createElement(
+        "p",
+        { className: "filter-scope-note" },
+        isChatScopedFilter
+          ? "Note: Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
+          : "Note: Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
       )
     );
   }
