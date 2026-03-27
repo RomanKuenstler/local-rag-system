@@ -793,8 +793,8 @@ export function renderPanelContent({
         "p",
         { className: "filter-scope-note" },
         isChatScopedFilter
-          ? "Note: Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
-          : "Note: Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
+          ? "Tags disabled globally cannot be enabled here. To change global tag availability, open Preferences → Filter."
+          : "Disabling tags here is global for your session and applies to every chat. Chat-level filter dialogs cannot enable globally disabled tags."
       )
     );
   }
