@@ -2204,7 +2204,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 .config-live-table-head,
 .config-live-table-row {
-  grid-template-columns: minmax(170px, 2fr) minmax(220px, 1.5fr) 90px;
+  grid-template-columns: minmax(170px, 2fr) minmax(220px, 1.5fr);
 }
 .config-setting-cell {
   display: grid;
@@ -2212,19 +2212,6 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 .config-setting-cell strong { font-size: 0.84rem; text-transform: capitalize; color: #0f172a; }
 .config-setting-cell small { color: #64748b; font-size: 0.73rem; }
-.config-live-table-head span:last-child,
-.config-live-table-row > :last-child {
-  justify-self: center;
-}
-.config-row-ready {
-  justify-self: center;
-  border: 1px solid rgba(22,163,74,.25);
-  color: #166534;
-  background: rgba(22,163,74,.09);
-  border-radius: 999px;
-  padding: 0.18rem 0.5rem;
-  font-size: 0.72rem;
-}
 .config-edit-form { display: flex; gap: 0.45rem; align-items: center; }
 .config-settings-error {
   margin: 0;

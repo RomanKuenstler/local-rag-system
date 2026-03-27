@@ -401,8 +401,7 @@ export function renderPanelContent({
             "div",
             { className: "library-table-head config-live-table-head", role: "row" },
             React.createElement("span", null, "Setting"),
-            React.createElement("span", null, "Value"),
-            React.createElement("span", null, "Save")
+            React.createElement("span", null, "Value")
           ),
           React.createElement(
             "div",
@@ -445,13 +444,11 @@ export function renderPanelContent({
                   },
                   icon(saveIconPath)
                 )
-              ),
-              React.createElement("span", { className: "config-row-ready" }, "Live")
+              )
             ))
           )
         )
-      ),
-      React.createElement("p", { className: "config-help" }, panelData.configView.help)
+      )
     );
   }
 
