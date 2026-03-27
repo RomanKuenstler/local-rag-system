@@ -509,6 +509,12 @@ export function renderPanelContent({
         description: "Processes library documents and generates embeddings for semantic search.",
       },
       {
+        key: "ocr-scanner",
+        label: "ocr scanner",
+        status: serviceStatuses.ocrScanner || "disconnected",
+        description: "Extracts text from scanned PDFs and images for retrieval and embedding.",
+      },
+      {
         key: "vector-db",
         label: "vector db",
         status: normalizeStorageStatus(vectorDbValue),

@@ -19,6 +19,7 @@ const PORT = parseInt(process.env.BACKEND_API_PORT || "3100", 10);
 const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
 const RETRIEVER_BASE_URL = process.env.RETRIEVER_BASE_URL || "http://retriever:3000";
 const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "http://embedder:3200";
+const OCR_SCANNER_BASE_URL = process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300";
 const MAX_API_BODY_BYTES = Number.parseInt(process.env.MAX_API_BODY_BYTES || String(25 * 1024 * 1024), 10);
 const ADMIN_EDIT_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
@@ -248,8 +249,13 @@ async function handleStatus(req, res, sessionId) {
   const retrieverStatusUrl = `${RETRIEVER_BASE_URL}/internal/retriever/status?sessionId=${encodeURIComponent(sessionId)}`;
   const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
+  const ocrScannerStatusPromise = fetchJson(`${OCR_SCANNER_BASE_URL}/healthz`).catch(() => null);
 
-  const [retrieverStatus, embedderStatus] = await Promise.all([retrieverStatusPromise, embedderStatusPromise]);
+  const [retrieverStatus, embedderStatus, ocrScannerStatus] = await Promise.all([
+    retrieverStatusPromise,
+    embedderStatusPromise,
+    ocrScannerStatusPromise,
+  ]);
   const responsePayload = {
     ...(retrieverStatus || {}),
     orchestration: {
@@ -269,6 +275,11 @@ async function handleStatus(req, res, sessionId) {
         role: embedderStatus?.service || "embedder",
         baseUrl: EMBEDDER_BASE_URL,
         status: embedderStatus,
+      },
+      ocrScanner: {
+        role: ocrScannerStatus?.service || "ocr-scanner",
+        baseUrl: OCR_SCANNER_BASE_URL,
+        status: ocrScannerStatus?.status || (ocrScannerStatus ? "active" : "disconnected"),
       },
     },
   };
