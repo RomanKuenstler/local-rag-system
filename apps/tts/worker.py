@@ -29,6 +29,14 @@ def log_event(event: str, **fields: object) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def model_runner_url(path: str) -> str:
+    base = MODEL_RUNNER_BASE_URL.rstrip("/")
+    clean_path = path.lstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}/{clean_path}"
+    return f"{base}/v1/{clean_path}"
+
+
 def parse_request_payload(payload: object) -> tuple[str, str, str, float | None]:
     if not isinstance(payload, dict):
         raise ValueError("Body must be a JSON object")
@@ -86,7 +94,7 @@ def synthesize() -> Response | tuple[object, int]:
     def stream_audio_speech() -> Response | tuple[object, int] | None:
         try:
             upstream_response = requests.post(
-                f"{MODEL_RUNNER_BASE_URL}/v1/audio/speech",
+                model_runner_url("audio/speech"),
                 headers={"Content-Type": "application/json"},
                 data=json.dumps(upstream_payload),
                 stream=True,
@@ -142,7 +150,7 @@ def synthesize() -> Response | tuple[object, int]:
 
         try:
             response = requests.post(
-                f"{MODEL_RUNNER_BASE_URL}/v1/chat/completions",
+                model_runner_url("chat/completions"),
                 headers={"Content-Type": "application/json"},
                 data=json.dumps(fallback_payload),
                 timeout=REQUEST_TIMEOUT_SECONDS,
