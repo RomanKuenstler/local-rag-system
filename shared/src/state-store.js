@@ -582,14 +582,16 @@ export async function resolveSessionChatId({ sessionId, requestedChatId = null, 
 
 export async function addChatMessage({ sessionId, chatId, role, content, metadata = {} }) {
   const userId = await resolveUserIdForSession(sessionId);
-  await dbQuery(
+  const inserted = await dbQuery(
     `INSERT INTO chat_messages (session_id, chat_id, user_id, role, content, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+     RETURNING id, session_id, chat_id, role, content, metadata, created_at`,
     [sessionId, chatId, userId, role, content, JSON.stringify(metadata || {})]
   );
 
   await dbQuery("UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1", [sessionId]);
   await dbQuery("UPDATE chats SET updated_at = NOW() WHERE id = $1", [chatId]);
+  return inserted.rows[0] || null;
 }
 
 export async function listChatMessages({ sessionId, chatId, limit = null }) {
@@ -599,7 +601,7 @@ export async function listChatMessages({ sessionId, chatId, limit = null }) {
     ? await dbQuery(
       `SELECT role, content, metadata, created_at
        FROM (
-         SELECT id, role, content, metadata, created_at
+         SELECT id, session_id, chat_id, role, content, metadata, created_at
          FROM chat_messages
          WHERE chat_id = $1 AND user_id = $2
          ORDER BY created_at DESC, id DESC
@@ -609,7 +611,7 @@ export async function listChatMessages({ sessionId, chatId, limit = null }) {
       [chatId, userId, limit]
     )
     : await dbQuery(
-      `SELECT role, content, metadata, created_at
+      `SELECT id, session_id, chat_id, role, content, metadata, created_at
        FROM chat_messages
        WHERE chat_id = $1 AND user_id = $2
        ORDER BY created_at ASC, id ASC`,

@@ -1592,6 +1592,10 @@ function App() {
           return {
             ...message,
             text: payload.answer || "No answer generated.",
+            dbMessageId: Number.isInteger(Number(payload?.assistantMessageId))
+              ? Number(payload.assistantMessageId)
+              : message.dbMessageId || null,
+            persistedChatId: String(payload?.chatId || message.persistedChatId || chatIdRef.current || "").trim() || null,
             evidenceSeverity: payload.evidenceSeverity || null,
             responseType: payload.responseType || null,
             retrieval: payload.retrieval || null,

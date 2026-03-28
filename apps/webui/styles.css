@@ -1963,8 +1963,8 @@ body {
   justify-content: center;
 }
 .assistant-tts-trigger .icon {
-  width: 1rem;
-  height: 1rem;
+  width: 1.25rem;
+  height: 1.25rem;
 }
 .assistant-tts-trigger:hover {
   color: #0f172a;
