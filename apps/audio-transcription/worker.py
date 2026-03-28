@@ -16,7 +16,7 @@ import librosa
 from flask import Flask, jsonify, request
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a"}
+SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".webm"}
 REQUEST_TYPES = {"chat_input", "audio_embedding"}
 DEFAULT_MODEL_ID = os.getenv("AUDIO_MODEL_ID", "openai/whisper-small").strip() or "openai/whisper-small"
 DEFAULT_SAMPLE_RATE = int(os.getenv("AUDIO_TRANSCRIPTION_SAMPLE_RATE", "16000"))
@@ -63,6 +63,7 @@ def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, st
 
     chat_relative_path = str(payload.get("chat_audio_relative_path") or "").strip()
     audio_base64 = str(payload.get("audio_base64") or "").strip()
+    requested_extension = str(payload.get("audio_extension") or "").strip().lower().lstrip(".")
 
     has_relative_path = bool(chat_relative_path)
     has_base64 = bool(audio_base64)
@@ -72,7 +73,11 @@ def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, st
     if has_relative_path:
         return safe_join(upload_dir, chat_relative_path), request_type, False
 
-    with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+    extension = f".{requested_extension}" if requested_extension else ".wav"
+    if extension not in SUPPORTED_AUDIO_EXTENSIONS:
+        extension = ".wav"
+
+    with NamedTemporaryFile(delete=False, suffix=extension) as tmp:
         tmp.write(base64.b64decode(audio_base64))
         return Path(tmp.name), request_type, True
 

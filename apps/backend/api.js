@@ -452,6 +452,68 @@ async function handleLibraryList(res, session) {
   });
 }
 
+const CHAT_INPUT_AUDIO_EXTENSIONS = new Set(["wav", "mp3", "m4a", "webm"]);
+
+async function handleChatInputTranscription(req, res, _session) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const audioBase64 = String(body?.audioBase64 || "").trim();
+  const requestedExtension = String(body?.audioExtension || "").trim().toLowerCase().replace(/^\./, "");
+  const audioExtension = CHAT_INPUT_AUDIO_EXTENSIONS.has(requestedExtension) ? requestedExtension : "wav";
+  if (!audioBase64) {
+    json(res, 400, { ok: false, error: "Missing audioBase64 payload." });
+    return;
+  }
+
+  const upstreamResponse = await fetch(`${AUDIO_TRANSCRIPTION_BASE_URL}/audio/transcribe`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      request_type: "chat_input",
+      audio_base64: audioBase64,
+      audio_extension: audioExtension,
+    }),
+  });
+
+  const payloadText = await upstreamResponse.text();
+  let payload;
+  try {
+    payload = payloadText ? JSON.parse(payloadText) : {};
+  } catch {
+    payload = { ok: false, error: "Invalid transcription response payload." };
+  }
+
+  if (!upstreamResponse.ok || payload?.ok !== true) {
+    json(res, upstreamResponse.status || 502, {
+      ok: false,
+      error: payload?.error || `Audio transcription failed (${upstreamResponse.status})`,
+      errorCode: payload?.error_code || "transcription_failed",
+    });
+    return;
+  }
+
+  const transcribedText = typeof payload?.transcription?.text === "string"
+    ? payload.transcription.text.trim()
+    : "";
+  json(res, 200, {
+    ok: true,
+    transcription: {
+      text: transcribedText,
+      detectedLanguage: payload?.transcription?.detected_language || "unknown",
+      durationSeconds: payload?.transcription?.duration_seconds ?? null,
+    },
+  });
+}
+
 async function handleLogin(req, res, url) {
   const rawBody = await readBody(req);
   let body;
@@ -829,6 +891,7 @@ const handleRequest = createBackendRequestHandler({
   handleLibraryUpload,
   handleLibraryDelete,
   handleLibraryToggle,
+  handleChatInputTranscription,
   getDbHealth,
   isAdminSession,
   requireValidatedSession,
@@ -861,5 +924,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt, POST /api/transcription/chat-input");
 });
