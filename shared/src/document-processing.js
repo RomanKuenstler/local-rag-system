@@ -11,7 +11,7 @@ import {
   PDF_MIN_EXTRACTED_CHARS,
 } from "../config/index.js";
 
-const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a"]);
+const AUDIO_EXTENSIONS = new Set([".wav", ".mp3", ".m4a", ".webm"]);
 
 function sha256(content) {
   return crypto.createHash("sha256").update(content, "utf8").digest("hex");

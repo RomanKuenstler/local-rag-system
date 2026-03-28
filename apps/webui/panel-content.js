@@ -15,6 +15,7 @@ const ATTACHMENT_EXTENSION_COLOR_CLASS = {
   wav: "is-yellow",
   mp3: "is-yellow",
   m4a: "is-yellow",
+  webm: "is-yellow",
 };
 
 function getExtensionColorClass(extensionValue) {
