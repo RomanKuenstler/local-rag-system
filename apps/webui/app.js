@@ -2113,6 +2113,7 @@ function App() {
         body: JSON.stringify({
           audioBase64,
           audioExtension: getDictationExtensionFromMimeType(mimeType),
+          transcriptionMode: "translate",
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -2125,10 +2126,7 @@ function App() {
         throw new Error("No text detected in dictation.");
       }
 
-      setInputValue((previous) => {
-        const prefix = String(previous || "").trim();
-        return prefix ? `${prefix} ${transcribedText}` : transcribedText;
-      });
+      setInputValue(transcribedText);
       window.requestAnimationFrame(() => {
         if (composerInputRef.current) {
           resizeComposerInput(composerInputRef.current);

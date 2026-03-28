@@ -453,6 +453,7 @@ async function handleLibraryList(res, session) {
 }
 
 const CHAT_INPUT_AUDIO_EXTENSIONS = new Set(["wav", "mp3", "m4a", "webm"]);
+const CHAT_INPUT_TRANSCRIPTION_MODES = new Set(["translate", "transcribe"]);
 
 async function handleChatInputTranscription(req, res, _session) {
   const rawBody = await readBody(req);
@@ -466,7 +467,11 @@ async function handleChatInputTranscription(req, res, _session) {
 
   const audioBase64 = String(body?.audioBase64 || "").trim();
   const requestedExtension = String(body?.audioExtension || "").trim().toLowerCase().replace(/^\./, "");
+  const requestedTranscriptionMode = String(body?.transcriptionMode || "").trim().toLowerCase();
   const audioExtension = CHAT_INPUT_AUDIO_EXTENSIONS.has(requestedExtension) ? requestedExtension : "wav";
+  const transcriptionMode = CHAT_INPUT_TRANSCRIPTION_MODES.has(requestedTranscriptionMode)
+    ? requestedTranscriptionMode
+    : "translate";
   if (!audioBase64) {
     json(res, 400, { ok: false, error: "Missing audioBase64 payload." });
     return;
@@ -481,6 +486,7 @@ async function handleChatInputTranscription(req, res, _session) {
       request_type: "chat_input",
       audio_base64: audioBase64,
       audio_extension: audioExtension,
+      transcription_mode: transcriptionMode,
     }),
   });
 
@@ -510,6 +516,7 @@ async function handleChatInputTranscription(req, res, _session) {
       text: transcribedText,
       detectedLanguage: payload?.transcription?.detected_language || "unknown",
       durationSeconds: payload?.transcription?.duration_seconds ?? null,
+      mode: payload?.transcription?.mode || transcriptionMode,
     },
   });
 }
