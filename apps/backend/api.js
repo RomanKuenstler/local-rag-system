@@ -540,12 +540,47 @@ async function handleTtsSynthesis(req, res, _session) {
     return;
   }
 
-  const text = String(body?.text || "").trim();
+  const chatId = String(body?.chatId || "").trim();
+  const rawMessageId = body?.messageId;
+  const messageId = Number.parseInt(String(rawMessageId || ""), 10);
   const voice = String(body?.voice || "").trim();
   const audioFormat = String(body?.audioFormat || body?.audio_format || "wav").trim().toLowerCase();
   const speed = body?.speed;
+  if (!chatId) {
+    json(res, 400, { ok: false, error: "Missing chatId payload." });
+    return;
+  }
+  if (!Number.isInteger(messageId) || messageId <= 0) {
+    json(res, 400, { ok: false, error: "messageId must be a positive integer." });
+    return;
+  }
+  if (!Number.isInteger(_session?.userId) || !_session?.sessionId) {
+    json(res, 401, { ok: false, error: "Invalid session context for TTS request." });
+    return;
+  }
+  const messageResult = await dbQuery(
+    `SELECT id, role, content
+     FROM chat_messages
+     WHERE id = $1
+       AND chat_id = $2
+       AND session_id = $3
+       AND user_id = $4
+     LIMIT 1`,
+    [messageId, chatId, _session.sessionId, _session.userId]
+  );
+  const messageRow = messageResult.rows[0];
+  if (!messageRow) {
+    json(res, 404, { ok: false, error: "Assistant message not found for this chat/session/user." });
+    return;
+  }
+  if (String(messageRow.role || "").trim().toLowerCase() !== "assistant") {
+    json(res, 400, { ok: false, error: "TTS is only available for assistant messages." });
+    return;
+  }
+
+  const text = String(messageRow.content || "").trim();
   if (!text) {
-    json(res, 400, { ok: false, error: "Missing text payload." });
+    json(res, 400, { ok: false, error: "Selected assistant message has no content." });
     return;
   }
 
@@ -580,6 +615,8 @@ async function handleTtsSynthesis(req, res, _session) {
   res.writeHead(200, {
     "Content-Type": contentType,
     "Cache-Control": "no-store",
+    "X-TTS-Chat-Id": chatId,
+    "X-TTS-Message-Id": String(messageId),
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",

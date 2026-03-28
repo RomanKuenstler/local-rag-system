@@ -1389,6 +1389,9 @@ async function handleMessages(req, res) {
     chatName,
     totalMessages: rows.length,
     messages: rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      sessionId: row.session_id,
       role: row.role,
       content: row.content,
       metadata: row.metadata || {},
