@@ -1969,9 +1969,24 @@ body {
 .assistant-tts-trigger:hover {
   color: #0f172a;
 }
+.assistant-tts-trigger.is-loading .icon {
+  animation: tts-spin 0.95s linear infinite;
+}
+.assistant-tts-trigger.is-playing {
+  color: #0f172a;
+}
 .assistant-tts-trigger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.assistant-tts-status {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #475569;
+}
+@keyframes tts-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 .assistant-evidence-trigger {
   border: none;

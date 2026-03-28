@@ -3940,16 +3940,20 @@ function App() {
                           "button",
                           {
                             type: "button",
-                            className: "assistant-tts-trigger",
+                            className: `assistant-tts-trigger${ttsLoadingMessageId === message.id ? " is-loading" : ""}${ttsPlayingMessageId === message.id ? " is-playing" : ""}`,
                             "aria-label": ttsPlayingMessageId === message.id ? "Stop reading answer aloud" : "Read answer aloud",
                             title: ttsPlayingMessageId === message.id ? "Stop audio" : "Read answer aloud",
+                            "aria-busy": ttsLoadingMessageId === message.id,
                             onClick: () => handleAssistantTtsPlayback(message),
-                            disabled: ttsLoadingMessageId === message.id
-                              || !Number.isInteger(Number(message.dbMessageId))
-                              || Number(message.dbMessageId) <= 0,
+                            disabled: ttsLoadingMessageId === message.id,
                           },
                           icon(speakerIconPath)
                         ),
+                        ttsLoadingMessageId === message.id
+                          ? React.createElement("small", { className: "assistant-tts-status" }, "Generating audio…")
+                          : ttsPlayingMessageId === message.id
+                            ? React.createElement("small", { className: "assistant-tts-status" }, "Playing…")
+                            : null,
                         React.createElement(
                           "div",
                           { className: "assistant-evidence-wrap" },

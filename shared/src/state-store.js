@@ -599,7 +599,7 @@ export async function listChatMessages({ sessionId, chatId, limit = null }) {
   const hasLimit = Number.isInteger(limit) && limit > 0;
   const result = hasLimit
     ? await dbQuery(
-      `SELECT role, content, metadata, created_at
+      `SELECT id, session_id, chat_id, role, content, metadata, created_at
        FROM (
          SELECT id, session_id, chat_id, role, content, metadata, created_at
          FROM chat_messages
