@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import base64
 from datetime import datetime, timezone
 
 import requests
@@ -82,44 +83,111 @@ def synthesize() -> Response | tuple[object, int]:
 
     log_event("tts.synthesis_started", model=MODEL_RUNNER_TTS_MODEL, format=audio_format)
 
-    try:
-        upstream_response = requests.post(
-            f"{MODEL_RUNNER_BASE_URL}/v1/audio/speech",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(upstream_payload),
-            stream=True,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as exc:
-        log_event("tts.synthesis_failed", error_code="upstream_unavailable", error=str(exc))
-        return jsonify({"ok": False, "error_code": "upstream_unavailable", "error": str(exc)}), 502
-
-    if upstream_response.status_code >= 400:
+    def stream_audio_speech() -> Response | tuple[object, int] | None:
         try:
-            error_payload = upstream_response.json()
-        except Exception:
-            error_payload = {"error": upstream_response.text[:500]}
-        message = str(error_payload.get("error") or error_payload)
-        log_event(
-            "tts.synthesis_failed",
-            error_code="upstream_rejected",
-            status_code=upstream_response.status_code,
-            error=message,
-        )
-        return jsonify({"ok": False, "error_code": "upstream_rejected", "error": message}), 502
+            upstream_response = requests.post(
+                f"{MODEL_RUNNER_BASE_URL}/v1/audio/speech",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(upstream_payload),
+                stream=True,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as exc:
+            log_event("tts.synthesis_failed", error_code="upstream_unavailable", error=str(exc))
+            return jsonify({"ok": False, "error_code": "upstream_unavailable", "error": str(exc)}), 502
 
-    content_type = upstream_response.headers.get("content-type") or f"audio/{audio_format}"
-
-    def generate():
-        try:
-            for chunk in upstream_response.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-        finally:
+        if upstream_response.status_code == 404:
             upstream_response.close()
-            log_event("tts.synthesis_completed", model=MODEL_RUNNER_TTS_MODEL, format=audio_format)
+            return None
 
-    response = Response(stream_with_context(generate()), status=200, content_type=content_type)
+        if upstream_response.status_code >= 400:
+            try:
+                error_payload = upstream_response.json()
+            except Exception:
+                error_payload = {"error": upstream_response.text[:500]}
+            message = str(error_payload.get("error") or error_payload)
+            log_event(
+                "tts.synthesis_failed",
+                error_code="upstream_rejected",
+                status_code=upstream_response.status_code,
+                error=message,
+            )
+            return jsonify({"ok": False, "error_code": "upstream_rejected", "error": message}), 502
+
+        content_type = upstream_response.headers.get("content-type") or f"audio/{audio_format}"
+
+        def generate():
+            try:
+                for chunk in upstream_response.iter_content(chunk_size=8192):
+                    if chunk:
+                        yield chunk
+            finally:
+                upstream_response.close()
+                log_event("tts.synthesis_completed", model=MODEL_RUNNER_TTS_MODEL, format=audio_format, endpoint="/v1/audio/speech")
+
+        return Response(stream_with_context(generate()), status=200, content_type=content_type)
+
+    def chat_completions_fallback() -> Response | tuple[object, int]:
+        fallback_payload = {
+            "model": MODEL_RUNNER_TTS_MODEL,
+            "messages": [{"role": "user", "content": text}],
+            "modalities": ["audio"],
+            "audio": {
+                "voice": voice or "alloy",
+                "format": audio_format,
+            },
+        }
+        if speed is not None:
+            fallback_payload["audio"]["speed"] = speed
+
+        try:
+            response = requests.post(
+                f"{MODEL_RUNNER_BASE_URL}/v1/chat/completions",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(fallback_payload),
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+        except requests.RequestException as exc:
+            log_event("tts.synthesis_failed", error_code="upstream_unavailable", error=str(exc))
+            return jsonify({"ok": False, "error_code": "upstream_unavailable", "error": str(exc)}), 502
+
+        if response.status_code >= 400:
+            try:
+                error_payload = response.json()
+            except Exception:
+                error_payload = {"error": response.text[:500]}
+            message = str(error_payload.get("error") or error_payload)
+            log_event(
+                "tts.synthesis_failed",
+                error_code="upstream_rejected",
+                status_code=response.status_code,
+                error=message,
+            )
+            return jsonify({"ok": False, "error_code": "upstream_rejected", "error": message}), 502
+
+        payload = response.json()
+        audio_b64 = (
+            payload.get("choices", [{}])[0]
+            .get("message", {})
+            .get("audio", {})
+            .get("data")
+        )
+        if not audio_b64:
+            return jsonify({"ok": False, "error_code": "invalid_response", "error": "No audio data in chat completion response"}), 502
+
+        audio_bytes = base64.b64decode(audio_b64)
+        log_event("tts.synthesis_completed", model=MODEL_RUNNER_TTS_MODEL, format=audio_format, endpoint="/v1/chat/completions")
+        return Response(audio_bytes, status=200, content_type=f"audio/{audio_format}")
+
+    primary_response = stream_audio_speech()
+    if primary_response is None:
+        log_event("tts.fallback_to_chat_completions", model=MODEL_RUNNER_TTS_MODEL)
+        primary_response = chat_completions_fallback()
+
+    if isinstance(primary_response, tuple):
+        return primary_response
+
+    response = primary_response
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-TTS-Model"] = MODEL_RUNNER_TTS_MODEL
     return response
