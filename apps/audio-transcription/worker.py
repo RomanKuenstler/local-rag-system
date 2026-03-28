@@ -22,6 +22,7 @@ SUPPORTED_TRANSCRIPTION_MODES = {"translate", "transcribe"}
 DEFAULT_MODEL_ID = os.getenv("AUDIO_MODEL_ID", "openai/whisper-small").strip() or "openai/whisper-small"
 DEFAULT_SAMPLE_RATE = int(os.getenv("AUDIO_TRANSCRIPTION_SAMPLE_RATE", "16000"))
 MAX_TRANSCRIPTION_SECONDS = float(os.getenv("AUDIO_MAX_DURATION_SECONDS", "300"))
+EMBEDDING_SEGMENT_OVERLAP_SECONDS = float(os.getenv("AUDIO_EMBED_SEGMENT_OVERLAP_SECONDS", "15"))
 
 app = Flask(__name__)
 _model_bundle: dict[str, object] = {}
@@ -130,23 +131,17 @@ def normalize_transcription_mode(payload: dict[str, object]) -> str:
     return "translate"
 
 
-def transcribe_audio(_audio_path: Path, transcription_mode: str = "translate") -> dict[str, object]:
+def transcribe_audio_array(
+    audio_array: object,
+    sampling_rate: int,
+    transcription_mode: str = "translate",
+) -> dict[str, object]:
     processor, model = get_model_bundle()
-
-    audio_array, sampling_rate = librosa.load(
-        str(_audio_path),
-        sr=DEFAULT_SAMPLE_RATE,
-        mono=True,
-    )
 
     if audio_array.size == 0:
         raise ValueError("Audio file has no decodable samples")
 
-    duration_seconds = float(audio_array.shape[0]) / float(DEFAULT_SAMPLE_RATE)
-    if duration_seconds > MAX_TRANSCRIPTION_SECONDS:
-        raise ValueError(
-            f"Audio duration {duration_seconds:.2f}s exceeds maximum {MAX_TRANSCRIPTION_SECONDS:.2f}s"
-        )
+    duration_seconds = float(audio_array.shape[0]) / float(sampling_rate)
 
     input_features = processor(
         audio_array,
@@ -179,10 +174,106 @@ def transcribe_audio(_audio_path: Path, transcription_mode: str = "translate") -
         "detected_language": detected_language or "unknown",
         "segments": [],
         "duration_seconds": round(duration_seconds, 3),
-        "sample_rate": DEFAULT_SAMPLE_RATE,
+        "sample_rate": sampling_rate,
         "task": task_label,
         "mode": transcription_mode,
     }
+
+
+def normalize_for_overlap(text: str) -> str:
+    return re.sub(r"\W+", "", text.lower())
+
+
+def merge_transcription_text(existing_text: str, incoming_text: str) -> str:
+    existing_words = existing_text.split()
+    incoming_words = incoming_text.split()
+    if not existing_words:
+        return incoming_text.strip()
+    if not incoming_words:
+        return existing_text.strip()
+
+    max_overlap = min(len(existing_words), len(incoming_words), 120)
+    overlap_size = 0
+    for candidate in range(max_overlap, 2, -1):
+        existing_window = [normalize_for_overlap(word) for word in existing_words[-candidate:]]
+        incoming_window = [normalize_for_overlap(word) for word in incoming_words[:candidate]]
+        if existing_window == incoming_window:
+            overlap_size = candidate
+            break
+
+    merged_words = existing_words + incoming_words[overlap_size:]
+    return " ".join(merged_words).strip()
+
+
+def transcribe_audio_embedding(audio_array: object, sampling_rate: int, transcription_mode: str) -> dict[str, object]:
+    segment_samples = int(MAX_TRANSCRIPTION_SECONDS * sampling_rate)
+    overlap_samples = int(max(0.0, EMBEDDING_SEGMENT_OVERLAP_SECONDS) * sampling_rate)
+    if segment_samples <= 0:
+        raise ValueError("AUDIO_MAX_DURATION_SECONDS must be greater than zero")
+    if overlap_samples >= segment_samples:
+        raise ValueError("AUDIO_EMBED_SEGMENT_OVERLAP_SECONDS must be less than AUDIO_MAX_DURATION_SECONDS")
+
+    step_samples = segment_samples - overlap_samples
+    total_samples = int(audio_array.shape[0])
+    if total_samples == 0:
+        raise ValueError("Audio file has no decodable samples")
+
+    merged_text = ""
+    segment_results: list[dict[str, object]] = []
+    detected_language = "unknown"
+    task = "translate_to_english" if transcription_mode == "translate" else "transcribe_original_language"
+    segment_index = 0
+    for start in range(0, total_samples, step_samples):
+        end = min(start + segment_samples, total_samples)
+        chunk = audio_array[start:end]
+        if chunk.size == 0:
+            continue
+
+        segment_index += 1
+        segment_result = transcribe_audio_array(chunk, sampling_rate, transcription_mode=transcription_mode)
+        segment_text = str(segment_result.get("text") or "").strip()
+        if detected_language == "unknown":
+            detected_language = str(segment_result.get("detected_language") or "unknown")
+        task = str(segment_result.get("task") or task)
+        merged_text = merge_transcription_text(merged_text, segment_text)
+        segment_results.append(
+            {
+                "index": segment_index,
+                "start_second": round(float(start) / float(sampling_rate), 3),
+                "end_second": round(float(end) / float(sampling_rate), 3),
+                "text": segment_text,
+            }
+        )
+        if end >= total_samples:
+            break
+
+    return {
+        "text": merged_text,
+        "detected_language": detected_language,
+        "segments": segment_results,
+        "duration_seconds": round(float(total_samples) / float(sampling_rate), 3),
+        "sample_rate": sampling_rate,
+        "task": task,
+        "mode": transcription_mode,
+    }
+
+
+def transcribe_audio(_audio_path: Path, transcription_mode: str = "translate", request_type: str = "chat_input") -> dict[str, object]:
+    audio_array, sampling_rate = librosa.load(
+        str(_audio_path),
+        sr=DEFAULT_SAMPLE_RATE,
+        mono=True,
+    )
+    duration_seconds = float(audio_array.shape[0]) / float(DEFAULT_SAMPLE_RATE)
+
+    if request_type == "audio_embedding":
+        return transcribe_audio_embedding(audio_array, sampling_rate, transcription_mode=transcription_mode)
+
+    if duration_seconds > MAX_TRANSCRIPTION_SECONDS:
+        raise ValueError(
+            f"Audio duration {duration_seconds:.2f}s exceeds maximum {MAX_TRANSCRIPTION_SECONDS:.2f}s"
+        )
+    return transcribe_audio_array(audio_array, sampling_rate, transcription_mode=transcription_mode)
 
 
 @app.get("/healthz")
@@ -209,7 +300,11 @@ def transcribe_route() -> tuple[object, int]:
             allowed = ", ".join(sorted(SUPPORTED_AUDIO_EXTENSIONS))
             raise ValueError(f"Unsupported audio extension '{audio_path.suffix.lower()}'; allowed: {allowed}")
 
-        transcription = transcribe_audio(audio_path, transcription_mode=transcription_mode)
+        transcription = transcribe_audio(
+            audio_path,
+            transcription_mode=transcription_mode,
+            request_type=request_type,
+        )
         response = {
             "ok": True,
             "request_type": request_type,
