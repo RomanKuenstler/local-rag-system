@@ -23,6 +23,7 @@ const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "http://embedder:3200
 const OCR_SCANNER_BASE_URL = process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300";
 const AUDIO_TRANSCRIPTION_BASE_URL =
   process.env.AUDIO_TRANSCRIPTION_BASE_URL || "http://audio-transcription:3400";
+const TTS_BASE_URL = process.env.TTS_BASE_URL || "http://tts:3500";
 const MAX_API_BODY_BYTES = Number.parseInt(process.env.MAX_API_BODY_BYTES || String(25 * 1024 * 1024), 10);
 const ADMIN_EDIT_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
@@ -254,12 +255,14 @@ async function handleStatus(req, res, sessionId) {
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
   const ocrScannerStatusPromise = fetchJson(`${OCR_SCANNER_BASE_URL}/healthz`).catch(() => null);
   const audioTranscriptionStatusPromise = fetchJson(`${AUDIO_TRANSCRIPTION_BASE_URL}/healthz`).catch(() => null);
+  const ttsStatusPromise = fetchJson(`${TTS_BASE_URL}/healthz`).catch(() => null);
 
-  const [retrieverStatus, embedderStatus, ocrScannerStatus, audioTranscriptionStatus] = await Promise.all([
+  const [retrieverStatus, embedderStatus, ocrScannerStatus, audioTranscriptionStatus, ttsStatus] = await Promise.all([
     retrieverStatusPromise,
     embedderStatusPromise,
     ocrScannerStatusPromise,
     audioTranscriptionStatusPromise,
+    ttsStatusPromise,
   ]);
   const responsePayload = {
     ...(retrieverStatus || {}),
@@ -290,6 +293,11 @@ async function handleStatus(req, res, sessionId) {
         role: audioTranscriptionStatus?.service || "audio-transcription",
         baseUrl: AUDIO_TRANSCRIPTION_BASE_URL,
         status: audioTranscriptionStatus?.status || (audioTranscriptionStatus ? "active" : "disconnected"),
+      },
+      tts: {
+        role: ttsStatus?.service || "tts",
+        baseUrl: TTS_BASE_URL,
+        status: ttsStatus?.status || (ttsStatus ? "active" : "disconnected"),
       },
     },
   };
@@ -520,6 +528,67 @@ async function handleChatInputTranscription(req, res, _session) {
       mode: payload?.transcription?.mode || transcriptionMode,
     },
   });
+}
+
+async function handleTtsSynthesis(req, res, _session) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const text = String(body?.text || "").trim();
+  const voice = String(body?.voice || "").trim();
+  const audioFormat = String(body?.audioFormat || body?.audio_format || "wav").trim().toLowerCase();
+  const speed = body?.speed;
+  if (!text) {
+    json(res, 400, { ok: false, error: "Missing text payload." });
+    return;
+  }
+
+  const upstreamResponse = await fetch(`${TTS_BASE_URL}/tts/synthesize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text,
+      voice,
+      audio_format: audioFormat,
+      speed,
+    }),
+  });
+
+  if (!upstreamResponse.ok || !upstreamResponse.body) {
+    const errorText = await upstreamResponse.text();
+    let errorPayload;
+    try {
+      errorPayload = errorText ? JSON.parse(errorText) : {};
+    } catch {
+      errorPayload = {};
+    }
+    json(res, upstreamResponse.status || 502, {
+      ok: false,
+      error: errorPayload?.error || `TTS synthesis failed (${upstreamResponse.status})`,
+      errorCode: errorPayload?.error_code || "tts_failed",
+    });
+    return;
+  }
+
+  const contentType = upstreamResponse.headers.get("content-type") || `audio/${audioFormat}`;
+  res.writeHead(200, {
+    "Content-Type": contentType,
+    "Cache-Control": "no-store",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
+  });
+
+  for await (const chunk of upstreamResponse.body) {
+    res.write(chunk);
+  }
+  res.end();
 }
 
 function getFileExtensionFromName(fileName) {
@@ -1006,6 +1075,7 @@ const handleRequest = createBackendRequestHandler({
   handleLibraryDelete,
   handleLibraryToggle,
   handleChatInputTranscription,
+  handleTtsSynthesis,
   handlePromptWithUserAttachments,
   getDbHealth,
   isAdminSession,
@@ -1039,5 +1109,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt, POST /api/transcription/chat-input");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt, POST /api/transcription/chat-input, POST /api/tts/synthesize");
 });

@@ -14,6 +14,7 @@ export function createBackendRequestHandler({
   handleLibraryDelete,
   handleLibraryToggle,
   handleChatInputTranscription,
+  handleTtsSynthesis,
   handlePromptWithUserAttachments,
   getDbHealth,
   isAdminSession,
@@ -193,6 +194,13 @@ export function createBackendRequestHandler({
       const session = await requireValidatedSession(req, res, url);
       if (!session) return true;
       await handleChatInputTranscription(req, res, session);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/tts/synthesize") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return true;
+      await handleTtsSynthesis(req, res, session);
       return true;
     }
 
