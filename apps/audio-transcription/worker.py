@@ -16,8 +16,9 @@ import librosa
 from flask import Flask, jsonify, request
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a"}
-REQUEST_TYPES = {"chat_input", "audio_embedding"}
+SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".webm"}
+REQUEST_TYPES = {"chat_input", "audio_embedding", "user_attach"}
+SUPPORTED_TRANSCRIPTION_MODES = {"translate", "transcribe"}
 DEFAULT_MODEL_ID = os.getenv("AUDIO_MODEL_ID", "openai/whisper-small").strip() or "openai/whisper-small"
 DEFAULT_SAMPLE_RATE = int(os.getenv("AUDIO_TRANSCRIPTION_SAMPLE_RATE", "16000"))
 MAX_TRANSCRIPTION_SECONDS = float(os.getenv("AUDIO_MAX_DURATION_SECONDS", "300"))
@@ -50,7 +51,7 @@ def is_allowed_audio(path: Path) -> bool:
 def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, str, bool]:
     request_type = str(payload.get("request_type") or "").strip()
     if request_type not in REQUEST_TYPES:
-        raise ValueError("request_type must be one of: chat_input, audio_embedding")
+        raise ValueError("request_type must be one of: chat_input, audio_embedding, user_attach")
 
     content_dir = Path(os.getenv("AUDIO_CONTENT_DIR", "/app/data")).resolve()
     upload_dir = Path(os.getenv("AUDIO_UPLOAD_DIR", "/app/upload")).resolve()
@@ -63,16 +64,21 @@ def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, st
 
     chat_relative_path = str(payload.get("chat_audio_relative_path") or "").strip()
     audio_base64 = str(payload.get("audio_base64") or "").strip()
+    requested_extension = str(payload.get("audio_extension") or "").strip().lower().lstrip(".")
 
     has_relative_path = bool(chat_relative_path)
     has_base64 = bool(audio_base64)
     if has_relative_path == has_base64:
-        raise ValueError("chat_input requires exactly one of chat_audio_relative_path or audio_base64")
+        raise ValueError(f"{request_type} requires exactly one of chat_audio_relative_path or audio_base64")
 
     if has_relative_path:
         return safe_join(upload_dir, chat_relative_path), request_type, False
 
-    with NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+    extension = f".{requested_extension}" if requested_extension else ".wav"
+    if extension not in SUPPORTED_AUDIO_EXTENSIONS:
+        extension = ".wav"
+
+    with NamedTemporaryFile(delete=False, suffix=extension) as tmp:
         tmp.write(base64.b64decode(audio_base64))
         return Path(tmp.name), request_type, True
 
@@ -117,7 +123,14 @@ def detect_language_from_generated_ids(processor: WhisperProcessor, predicted_id
     return None
 
 
-def transcribe_audio(_audio_path: Path) -> dict[str, object]:
+def normalize_transcription_mode(payload: dict[str, object]) -> str:
+    requested_mode = str(payload.get("transcription_mode") or "").strip().lower()
+    if requested_mode in SUPPORTED_TRANSCRIPTION_MODES:
+        return requested_mode
+    return "translate"
+
+
+def transcribe_audio(_audio_path: Path, transcription_mode: str = "translate") -> dict[str, object]:
     processor, model = get_model_bundle()
 
     audio_array, sampling_rate = librosa.load(
@@ -147,13 +160,19 @@ def transcribe_audio(_audio_path: Path) -> dict[str, object]:
     )
     detected_language = detect_language_from_generated_ids(processor, transcribe_predicted)
 
-    translate_predicted = model.generate(
-        input_features,
-        task="translate",
-        return_dict_in_generate=True,
-    )
-    translated = processor.batch_decode(translate_predicted.sequences, skip_special_tokens=True)
-    text = translated[0].strip() if translated else ""
+    if transcription_mode == "transcribe":
+        final_predicted = transcribe_predicted
+        task_label = "transcribe_original_language"
+    else:
+        final_predicted = model.generate(
+            input_features,
+            task="translate",
+            return_dict_in_generate=True,
+        )
+        task_label = "translate_to_english"
+
+    decoded = processor.batch_decode(final_predicted.sequences, skip_special_tokens=True)
+    text = decoded[0].strip() if decoded else ""
 
     return {
         "text": text,
@@ -161,7 +180,8 @@ def transcribe_audio(_audio_path: Path) -> dict[str, object]:
         "segments": [],
         "duration_seconds": round(duration_seconds, 3),
         "sample_rate": DEFAULT_SAMPLE_RATE,
-        "task": "translate_to_english",
+        "task": task_label,
+        "mode": transcription_mode,
     }
 
 
@@ -181,6 +201,7 @@ def transcribe_route() -> tuple[object, int]:
     request_type = ""
 
     try:
+        transcription_mode = normalize_transcription_mode(payload)
         audio_path, request_type, is_temp_file = resolve_audio_path_for_request(payload)
         if not audio_path.exists() or not audio_path.is_file():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -188,10 +209,11 @@ def transcribe_route() -> tuple[object, int]:
             allowed = ", ".join(sorted(SUPPORTED_AUDIO_EXTENSIONS))
             raise ValueError(f"Unsupported audio extension '{audio_path.suffix.lower()}'; allowed: {allowed}")
 
-        transcription = transcribe_audio(audio_path)
+        transcription = transcribe_audio(audio_path, transcription_mode=transcription_mode)
         response = {
             "ok": True,
             "request_type": request_type,
+            "transcription_mode": transcription_mode,
             "audio_file": audio_path.name,
             "model": {
                 "endpoint": os.getenv("MODEL_RUNNER_BASE_URL"),

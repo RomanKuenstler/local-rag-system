@@ -13,6 +13,8 @@ export function createBackendRequestHandler({
   handleLibraryUpload,
   handleLibraryDelete,
   handleLibraryToggle,
+  handleChatInputTranscription,
+  handlePromptWithUserAttachments,
   getDbHealth,
   isAdminSession,
   requireValidatedSession,
@@ -183,7 +185,14 @@ export function createBackendRequestHandler({
     if (req.method === "POST" && url.pathname === "/api/prompt") {
       const session = await requireValidatedSession(req, res, url);
       if (!session) return true;
-      await proxyRetriever({ req, res, targetPath: "/internal/retriever/prompt", sessionId: session.sessionId });
+      await handlePromptWithUserAttachments(req, res, session);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/transcription/chat-input") {
+      const session = await requireValidatedSession(req, res, url);
+      if (!session) return true;
+      await handleChatInputTranscription(req, res, session);
       return true;
     }
 
