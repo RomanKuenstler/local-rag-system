@@ -427,8 +427,42 @@ function App() {
   }
 
   async function handleAssistantTtsPlayback(message) {
-    const messageId = Number.parseInt(String(message?.dbMessageId || ""), 10);
-    const chatId = String(message?.persistedChatId || chatIdRef.current || "").trim();
+    const preferredChatId = String(message?.persistedChatId || chatIdRef.current || "").trim();
+    let rawMessageId = Number(message?.dbMessageId);
+    let messageId = Number.isInteger(rawMessageId) ? rawMessageId : Number.NaN;
+    let chatId = preferredChatId;
+
+    if (!Number.isInteger(messageId) || messageId <= 0 || !chatId) {
+      try {
+        const recoveryChatId = preferredChatId || chatIdRef.current;
+        const response = await apiFetch(
+          `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(recoveryChatId)}&limit=40`
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && Array.isArray(payload?.messages)) {
+          const targetText = String(message?.text || "").trim();
+          const match = [...payload.messages]
+            .reverse()
+            .find((candidate) => String(candidate?.role || "") === "assistant"
+              && String(candidate?.content || "").trim() === targetText
+              && Number.isInteger(Number(candidate?.id))
+              && Number(candidate.id) > 0);
+          if (match) {
+            rawMessageId = Number(match.id);
+            messageId = rawMessageId;
+            chatId = String(match.chatId || payload.chatId || recoveryChatId || "").trim();
+            setMessages((previous) => previous.map((existing) => (
+              existing.id === message.id
+                ? { ...existing, dbMessageId: rawMessageId, persistedChatId: chatId }
+                : existing
+            )));
+          }
+        }
+      } catch {
+        // ignore recovery issues; handled by fallback error below
+      }
+    }
+
     if (!Number.isInteger(messageId) || messageId <= 0 || !chatId) {
       setMessages((prev) => prev.concat(createMessage("assistant", "Error: TTS is unavailable for this message.", {
         evidenceSeverity: "error",
@@ -3910,7 +3944,9 @@ function App() {
                             "aria-label": ttsPlayingMessageId === message.id ? "Stop reading answer aloud" : "Read answer aloud",
                             title: ttsPlayingMessageId === message.id ? "Stop audio" : "Read answer aloud",
                             onClick: () => handleAssistantTtsPlayback(message),
-                            disabled: ttsLoadingMessageId === message.id || !Number.isInteger(Number(message.dbMessageId)),
+                            disabled: ttsLoadingMessageId === message.id
+                              || !Number.isInteger(Number(message.dbMessageId))
+                              || Number(message.dbMessageId) <= 0,
                           },
                           icon(speakerIconPath)
                         ),
