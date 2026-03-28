@@ -21,6 +21,8 @@ const HOST = process.env.BACKEND_API_HOST || "0.0.0.0";
 const RETRIEVER_BASE_URL = process.env.RETRIEVER_BASE_URL || "http://retriever:3000";
 const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "http://embedder:3200";
 const OCR_SCANNER_BASE_URL = process.env.OCR_SCANNER_BASE_URL || "http://ocr-scanner:3300";
+const AUDIO_TRANSCRIPTION_BASE_URL =
+  process.env.AUDIO_TRANSCRIPTION_BASE_URL || "http://audio-transcription:3400";
 const MAX_API_BODY_BYTES = Number.parseInt(process.env.MAX_API_BODY_BYTES || String(25 * 1024 * 1024), 10);
 const ADMIN_EDIT_PROTECTED_USERNAMES = new Set(["default", "defaultadm"]);
 
@@ -251,11 +253,13 @@ async function handleStatus(req, res, sessionId) {
   const retrieverStatusPromise = fetchJson(retrieverStatusUrl);
   const embedderStatusPromise = fetchJson(`${EMBEDDER_BASE_URL}/internal/embedder/status`).catch(() => null);
   const ocrScannerStatusPromise = fetchJson(`${OCR_SCANNER_BASE_URL}/healthz`).catch(() => null);
+  const audioTranscriptionStatusPromise = fetchJson(`${AUDIO_TRANSCRIPTION_BASE_URL}/healthz`).catch(() => null);
 
-  const [retrieverStatus, embedderStatus, ocrScannerStatus] = await Promise.all([
+  const [retrieverStatus, embedderStatus, ocrScannerStatus, audioTranscriptionStatus] = await Promise.all([
     retrieverStatusPromise,
     embedderStatusPromise,
     ocrScannerStatusPromise,
+    audioTranscriptionStatusPromise,
   ]);
   const responsePayload = {
     ...(retrieverStatus || {}),
@@ -281,6 +285,11 @@ async function handleStatus(req, res, sessionId) {
         role: ocrScannerStatus?.service || "ocr-scanner",
         baseUrl: OCR_SCANNER_BASE_URL,
         status: ocrScannerStatus?.status || (ocrScannerStatus ? "active" : "disconnected"),
+      },
+      audioTranscription: {
+        role: audioTranscriptionStatus?.service || "audio-transcription",
+        baseUrl: AUDIO_TRANSCRIPTION_BASE_URL,
+        status: audioTranscriptionStatus?.status || (audioTranscriptionStatus ? "active" : "disconnected"),
       },
     },
   };
@@ -441,6 +450,182 @@ async function handleLibraryList(res, session) {
     embedding: files.filter((file) => file.uploadStatus === "embedding").length,
     error: files.filter((file) => file.uploadStatus === "error").length,
   });
+}
+
+const CHAT_INPUT_AUDIO_EXTENSIONS = new Set(["wav", "mp3", "m4a", "webm"]);
+const CHAT_INPUT_TRANSCRIPTION_MODES = new Set(["translate", "transcribe"]);
+const PROMPT_AUDIO_ATTACHMENT_EXTENSIONS = new Set([".wav", ".mp3", ".m4a", ".webm"]);
+
+async function handleChatInputTranscription(req, res, _session) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const audioBase64 = String(body?.audioBase64 || "").trim();
+  const requestedExtension = String(body?.audioExtension || "").trim().toLowerCase().replace(/^\./, "");
+  const requestedTranscriptionMode = String(body?.transcriptionMode || "").trim().toLowerCase();
+  const audioExtension = CHAT_INPUT_AUDIO_EXTENSIONS.has(requestedExtension) ? requestedExtension : "wav";
+  const transcriptionMode = CHAT_INPUT_TRANSCRIPTION_MODES.has(requestedTranscriptionMode)
+    ? requestedTranscriptionMode
+    : "translate";
+  if (!audioBase64) {
+    json(res, 400, { ok: false, error: "Missing audioBase64 payload." });
+    return;
+  }
+
+  const upstreamResponse = await fetch(`${AUDIO_TRANSCRIPTION_BASE_URL}/audio/transcribe`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      request_type: "chat_input",
+      audio_base64: audioBase64,
+      audio_extension: audioExtension,
+      transcription_mode: transcriptionMode,
+    }),
+  });
+
+  const payloadText = await upstreamResponse.text();
+  let payload;
+  try {
+    payload = payloadText ? JSON.parse(payloadText) : {};
+  } catch {
+    payload = { ok: false, error: "Invalid transcription response payload." };
+  }
+
+  if (!upstreamResponse.ok || payload?.ok !== true) {
+    json(res, upstreamResponse.status || 502, {
+      ok: false,
+      error: payload?.error || `Audio transcription failed (${upstreamResponse.status})`,
+      errorCode: payload?.error_code || "transcription_failed",
+    });
+    return;
+  }
+
+  const transcribedText = typeof payload?.transcription?.text === "string"
+    ? payload.transcription.text.trim()
+    : "";
+  json(res, 200, {
+    ok: true,
+    transcription: {
+      text: transcribedText,
+      detectedLanguage: payload?.transcription?.detected_language || "unknown",
+      durationSeconds: payload?.transcription?.duration_seconds ?? null,
+      mode: payload?.transcription?.mode || transcriptionMode,
+    },
+  });
+}
+
+function getFileExtensionFromName(fileName) {
+  const normalized = String(fileName || "").trim().toLowerCase();
+  if (!normalized.includes(".")) return "";
+  return `.${normalized.split(".").pop() || ""}`;
+}
+
+function toAudioExtensionPayload(extension) {
+  return String(extension || "").replace(/^\./, "").toLowerCase();
+}
+
+async function transcribePromptAudioAttachment(file) {
+  const rawName = String(file?.name || "").trim();
+  const extension = getFileExtensionFromName(rawName);
+  if (!PROMPT_AUDIO_ATTACHMENT_EXTENSIONS.has(extension)) {
+    return { ok: true, file };
+  }
+
+  const audioBase64 = typeof file?.contentBase64 === "string" ? file.contentBase64.trim() : "";
+  if (!audioBase64) {
+    return { ok: false, error: `Missing audio payload for attachment ${rawName || "unknown"}.` };
+  }
+
+  const upstreamResponse = await fetch(`${AUDIO_TRANSCRIPTION_BASE_URL}/audio/transcribe`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      request_type: "user_attach",
+      audio_base64: audioBase64,
+      audio_extension: toAudioExtensionPayload(extension),
+      transcription_mode: "translate",
+    }),
+  });
+
+  const payloadText = await upstreamResponse.text();
+  let payload;
+  try {
+    payload = payloadText ? JSON.parse(payloadText) : {};
+  } catch {
+    payload = { ok: false, error: "Invalid transcription response payload." };
+  }
+
+  if (!upstreamResponse.ok || payload?.ok !== true) {
+    return {
+      ok: false,
+      error: payload?.error || `Audio transcription failed (${upstreamResponse.status})`,
+    };
+  }
+
+  const transcriptionText = typeof payload?.transcription?.text === "string"
+    ? payload.transcription.text.trim()
+    : "";
+  if (!transcriptionText) {
+    return { ok: false, error: `No text detected in audio attachment ${rawName || "unknown"}.` };
+  }
+
+  return {
+    ok: true,
+    file: {
+      name: `${rawName}.transcription.txt`,
+      content: transcriptionText,
+    },
+  };
+}
+
+async function handlePromptWithUserAttachments(req, res, session) {
+  const rawBody = await readBody(req);
+  let body;
+  try {
+    body = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    json(res, 400, { ok: false, error: "Invalid JSON payload" });
+    return;
+  }
+
+  const uploadedFiles = Array.isArray(body?.uploadedFiles) ? body.uploadedFiles : [];
+  const normalizedUploadedFiles = [];
+  for (const file of uploadedFiles) {
+    const normalized = await transcribePromptAudioAttachment(file);
+    if (!normalized.ok) {
+      json(res, 400, { ok: false, error: normalized.error || "Audio attachment transcription failed." });
+      return;
+    }
+    normalizedUploadedFiles.push(normalized.file);
+  }
+
+  const upstreamResponse = await fetch(`${RETRIEVER_BASE_URL}/internal/retriever/prompt`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...body,
+      uploadedFiles: normalizedUploadedFiles,
+      sessionId: session.sessionId,
+    }),
+  });
+
+  const text = await upstreamResponse.text();
+  const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json";
+  res.writeHead(upstreamResponse.status, {
+    "Content-Type": upstreamContentType,
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Session-Token",
+  });
+  res.end(text);
 }
 
 async function handleLogin(req, res, url) {
@@ -820,6 +1005,8 @@ const handleRequest = createBackendRequestHandler({
   handleLibraryUpload,
   handleLibraryDelete,
   handleLibraryToggle,
+  handleChatInputTranscription,
+  handlePromptWithUserAttachments,
   getDbHealth,
   isAdminSession,
   requireValidatedSession,
@@ -852,5 +1039,5 @@ console.log(`[backend] synced users from ${syncedUsers.filePath} (configured: ${
 
 server.listen(PORT, HOST, () => {
   console.log(`Backend API listening on http://${HOST}:${PORT}`);
-  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt");
+  console.log("Endpoints: POST /api/auth/login, POST /api/auth/change-password, GET /api/auth/session, POST /api/auth/logout, GET|POST /api/admin/users, PATCH|DELETE /api/admin/users/:username, GET /api/status, GET /api/files, PATCH /api/files/tags, GET|PATCH /api/files/tag-filters, GET|POST /api/chats, PATCH|DELETE /api/chats/:chatId, GET /api/chats/:chatId/download, GET /api/messages, GET|PATCH /api/personalization, GET|POST|PATCH|DELETE /api/library/files, POST /api/prompt, POST /api/transcription/chat-input");
 });

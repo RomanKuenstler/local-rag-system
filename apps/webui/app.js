@@ -102,6 +102,9 @@ function App() {
   const [inputValue, setInputValue] = useState("");
   const [attachedPromptFiles, setAttachedPromptFiles] = useState([]);
   const [attachmentNotice, setAttachmentNotice] = useState("");
+  const [isDictationActive, setIsDictationActive] = useState(false);
+  const [isDictationSubmitting, setIsDictationSubmitting] = useState(false);
+  const [, setDictationNotice] = useState("");
   const [panelData, setPanelData] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [statusData, setStatusData] = useState(null);
@@ -182,6 +185,11 @@ function App() {
   const lastMessageRef = useRef(null);
   const composerInputRef = useRef(null);
   const promptFileInputRef = useRef(null);
+  const dictationRecorderRef = useRef(null);
+  const dictationStreamRef = useRef(null);
+  const dictationChunksRef = useRef([]);
+  const dictationMimeTypeRef = useRef("");
+  const dictationStopPromiseRef = useRef(null);
   const libraryUploadDialogInputRef = useRef(null);
   const menuRef = useRef(null);
   const assistantModeMenuRef = useRef(null);
@@ -233,6 +241,9 @@ function App() {
     setIsAssistantModeMenuOpen(false);
     setIsUnifiedDialogOpen(false);
     setPanelData(null);
+    setIsDictationActive(false);
+    setIsDictationSubmitting(false);
+    setDictationNotice("");
     setDeleteConfirmFile(null);
     setDeleteConfirmUser(null);
     setDeleteConfirmChat(null);
@@ -1296,6 +1307,7 @@ function App() {
     const isPanelCommand = PANEL_COMMANDS.has(prompt.toLowerCase());
     const hasPromptFiles = Array.isArray(promptFiles) && promptFiles.length > 0;
     if (!prompt || isSending) return;
+    setDictationNotice("");
 
     const selectedPromptFiles = hasPromptFiles ? [...promptFiles] : [];
     if (hasPromptFiles || attachedPromptFiles.length > 0) {
@@ -1962,13 +1974,190 @@ function App() {
     await saveAboutYouSetting("moreAboutUser", moreAboutUserDraft, setIsMoreAboutUserDirty);
   }
 
+  function stopActiveDictationTracks() {
+    if (dictationStreamRef.current) {
+      for (const track of dictationStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      dictationStreamRef.current = null;
+    }
+  }
+
+  function resetDictationSession() {
+    dictationRecorderRef.current = null;
+    dictationChunksRef.current = [];
+    dictationMimeTypeRef.current = "";
+    dictationStopPromiseRef.current = null;
+    stopActiveDictationTracks();
+    setIsDictationActive(false);
+  }
+
+  function getDictationExtensionFromMimeType(mimeType) {
+    const normalizedMimeType = String(mimeType || "").toLowerCase();
+    if (normalizedMimeType.includes("webm")) return "webm";
+    if (normalizedMimeType.includes("mp4")) return "m4a";
+    if (normalizedMimeType.includes("mpeg") || normalizedMimeType.includes("mp3")) return "mp3";
+    if (normalizedMimeType.includes("wav")) return "wav";
+    return "wav";
+  }
+
+  async function stopDictationCapture() {
+    const existingStopPromise = dictationStopPromiseRef.current;
+    if (existingStopPromise) {
+      return existingStopPromise;
+    }
+
+    const recorder = dictationRecorderRef.current;
+    if (!recorder) {
+      return { blob: null, mimeType: dictationMimeTypeRef.current || "" };
+    }
+
+    if (recorder.state === "inactive") {
+      const blob = dictationChunksRef.current.length > 0
+        ? new Blob(dictationChunksRef.current, { type: dictationMimeTypeRef.current || "audio/webm" })
+        : null;
+      resetDictationSession();
+      return { blob, mimeType: dictationMimeTypeRef.current || "" };
+    }
+
+    const stopPromise = new Promise((resolve) => {
+      const onStop = () => {
+        const mimeType = dictationMimeTypeRef.current || recorder.mimeType || "audio/webm";
+        const blob = dictationChunksRef.current.length > 0
+          ? new Blob(dictationChunksRef.current, { type: mimeType })
+          : null;
+        resetDictationSession();
+        resolve({ blob, mimeType });
+      };
+      recorder.addEventListener("stop", onStop, { once: true });
+      recorder.stop();
+    });
+    dictationStopPromiseRef.current = stopPromise;
+    return stopPromise;
+  }
+
+  async function startDictation() {
+    if (isSending || isDictationSubmitting || isDictationActive || !isEmbeddingReady) return;
+    if (!window.navigator?.mediaDevices?.getUserMedia || typeof window.MediaRecorder !== "function") {
+      setDictationNotice("Dictation is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await window.navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeCandidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+      ];
+      const selectedMimeType = mimeCandidates.find((candidate) => window.MediaRecorder.isTypeSupported(candidate)) || "";
+      const recorder = selectedMimeType
+        ? new window.MediaRecorder(stream, { mimeType: selectedMimeType })
+        : new window.MediaRecorder(stream);
+
+      dictationStreamRef.current = stream;
+      dictationRecorderRef.current = recorder;
+      dictationChunksRef.current = [];
+      dictationMimeTypeRef.current = selectedMimeType || recorder.mimeType || "audio/webm";
+      dictationStopPromiseRef.current = null;
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data && event.data.size > 0) {
+          dictationChunksRef.current.push(event.data);
+        }
+      });
+      recorder.addEventListener("error", () => {
+        setDictationNotice("Recording failed. Please try again.");
+        resetDictationSession();
+      });
+      recorder.start();
+      setDictationNotice("");
+      setIsDictationActive(true);
+    } catch (error) {
+      stopActiveDictationTracks();
+      setIsDictationActive(false);
+      setDictationNotice(error?.message || "Unable to access microphone.");
+    }
+  }
+
+  async function cancelDictation() {
+    try {
+      await stopDictationCapture();
+    } finally {
+      dictationChunksRef.current = [];
+      setDictationNotice("Dictation canceled.");
+    }
+  }
+
+  async function finishDictation() {
+    if (!isDictationActive || isDictationSubmitting) return;
+    setIsDictationSubmitting(true);
+    try {
+      const { blob, mimeType } = await stopDictationCapture();
+      if (!blob || blob.size === 0) {
+        throw new Error("No audio recorded.");
+      }
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const audioBytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      const chunkSize = 0x8000;
+      for (let offset = 0; offset < audioBytes.length; offset += chunkSize) {
+        binary += String.fromCharCode(...audioBytes.subarray(offset, offset + chunkSize));
+      }
+      const audioBase64 = btoa(binary);
+      const response = await apiFetch("/api/transcription/chat-input", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          audioBase64,
+          audioExtension: getDictationExtensionFromMimeType(mimeType),
+          transcriptionMode: "transcribe",
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok !== true) {
+        throw new Error(payload?.error || "Audio transcription failed.");
+      }
+
+      const transcribedText = String(payload?.transcription?.text || "").trim();
+      if (!transcribedText) {
+        throw new Error("No text detected in dictation.");
+      }
+
+      setInputValue(transcribedText);
+      window.requestAnimationFrame(() => {
+        if (composerInputRef.current) {
+          resizeComposerInput(composerInputRef.current);
+        }
+      });
+      setDictationNotice("");
+    } catch (error) {
+      setDictationNotice(error?.message || "Unable to transcribe dictation.");
+    } finally {
+      setIsDictationSubmitting(false);
+    }
+  }
+
+  useEffect(() => () => {
+    try {
+      if (dictationRecorderRef.current && dictationRecorderRef.current.state !== "inactive") {
+        dictationRecorderRef.current.stop();
+      }
+    } catch {
+      // ignore cleanup errors
+    }
+    stopActiveDictationTracks();
+  }, []);
+
   async function sendPrompt(event) {
     event.preventDefault();
+    if (isDictationActive) return;
     await sendRawPrompt(inputValue, attachedPromptFiles);
   }
 
   function openPromptFilePicker() {
-    if (isSending || !isEmbeddingReady) return;
+    if (isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady) return;
     promptFileInputRef.current?.click();
   }
 
@@ -2216,6 +2405,11 @@ function App() {
     retriever: retrieverStatus,
     embedder: embedderStatus,
     ocrScanner: normalizeStatusBadge(statusData?.services?.ocrScanner?.status || statusData?.services?.ocrScanner?.role || "disconnected"),
+    audioTranscription: normalizeStatusBadge(
+      statusData?.services?.audioTranscription?.status
+      || statusData?.services?.audioTranscription?.role
+      || "disconnected"
+    ),
   };
   const libraryFiles = Array.isArray(filesData?.files) ? filesData.files : [];
   const defaultFileTag = String(filesData?.defaultTag || DEFAULT_FILE_TAG_LABEL).trim().toLowerCase() || DEFAULT_FILE_TAG_LABEL;
@@ -3687,6 +3881,49 @@ function App() {
                 ...attachedPromptFiles.map((file, index) => renderComposerAttachmentChip(file, index))
               )
               : null,
+          isDictationActive
+            || isDictationSubmitting
+              ? React.createElement(
+                "div",
+                { className: "composer-dictation-banner" },
+                React.createElement(
+                  "div",
+                  { className: "composer-dictation-status" },
+                  React.createElement("span", { className: "composer-dictation-pulse", "aria-hidden": "true" }),
+                  React.createElement(
+                    "span",
+                    null,
+                    isDictationSubmitting ? "Waiting for transcription..." : "Dictation active — listening"
+                  )
+                ),
+                isDictationActive
+                  ? React.createElement(
+                    "div",
+                    { className: "composer-dictation-actions" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "composer-dictation-cancel",
+                        onClick: () => { void cancelDictation(); },
+                        disabled: isDictationSubmitting,
+                      },
+                      "Cancel"
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "composer-dictation-finish",
+                        onClick: () => { void finishDictation(); },
+                        disabled: isDictationSubmitting,
+                      },
+                      "Finish"
+                    )
+                  )
+                  : null
+              )
+              : null,
             React.createElement(
               "div",
               { className: "composer-entry-row" },
@@ -3696,7 +3933,7 @@ function App() {
                   className: "composer-attach-button",
                   type: "button",
                   onClick: openPromptFilePicker,
-                  disabled: isSending || !isEmbeddingReady,
+                  disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady,
                   "aria-label": "Attach files",
                   "data-testid": "composer-attach-button",
                   title: `Attach files (${PROMPT_ATTACHMENT_RULES.allowedExtensions.join(", ")})`,
@@ -3714,21 +3951,37 @@ function App() {
                 onKeyDown: (event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
-                    if (inputValue.trim() && !isSending && isEmbeddingReady) {
+                    if (inputValue.trim() && !isSending && !isDictationActive && !isDictationSubmitting && isEmbeddingReady) {
                       void sendRawPrompt(inputValue, attachedPromptFiles);
                     }
                   }
                 },
                 rows: 1,
                 placeholder: "Ask anything about your knowledge base...",
-                disabled: isSending || !isEmbeddingReady,
-              })
+                disabled: isSending || isDictationSubmitting || !isEmbeddingReady,
+              }),
+              React.createElement(
+                "button",
+                {
+                  className: "composer-mic-button",
+                  type: "button",
+                  onClick: () => { void startDictation(); },
+                  disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady,
+                  "aria-label": "Start dictation",
+                  title: "Dictate prompt",
+                },
+                icon("M12 15a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3m5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.92V22h3a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2h3v-3.08A7 7 0 0 1 6 12a1 1 0 1 1 2 0 5 5 0 0 0 10 0")
+              ),
+              React.createElement(
+                "button",
+                {
+                  className: "send",
+                  type: "submit",
+                  disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady || !inputValue.trim(),
+                },
+                icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
+              )
             )
-          ),
-          React.createElement(
-            "button",
-            { className: "send", type: "submit", disabled: isSending || !isEmbeddingReady || !inputValue.trim() },
-            icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
           ),
           attachmentNotice
             ? React.createElement(
@@ -3811,19 +4064,6 @@ function App() {
         : null,
       null
     ),
-    activeView !== "library" && activeView !== "admin" && !isEmbeddingReady && !isLoadingStatus
-      ? React.createElement(
-        "div",
-        { className: "embedding-loading-overlay" },
-        React.createElement(
-          "div",
-          { className: "embedding-loading" },
-          React.createElement("span", { className: "spinner", "aria-hidden": "true" }),
-          React.createElement("strong", null, "Embedding in progress"),
-          React.createElement("p", null, "Your documents are being indexed. You can browse dialogs while indexing completes.")
-        )
-      )
-      : null,
     isUploadDialogOpen
       ? React.createElement(
         "div",
