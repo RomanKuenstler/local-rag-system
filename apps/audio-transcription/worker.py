@@ -17,7 +17,7 @@ from flask import Flask, jsonify, request
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".webm"}
-REQUEST_TYPES = {"chat_input", "audio_embedding"}
+REQUEST_TYPES = {"chat_input", "audio_embedding", "user_attach"}
 SUPPORTED_TRANSCRIPTION_MODES = {"translate", "transcribe"}
 DEFAULT_MODEL_ID = os.getenv("AUDIO_MODEL_ID", "openai/whisper-small").strip() or "openai/whisper-small"
 DEFAULT_SAMPLE_RATE = int(os.getenv("AUDIO_TRANSCRIPTION_SAMPLE_RATE", "16000"))
@@ -51,7 +51,7 @@ def is_allowed_audio(path: Path) -> bool:
 def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, str, bool]:
     request_type = str(payload.get("request_type") or "").strip()
     if request_type not in REQUEST_TYPES:
-        raise ValueError("request_type must be one of: chat_input, audio_embedding")
+        raise ValueError("request_type must be one of: chat_input, audio_embedding, user_attach")
 
     content_dir = Path(os.getenv("AUDIO_CONTENT_DIR", "/app/data")).resolve()
     upload_dir = Path(os.getenv("AUDIO_UPLOAD_DIR", "/app/upload")).resolve()
@@ -69,7 +69,7 @@ def resolve_audio_path_for_request(payload: dict[str, object]) -> tuple[Path, st
     has_relative_path = bool(chat_relative_path)
     has_base64 = bool(audio_base64)
     if has_relative_path == has_base64:
-        raise ValueError("chat_input requires exactly one of chat_audio_relative_path or audio_base64")
+        raise ValueError(f"{request_type} requires exactly one of chat_audio_relative_path or audio_base64")
 
     if has_relative_path:
         return safe_join(upload_dir, chat_relative_path), request_type, False

@@ -48,7 +48,7 @@ export const DEFAULT_PERSONALIZATION_PREFERENCES = {
 export const TEMPORARILY_DISABLED_ASSISTANT_MODES = new Set([]);
 export const PROMPT_ATTACHMENT_RULES = {
   maxFiles: 3,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".csv", ".png", ".jpg", ".jpeg", ".webp", ".wav", ".mp3", ".m4a", ".webm"],
 };
 const ATTACHMENT_EXTENSION_COLOR_CLASS = {
   pdf: "is-red",
@@ -65,6 +65,7 @@ const ATTACHMENT_EXTENSION_COLOR_CLASS = {
   wav: "is-yellow",
   mp3: "is-yellow",
   m4a: "is-yellow",
+  webm: "is-yellow",
 };
 export const LIBRARY_UPLOAD_RULES = {
   maxFiles: 5,

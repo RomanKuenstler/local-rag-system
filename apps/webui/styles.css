@@ -2266,6 +2266,7 @@ body {
 .composer-attachment-icon.is-blue { background: #2563eb; }
 .composer-attachment-icon.is-purple { background: #8b5cf6; }
 .composer-attachment-icon.is-green { background: #16a34a; }
+.composer-attachment-icon.is-yellow { background: #ca8a04; }
 .composer-attachment-meta {
   min-width: 0;
   display: grid;
