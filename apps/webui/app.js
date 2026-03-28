@@ -104,7 +104,7 @@ function App() {
   const [attachmentNotice, setAttachmentNotice] = useState("");
   const [isDictationActive, setIsDictationActive] = useState(false);
   const [isDictationSubmitting, setIsDictationSubmitting] = useState(false);
-  const [dictationNotice, setDictationNotice] = useState("");
+  const [, setDictationNotice] = useState("");
   const [panelData, setPanelData] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [statusData, setStatusData] = useState(null);
@@ -2092,7 +2092,6 @@ function App() {
   async function finishDictation() {
     if (!isDictationActive || isDictationSubmitting) return;
     setIsDictationSubmitting(true);
-    setDictationNotice("Transcribing dictation...");
     try {
       const { blob, mimeType } = await stopDictationCapture();
       if (!blob || blob.size === 0) {
@@ -2113,7 +2112,7 @@ function App() {
         body: JSON.stringify({
           audioBase64,
           audioExtension: getDictationExtensionFromMimeType(mimeType),
-          transcriptionMode: "translate",
+          transcriptionMode: "transcribe",
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -3882,7 +3881,8 @@ function App() {
                 ...attachedPromptFiles.map((file, index) => renderComposerAttachmentChip(file, index))
               )
               : null,
-            isDictationActive
+          isDictationActive
+            || isDictationSubmitting
               ? React.createElement(
                 "div",
                 { className: "composer-dictation-banner" },
@@ -3893,33 +3893,35 @@ function App() {
                   React.createElement(
                     "span",
                     null,
-                    isDictationSubmitting ? "Dictation finishing..." : "Dictation active — listening"
+                    isDictationSubmitting ? "Waiting for transcription..." : "Dictation active — listening"
                   )
                 ),
-                React.createElement(
-                  "div",
-                  { className: "composer-dictation-actions" },
-                  React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "composer-dictation-cancel",
-                      onClick: () => { void cancelDictation(); },
-                      disabled: isDictationSubmitting,
-                    },
-                    "Cancel"
-                  ),
-                  React.createElement(
-                    "button",
-                    {
-                      type: "button",
-                      className: "composer-dictation-finish",
-                      onClick: () => { void finishDictation(); },
-                      disabled: isDictationSubmitting,
-                    },
-                    "Finish"
+                isDictationActive
+                  ? React.createElement(
+                    "div",
+                    { className: "composer-dictation-actions" },
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "composer-dictation-cancel",
+                        onClick: () => { void cancelDictation(); },
+                        disabled: isDictationSubmitting,
+                      },
+                      "Cancel"
+                    ),
+                    React.createElement(
+                      "button",
+                      {
+                        type: "button",
+                        className: "composer-dictation-finish",
+                        onClick: () => { void finishDictation(); },
+                        disabled: isDictationSubmitting,
+                      },
+                      "Finish"
+                    )
                   )
-                )
+                  : null
               )
               : null,
             React.createElement(
@@ -3957,35 +3959,35 @@ function App() {
                 rows: 1,
                 placeholder: "Ask anything about your knowledge base...",
                 disabled: isSending || isDictationSubmitting || !isEmbeddingReady,
-              })
+              }),
+              React.createElement(
+                "button",
+                {
+                  className: "composer-mic-button",
+                  type: "button",
+                  onClick: () => { void startDictation(); },
+                  disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady,
+                  "aria-label": "Start dictation",
+                  title: "Dictate prompt",
+                },
+                icon("M12 15a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3m5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.92V22h3a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2h3v-3.08A7 7 0 0 1 6 12a1 1 0 1 1 2 0 5 5 0 0 0 10 0")
+              ),
+              React.createElement(
+                "button",
+                {
+                  className: "send",
+                  type: "submit",
+                  disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady || !inputValue.trim(),
+                },
+                icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
+              )
             )
           ),
-          React.createElement(
-            "button",
-            {
-              className: "composer-mic-button",
-              type: "button",
-              onClick: () => { void startDictation(); },
-              disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady,
-              "aria-label": "Start dictation",
-              title: "Dictate prompt",
-            },
-            icon("M12 15a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3m5-3a1 1 0 1 1 2 0 7 7 0 0 1-6 6.92V22h3a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2h3v-3.08A7 7 0 0 1 6 12a1 1 0 1 1 2 0 5 5 0 0 0 10 0")
-          ),
-          React.createElement(
-            "button",
-            {
-              className: "send",
-              type: "submit",
-              disabled: isSending || isDictationActive || isDictationSubmitting || !isEmbeddingReady || !inputValue.trim(),
-            },
-            icon("M12 5l6.2 6.2-1.4 1.4-3.8-3.8V19h-2V8.8l-3.8 3.8-1.4-1.4z")
-          ),
-          (attachmentNotice || dictationNotice)
+          attachmentNotice
             ? React.createElement(
               "p",
               { className: "composer-attachment-notice invalid" },
-              attachmentNotice || dictationNotice
+              attachmentNotice
             )
             : null
         )

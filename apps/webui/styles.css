@@ -2083,7 +2083,7 @@ body {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
   gap: 0.55rem;
   background: rgba(255,255,255,.97);
@@ -2108,7 +2108,7 @@ body {
 .composer-entry-row {
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 0.45rem;
 }
 .composer-file-input {
@@ -2300,6 +2300,7 @@ textarea {
   resize: none;
   overflow-y: auto;
   width: 100%;
+  flex: 1 1 auto;
 }
 textarea:focus { outline: none; }
 .composer-attachment-notice {
