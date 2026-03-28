@@ -4064,19 +4064,6 @@ function App() {
         : null,
       null
     ),
-    activeView !== "library" && activeView !== "admin" && !isEmbeddingReady && !isLoadingStatus
-      ? React.createElement(
-        "div",
-        { className: "embedding-loading-overlay" },
-        React.createElement(
-          "div",
-          { className: "embedding-loading" },
-          React.createElement("span", { className: "spinner", "aria-hidden": "true" }),
-          React.createElement("strong", null, "Embedding in progress"),
-          React.createElement("p", null, "Your documents are being indexed. You can browse dialogs while indexing completes.")
-        )
-      )
-      : null,
     isUploadDialogOpen
       ? React.createElement(
         "div",
