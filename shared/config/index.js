@@ -4,7 +4,7 @@ export const COLLECTION_NAME = process.env.QDRANT_COLLECTION || "knowledge_base"
 export const QDRANT_URL = process.env.QDRANT_URL || "http://qdrant:6333";
 export const QDRANT_API_KEY = process.env.QDRANT_API_KEY || undefined;
 export const CONTENT_PATH = process.env.CONTENT_PATH || "./data";
-export const EMBEDDABLE_EXTENSIONS = [".md", ".txt", ".html", ".htm", ".pdf", ".epub", ".wav", ".mp3", ".m4a"];
+export const EMBEDDABLE_EXTENSIONS = [".md", ".txt", ".html", ".htm", ".pdf", ".epub", ".wav", ".mp3", ".m4a", ".webm"];
 export const DEFAULT_FILE_TAG = String(process.env.DEFAULT_FILE_TAG || "default").trim().toLowerCase() || "default";
 
 export const HISTORY_MESSAGES = parseInt(process.env.HISTORY_MESSAGES || "10", 10);

@@ -54,9 +54,9 @@ docker compose up -d --build
 - **File management APIs**:
   - Retriever-backed index view and tagging (`/api/files`, `/api/files/tags`, `/api/files/tag-filters`).
   - Managed library upload/toggle/delete/list (`/api/library/files`).
-- **Prompt file attachments** (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`, and OCR image formats).
+- **Prompt file attachments** (`.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`, OCR image formats, and audio files `.wav`, `.mp3`, `.m4a`, `.webm`).
 - **OCR integration path** for both indexing-time and prompt-time extraction.
-- **Library audio ingestion** for `.wav`, `.mp3`, `.m4a` via audio transcription prep flow.
+- **Library audio ingestion** for `.wav`, `.mp3`, `.m4a`, `.webm` via audio transcription prep flow.
 
 ## OCR scanner behavior
 
@@ -82,7 +82,7 @@ Extraction behavior:
 
 Current behavior:
 
-- Accepts `.wav`, `.mp3`, and `.m4a` files.
+- Accepts `.wav`, `.mp3`, `.m4a`, and `.webm` files.
 - Validates request type + payload shape and returns normalized response metadata.
 - Detects spoken language and returns it as metadata (`detected_language`).
 - Runs Whisper Small (`openai/whisper-small`) in translate mode to return English text for downstream embedding.

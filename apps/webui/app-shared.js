@@ -69,7 +69,7 @@ const ATTACHMENT_EXTENSION_COLOR_CLASS = {
 };
 export const LIBRARY_UPLOAD_RULES = {
   maxFiles: 5,
-  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub", ".wav", ".mp3", ".m4a"],
+  allowedExtensions: [".md", ".txt", ".html", ".htm", ".pdf", ".epub", ".wav", ".mp3", ".m4a", ".webm"],
 };
 export const SESSION_ID_STORAGE_KEY = "rag-session-id";
 export const CHAT_ID_STORAGE_KEY = "rag-chat-id";

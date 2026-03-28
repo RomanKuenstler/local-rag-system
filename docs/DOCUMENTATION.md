@@ -151,7 +151,7 @@ The system is composed of eight services coordinated by Docker Compose:
 
 ### Library/indexing support
 
-Primary embeddable formats include markdown/text/html/pdf/epub/audio (`.wav`, `.mp3`, `.m4a`) sources from `data/`.
+Primary embeddable formats include markdown/text/html/pdf/epub/audio (`.wav`, `.mp3`, `.m4a`, `.webm`) sources from `data/`.
 
 ### Prompt attachment support
 
@@ -159,6 +159,7 @@ Prompt-time upload handling supports:
 
 - `.md`, `.txt`, `.html`, `.htm`, `.pdf`, `.csv`
 - OCR image types: `.png`, `.jpg`, `.jpeg`, `.webp`
+- Audio types: `.wav`, `.mp3`, `.m4a`, `.webm`
 
 ---
 
