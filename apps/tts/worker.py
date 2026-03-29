@@ -13,8 +13,8 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 MODEL_RUNNER_BASE_URL = (os.getenv("MODEL_RUNNER_BASE_URL", "http://model-runner.docker.internal").rstrip("/")
                          or "http://model-runner.docker.internal")
-MODEL_RUNNER_TTS_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS", "hf.co/hexgrad/Kokoro-82M").strip() or "hf.co/hexgrad/Kokoro-82M"
-MODEL_RUNNER_TTS_FALLBACK_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS_FALLBACK", "hf.co/rhasspy/piper-voices").strip() or "hf.co/rhasspy/piper-voices"
+MODEL_RUNNER_TTS_MODEL = "hf.co/TrevorJS/voxtral-tts-q4-gguf"
+
 TTS_DEFAULT_FORMAT = os.getenv("TTS_AUDIO_FORMAT", "wav").strip().lower() or "wav"
 TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "af_heart").strip() or "af_heart"
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("TTS_UPSTREAM_TIMEOUT_SECONDS", "180"))
@@ -68,7 +68,6 @@ def healthz() -> tuple[object, int]:
         "model": {
             "endpoint": MODEL_RUNNER_BASE_URL,
             "name": MODEL_RUNNER_TTS_MODEL,
-            "fallback": MODEL_RUNNER_TTS_FALLBACK_MODEL,
         },
     }), 200
 
@@ -83,9 +82,7 @@ def synthesize() -> Response | tuple[object, int]:
         return jsonify({"ok": False, "error_code": "invalid_request", "error": str(exc)}), 400
 
     candidate_models = [MODEL_RUNNER_TTS_MODEL]
-    if MODEL_RUNNER_TTS_FALLBACK_MODEL and MODEL_RUNNER_TTS_FALLBACK_MODEL != MODEL_RUNNER_TTS_MODEL:
-        candidate_models.append(MODEL_RUNNER_TTS_FALLBACK_MODEL)
-
+    
     def stream_audio_speech(model_name: str) -> Response | tuple[object, int] | None:
         upstream_payload = {
             "model": model_name,
@@ -197,7 +194,6 @@ def synthesize() -> Response | tuple[object, int]:
         primary_response = stream_audio_speech(model_name)
         if primary_response is None:
             log_event("tts.fallback_to_chat_completions", model=model_name)
-            primary_response = chat_completions_fallback(model_name)
 
         if isinstance(primary_response, tuple):
             status_code = int(primary_response[1]) if len(primary_response) > 1 else 500

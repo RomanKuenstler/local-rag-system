@@ -193,9 +193,6 @@ services:
       tts-model:
         endpoint_var: MODEL_RUNNER_BASE_URL
         model_var: MODEL_RUNNER_LLM_TTS
-      tts-fallback-model:
-        endpoint_var: MODEL_RUNNER_BASE_URL
-        model_var: MODEL_RUNNER_LLM_TTS_FALLBACK
     depends_on:
       postgres:
         condition: service_healthy
@@ -262,6 +259,4 @@ models:
   audio-model:
     model: hf.co/openai/whisper-small
   tts-model:
-    model: hf.co/hexgrad/Kokoro-82M
-  tts-fallback-model:
-    model: hf.co/rhasspy/piper-voices
+    model: hf.co/TrevorJS/voxtral-tts-q4-gguf
