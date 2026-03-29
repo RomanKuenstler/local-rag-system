@@ -179,6 +179,8 @@ function App() {
   const [isMoreAboutUserDirty, setIsMoreAboutUserDirty] = useState(false);
   const [tagFilterEnabledByTag, setTagFilterEnabledByTag] = useState({});
   const [isTagFilterSaving, setIsTagFilterSaving] = useState(false);
+  const [ttsLoadingMessageId, setTtsLoadingMessageId] = useState(null);
+  const [ttsPlayingMessageId, setTtsPlayingMessageId] = useState(null);
 
   const previousEmbeddingReadyRef = useRef(null);
   const pollTimeoutRef = useRef(null);
@@ -198,6 +200,8 @@ function App() {
   const volatileChatCreatePromiseRef = useRef(null);
   const sendingStatusPollRef = useRef(null);
   const postLoginHashRef = useRef("");
+  const ttsAudioRef = useRef(null);
+  const ttsAudioUrlRef = useRef("");
 
   const isEmbeddingReady = statusData?.embedding?.readiness?.ready === true;
   const currentUiMode = String(statusData?.app?.uiMode || "clean").toLowerCase();
@@ -238,6 +242,24 @@ function App() {
     }
     setIsUserMenuOpen(false);
     setIsMenuOpen(false);
+    if (ttsAudioRef.current) {
+      try {
+        ttsAudioRef.current.pause();
+      } catch {
+        // ignore playback pause errors
+      }
+      ttsAudioRef.current = null;
+    }
+    if (ttsAudioUrlRef.current) {
+      try {
+        URL.revokeObjectURL(ttsAudioUrlRef.current);
+      } catch {
+        // ignore revoke errors
+      }
+      ttsAudioUrlRef.current = "";
+    }
+    setTtsLoadingMessageId(null);
+    setTtsPlayingMessageId(null);
     setIsAssistantModeMenuOpen(false);
     setIsUnifiedDialogOpen(false);
     setPanelData(null);
@@ -403,6 +425,152 @@ function App() {
     }
     return null;
   }
+
+  async function handleAssistantTtsPlayback(message) {
+    const preferredChatId = String(message?.persistedChatId || chatIdRef.current || "").trim();
+    let rawMessageId = Number(message?.dbMessageId);
+    let messageId = Number.isInteger(rawMessageId) ? rawMessageId : Number.NaN;
+    let chatId = preferredChatId;
+
+    if (!Number.isInteger(messageId) || messageId <= 0 || !chatId) {
+      try {
+        const recoveryChatId = preferredChatId || chatIdRef.current;
+        const response = await apiFetch(
+          `${API_BASE_URL}/api/messages?sessionId=${encodeURIComponent(sessionIdRef.current)}&chatId=${encodeURIComponent(recoveryChatId)}&limit=40`
+        );
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok && Array.isArray(payload?.messages)) {
+          const targetText = String(message?.text || "").trim();
+          const match = [...payload.messages]
+            .reverse()
+            .find((candidate) => String(candidate?.role || "") === "assistant"
+              && String(candidate?.content || "").trim() === targetText
+              && Number.isInteger(Number(candidate?.id))
+              && Number(candidate.id) > 0);
+          if (match) {
+            rawMessageId = Number(match.id);
+            messageId = rawMessageId;
+            chatId = String(match.chatId || payload.chatId || recoveryChatId || "").trim();
+            setMessages((previous) => previous.map((existing) => (
+              existing.id === message.id
+                ? { ...existing, dbMessageId: rawMessageId, persistedChatId: chatId }
+                : existing
+            )));
+          }
+        }
+      } catch {
+        // ignore recovery issues; handled by fallback error below
+      }
+    }
+
+    if (!Number.isInteger(messageId) || messageId <= 0 || !chatId) {
+      setMessages((prev) => prev.concat(createMessage("assistant", "Error: TTS is unavailable for this message.", {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+      return;
+    }
+
+    if (ttsPlayingMessageId === message.id) {
+      if (ttsAudioRef.current) {
+        try {
+          ttsAudioRef.current.pause();
+        } catch {
+          // ignore pause errors
+        }
+      }
+      setTtsPlayingMessageId(null);
+      setTtsLoadingMessageId(null);
+      return;
+    }
+
+    if (ttsAudioRef.current) {
+      try {
+        ttsAudioRef.current.pause();
+      } catch {
+        // ignore pause errors
+      }
+      ttsAudioRef.current = null;
+    }
+    if (ttsAudioUrlRef.current) {
+      try {
+        URL.revokeObjectURL(ttsAudioUrlRef.current);
+      } catch {
+        // ignore revoke errors
+      }
+      ttsAudioUrlRef.current = "";
+    }
+
+    setTtsLoadingMessageId(message.id);
+    setTtsPlayingMessageId(null);
+    try {
+      const response = await apiFetch("/api/tts/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId,
+          messageId,
+        }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.error || "TTS synthesis failed.");
+      }
+
+      const audioBlob = await response.blob();
+      if (!audioBlob || audioBlob.size === 0) {
+        throw new Error("TTS returned empty audio.");
+      }
+      const objectUrl = URL.createObjectURL(audioBlob);
+      ttsAudioUrlRef.current = objectUrl;
+      const audio = new Audio(objectUrl);
+      ttsAudioRef.current = audio;
+      audio.onended = () => {
+        if (ttsAudioUrlRef.current) {
+          try {
+            URL.revokeObjectURL(ttsAudioUrlRef.current);
+          } catch {
+            // ignore revoke errors
+          }
+          ttsAudioUrlRef.current = "";
+        }
+        ttsAudioRef.current = null;
+        setTtsPlayingMessageId(null);
+      };
+      audio.onerror = () => {
+        setTtsPlayingMessageId(null);
+      };
+
+      await audio.play();
+      setTtsPlayingMessageId(message.id);
+    } catch (error) {
+      setMessages((prev) => prev.concat(createMessage("assistant", `Error: ${error.message}`, {
+        evidenceSeverity: "error",
+        isVolatile: true,
+      })));
+    } finally {
+      setTtsLoadingMessageId(null);
+    }
+  }
+
+  useEffect(() => () => {
+    if (ttsAudioRef.current) {
+      try {
+        ttsAudioRef.current.pause();
+      } catch {
+        // ignore pause errors
+      }
+      ttsAudioRef.current = null;
+    }
+    if (ttsAudioUrlRef.current) {
+      try {
+        URL.revokeObjectURL(ttsAudioUrlRef.current);
+      } catch {
+        // ignore revoke errors
+      }
+      ttsAudioUrlRef.current = "";
+    }
+  }, []);
 
   async function submitLogin(event) {
     event?.preventDefault?.();
@@ -638,6 +806,8 @@ function App() {
           || (message.role === "assistant" ? "No answer generated." : "");
         return createMessage(message.role, message.content, {
           text: normalizedText,
+          dbMessageId: Number.isInteger(Number(message.id)) ? Number(message.id) : null,
+          persistedChatId: String(message.chatId || payload.chatId || "").trim() || null,
           evidenceSeverity: metadata.evidenceSeverity || null,
           responseType: metadata.responseType || null,
           retrieval: metadata.retrieval || null,
@@ -1456,6 +1626,10 @@ function App() {
           return {
             ...message,
             text: payload.answer || "No answer generated.",
+            dbMessageId: Number.isInteger(Number(payload?.assistantMessageId))
+              ? Number(payload.assistantMessageId)
+              : message.dbMessageId || null,
+            persistedChatId: String(payload?.chatId || message.persistedChatId || chatIdRef.current || "").trim() || null,
             evidenceSeverity: payload.evidenceSeverity || null,
             responseType: payload.responseType || null,
             retrieval: payload.retrieval || null,
@@ -2284,6 +2458,7 @@ function App() {
   const keyIconPath = "M14.5 4a5.5 5.5 0 0 0-5.4 6.5L3 16.6V21h4.4l1.8-1.8V17h2.2l1.8-1.8a5.5 5.5 0 1 0 1.3-11.2m0 2a3.5 3.5 0 1 1-3.5 3.5A3.5 3.5 0 0 1 14.5 6";
   const logoutIconPath = "M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3h-2v3H6V5h9v3h2V5a2 2 0 0 0-2-2m-1.6 12.4L12 14l2.6-2.6H8v-2h6.6L12 6.8l1.4-1.4L18.4 11z";
   const sourceFileIconPath = "M7 3h7l5 5v13H7zm7 1.8V9h4.2zM10 13h6v1.6h-6zm0 3h6v1.6h-6z";
+  const speakerIconPath = "M5 10v4h3l4 3V7L8 10zm10.5 2a3.5 3.5 0 0 0-1.8-3.1v6.2a3.5 3.5 0 0 0 1.8-3.1m1.5-5.6v2.1a6 6 0 0 1 0 7v2.1a8 8 0 0 0 0-11.2";
   const userIconPath = "M12 12a4.5 4.5 0 1 0-4.5-4.5A4.5 4.5 0 0 0 12 12m0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5";
   const chevronDownIconPath = "M7.4 9.8a1 1 0 0 1 1.4 0L12 13l3.2-3.2a1 1 0 1 1 1.4 1.4l-3.9 3.9a1 1 0 0 1-1.4 0l-3.9-3.9a1 1 0 0 1 0-1.4";
   const checkIconPath = "M9.2 16.2 4.8 11.8l1.4-1.4 3 3 8-8 1.4 1.4z";
@@ -3760,72 +3935,94 @@ function App() {
                       ? null
                       : React.createElement(
                         "div",
-                        { className: "assistant-evidence-wrap" },
+                        { className: "assistant-answer-actions" },
                         React.createElement(
                           "button",
                           {
                             type: "button",
-                            className: `assistant-evidence-trigger${openEvidenceMenuMessageId === message.id ? " active" : ""}`,
-                            "aria-expanded": openEvidenceMenuMessageId === message.id,
-                            "aria-haspopup": "menu",
-                            onClick: (event) => toggleEvidenceMenu(message.id, event),
+                            className: `assistant-tts-trigger${ttsLoadingMessageId === message.id ? " is-loading" : ""}${ttsPlayingMessageId === message.id ? " is-playing" : ""}`,
+                            "aria-label": ttsPlayingMessageId === message.id ? "Stop reading answer aloud" : "Read answer aloud",
+                            title: ttsPlayingMessageId === message.id ? "Stop audio" : "Read answer aloud",
+                            "aria-busy": ttsLoadingMessageId === message.id,
+                            onClick: () => handleAssistantTtsPlayback(message),
+                            disabled: ttsLoadingMessageId === message.id,
                           },
-                          React.createElement("span", { className: "assistant-evidence-trigger-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
-                          React.createElement("small", null, "Sources")
+                          icon(speakerIconPath)
                         ),
-                        openEvidenceMenuMessageId === message.id
-                          ? React.createElement(
-                            "section",
+                        ttsLoadingMessageId === message.id
+                          ? React.createElement("small", { className: "assistant-tts-status" }, "Generating audio…")
+                          : ttsPlayingMessageId === message.id
+                            ? React.createElement("small", { className: "assistant-tts-status" }, "Playing…")
+                            : null,
+                        React.createElement(
+                          "div",
+                          { className: "assistant-evidence-wrap" },
+                          React.createElement(
+                            "button",
                             {
-                              className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`,
-                              role: "menu",
-                              "aria-label": "Evidence details",
-                              style: { maxHeight: `${openEvidenceMenuMaxHeight}px` },
+                              type: "button",
+                              className: `assistant-evidence-trigger${openEvidenceMenuMessageId === message.id ? " active" : ""}`,
+                              "aria-expanded": openEvidenceMenuMessageId === message.id,
+                              "aria-haspopup": "menu",
+                              onClick: (event) => toggleEvidenceMenu(message.id, event),
                             },
-                            React.createElement("h4", { className: "assistant-evidence-heading" }, "Sources"),
-                            React.createElement(
-                              "p",
-                              { className: "assistant-evidence-summary" },
-                              `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval?.matches?.length || 0} • Cosine limit: ${message.retrieval?.cosineLimit ?? "n/a"}`
-                            ),
-                            Array.isArray(message.retrieval?.matches) && message.retrieval.matches.length > 0
-                              ? React.createElement(
-                                "ul",
-                                { className: "assistant-evidence-list" },
-                                ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
-                                  "li",
-                                  { key: `${message.id}-${match.rank}-${match.source}` },
-                                  React.createElement(
-                                    "div",
-                                    { className: "assistant-evidence-meta" },
-                                    React.createElement("span", { className: "assistant-evidence-file-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                            React.createElement("span", { className: "assistant-evidence-trigger-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                            React.createElement("small", null, "Sources")
+                          ),
+                          openEvidenceMenuMessageId === message.id
+                            ? React.createElement(
+                              "section",
+                              {
+                                className: `assistant-evidence-menu ${openEvidenceMenuPlacement}`,
+                                role: "menu",
+                                "aria-label": "Evidence details",
+                                style: { maxHeight: `${openEvidenceMenuMaxHeight}px` },
+                              },
+                              React.createElement("h4", { className: "assistant-evidence-heading" }, "Sources"),
+                              React.createElement(
+                                "p",
+                                { className: "assistant-evidence-summary" },
+                                `Quality: ${formatSeverityLabel(message.evidenceSeverity || "unknown")} • Matches: ${message.retrieval?.matches?.length || 0} • Cosine limit: ${message.retrieval?.cosineLimit ?? "n/a"}`
+                              ),
+                              Array.isArray(message.retrieval?.matches) && message.retrieval.matches.length > 0
+                                ? React.createElement(
+                                  "ul",
+                                  { className: "assistant-evidence-list" },
+                                  ...message.retrieval.matches.slice(0, 4).map((match) => React.createElement(
+                                    "li",
+                                    { key: `${message.id}-${match.rank}-${match.source}` },
                                     React.createElement(
-                                      "span",
-                                      { className: "assistant-evidence-file-name" },
-                                      String(match.source || "unknown source").replace(/^_library\//, "")
+                                      "div",
+                                      { className: "assistant-evidence-meta" },
+                                      React.createElement("span", { className: "assistant-evidence-file-icon", "aria-hidden": "true" }, icon(sourceFileIconPath)),
+                                      React.createElement(
+                                        "span",
+                                        { className: "assistant-evidence-file-name" },
+                                        String(match.source || "unknown source").replace(/^_library\//, "")
+                                      ),
                                     ),
-                                  ),
-                                  React.createElement(
-                                    "p",
-                                    { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
-                                    `Score ${formatScorePercent(match.score)}`
-                                  ),
-                                  match.title ? React.createElement("p", { className: "assistant-evidence-title" }, match.title) : null,
-                                  Array.isArray(match.tags) && match.tags.length > 0
-                                    ? React.createElement(
+                                    React.createElement(
                                       "p",
-                                      { className: "assistant-evidence-tags" },
-                                      `Tags ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
-                                    )
-                                    : null,
-                                  Array.isArray(match.tags) && match.tags.length > 0
-                                    ? null
-                                    : React.createElement("p", { className: "assistant-evidence-tags assistant-evidence-tags-empty" }, "Tags none")
-                                ))
-                              )
-                              : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
-                          )
-                          : null
+                                      { className: `assistant-evidence-score ${getScoreSeverity(match.score)}` },
+                                      `Score ${formatScorePercent(match.score)}`
+                                    ),
+                                    match.title ? React.createElement("p", { className: "assistant-evidence-title" }, match.title) : null,
+                                    Array.isArray(match.tags) && match.tags.length > 0
+                                      ? React.createElement(
+                                        "p",
+                                        { className: "assistant-evidence-tags" },
+                                        `Tags ${match.tags.map((tag) => String(tag || "").trim()).filter(Boolean).join(", ")}`
+                                      )
+                                      : null,
+                                    Array.isArray(match.tags) && match.tags.length > 0
+                                      ? null
+                                      : React.createElement("p", { className: "assistant-evidence-tags assistant-evidence-tags-empty" }, "Tags none")
+                                  ))
+                                )
+                                : React.createElement("p", { className: "assistant-evidence-empty" }, "No retrieval matches were returned.")
+                            )
+                            : null
+                        )
                       )
                   )
                   : message.role === "assistant"

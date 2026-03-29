@@ -20,6 +20,7 @@ services:
       RETRIEVER_BASE_URL: http://retriever:3000
       EMBEDDER_BASE_URL: http://embedder:3200
       AUDIO_TRANSCRIPTION_BASE_URL: http://audio-transcription:3400
+      TTS_BASE_URL: http://tts:3500
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: rag
@@ -92,6 +93,8 @@ services:
       ocr-scanner:
         condition: service_started
       audio-transcription:
+        condition: service_started
+      tts:
         condition: service_started
       postgres:
         condition: service_healthy
@@ -177,6 +180,23 @@ services:
       postgres:
         condition: service_healthy
 
+  tts:
+    build:
+      context: ./apps/tts
+      dockerfile: Dockerfile
+    environment:
+      TTS_API_HOST: 0.0.0.0
+      TTS_API_PORT: 3500
+    ports:
+      - "3500:3500"
+    models:
+      tts-model:
+        endpoint_var: MODEL_RUNNER_BASE_URL
+        model_var: MODEL_RUNNER_LLM_TTS
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   webui:
     build:
       context: ./apps/webui
@@ -238,3 +258,5 @@ models:
     model: ai/embeddinggemma:latest
   audio-model:
     model: hf.co/openai/whisper-small
+  tts-model:
+    model: hf.co/TrevorJS/voxtral-tts-q4-gguf

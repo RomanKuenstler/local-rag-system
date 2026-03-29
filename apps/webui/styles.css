@@ -1947,6 +1947,47 @@ body {
   position: relative;
   width: fit-content;
 }
+.assistant-answer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+.assistant-tts-trigger {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.assistant-tts-trigger .icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.assistant-tts-trigger:hover {
+  color: #0f172a;
+}
+.assistant-tts-trigger.is-loading .icon {
+  animation: tts-spin 0.95s linear infinite;
+}
+.assistant-tts-trigger.is-playing {
+  color: #0f172a;
+}
+.assistant-tts-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.assistant-tts-status {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #475569;
+}
+@keyframes tts-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .assistant-evidence-trigger {
   border: none;
   background: #eef2f7;

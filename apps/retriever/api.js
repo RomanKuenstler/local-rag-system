@@ -1301,7 +1301,7 @@ async function handlePrompt(req, res) {
         attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
       },
     });
-    await addChatMessage({
+    const assistantMessage = await addChatMessage({
       sessionId,
       chatId,
       role: "assistant",
@@ -1317,6 +1317,7 @@ async function handlePrompt(req, res) {
       sessionId,
       chatId,
       chatName,
+      assistantMessageId: assistantMessage?.id || null,
       answer:
         "Evidence quality is WEAK for this topic. The generated answer may be unreliable. Do you want to see it? Use /yes to show it, or /no or /skip to hide it.",
       evidenceSeverity: "warn",
@@ -1340,7 +1341,7 @@ async function handlePrompt(req, res) {
       attachedFiles: uploadInfo?.uploadedFiles || requestedAttachedFiles,
     },
   });
-  await addChatMessage({
+  const assistantMessage = await addChatMessage({
     sessionId,
     chatId,
     role: "assistant",
@@ -1356,6 +1357,7 @@ async function handlePrompt(req, res) {
     sessionId,
     chatId,
     chatName,
+    assistantMessageId: assistantMessage?.id || null,
     answer,
     evidenceSeverity: hasUploadedContext ? "source_attached" : searchResult.evidenceQuality,
     hasSufficientEvidence: searchResult.hasSufficientEvidence,
@@ -1389,6 +1391,9 @@ async function handleMessages(req, res) {
     chatName,
     totalMessages: rows.length,
     messages: rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      sessionId: row.session_id,
       role: row.role,
       content: row.content,
       metadata: row.metadata || {},
