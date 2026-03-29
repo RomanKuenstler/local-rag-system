@@ -14,6 +14,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 MODEL_RUNNER_BASE_URL = (os.getenv("MODEL_RUNNER_BASE_URL", "http://model-runner.docker.internal").rstrip("/")
                          or "http://model-runner.docker.internal")
 MODEL_RUNNER_TTS_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS", "hf.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base").strip() or "hf.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+MODEL_RUNNER_TTS_FALLBACK_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS_FALLBACK", "hf.co/rhasspy/piper-voices").strip() or "hf.co/rhasspy/piper-voices"
 TTS_DEFAULT_FORMAT = os.getenv("TTS_AUDIO_FORMAT", "wav").strip().lower() or "wav"
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("TTS_UPSTREAM_TIMEOUT_SECONDS", "180"))
 
@@ -66,6 +67,7 @@ def healthz() -> tuple[object, int]:
         "model": {
             "endpoint": MODEL_RUNNER_BASE_URL,
             "name": MODEL_RUNNER_TTS_MODEL,
+            "fallback": MODEL_RUNNER_TTS_FALLBACK_MODEL,
         },
     }), 200
 
@@ -79,19 +81,21 @@ def synthesize() -> Response | tuple[object, int]:
     except ValueError as exc:
         return jsonify({"ok": False, "error_code": "invalid_request", "error": str(exc)}), 400
 
-    upstream_payload = {
-        "model": MODEL_RUNNER_TTS_MODEL,
-        "input": text,
-        "format": audio_format,
-    }
-    if voice:
-        upstream_payload["voice"] = voice
-    if speed is not None:
-        upstream_payload["speed"] = speed
+    candidate_models = [MODEL_RUNNER_TTS_MODEL]
+    if MODEL_RUNNER_TTS_FALLBACK_MODEL and MODEL_RUNNER_TTS_FALLBACK_MODEL != MODEL_RUNNER_TTS_MODEL:
+        candidate_models.append(MODEL_RUNNER_TTS_FALLBACK_MODEL)
 
-    log_event("tts.synthesis_started", model=MODEL_RUNNER_TTS_MODEL, format=audio_format)
+    def stream_audio_speech(model_name: str) -> Response | tuple[object, int] | None:
+        upstream_payload = {
+            "model": model_name,
+            "input": text,
+            "format": audio_format,
+        }
+        if voice:
+            upstream_payload["voice"] = voice
+        if speed is not None:
+            upstream_payload["speed"] = speed
 
-    def stream_audio_speech() -> Response | tuple[object, int] | None:
         try:
             upstream_response = requests.post(
                 model_runner_url("audio/speech"),
@@ -131,13 +135,13 @@ def synthesize() -> Response | tuple[object, int]:
                         yield chunk
             finally:
                 upstream_response.close()
-                log_event("tts.synthesis_completed", model=MODEL_RUNNER_TTS_MODEL, format=audio_format, endpoint="/v1/audio/speech")
+                log_event("tts.synthesis_completed", model=model_name, format=audio_format, endpoint="/v1/audio/speech")
 
         return Response(stream_with_context(generate()), status=200, content_type=content_type)
 
-    def chat_completions_fallback() -> Response | tuple[object, int]:
+    def chat_completions_fallback(model_name: str) -> Response | tuple[object, int]:
         fallback_payload = {
-            "model": MODEL_RUNNER_TTS_MODEL,
+            "model": model_name,
             "messages": [{"role": "user", "content": text}],
             "modalities": ["audio"],
             "audio": {
@@ -184,20 +188,31 @@ def synthesize() -> Response | tuple[object, int]:
             return jsonify({"ok": False, "error_code": "invalid_response", "error": "No audio data in chat completion response"}), 502
 
         audio_bytes = base64.b64decode(audio_b64)
-        log_event("tts.synthesis_completed", model=MODEL_RUNNER_TTS_MODEL, format=audio_format, endpoint="/v1/chat/completions")
+        log_event("tts.synthesis_completed", model=model_name, format=audio_format, endpoint="/v1/chat/completions")
         return Response(audio_bytes, status=200, content_type=f"audio/{audio_format}")
 
-    primary_response = stream_audio_speech()
-    if primary_response is None:
-        log_event("tts.fallback_to_chat_completions", model=MODEL_RUNNER_TTS_MODEL)
-        primary_response = chat_completions_fallback()
+    for index, model_name in enumerate(candidate_models):
+        log_event("tts.synthesis_started", model=model_name, format=audio_format)
+        primary_response = stream_audio_speech(model_name)
+        if primary_response is None:
+            log_event("tts.fallback_to_chat_completions", model=model_name)
+            primary_response = chat_completions_fallback(model_name)
 
-    if isinstance(primary_response, tuple):
-        return primary_response
+        if isinstance(primary_response, tuple):
+            status_code = int(primary_response[1]) if len(primary_response) > 1 else 500
+            if index < len(candidate_models) - 1 and status_code >= 500:
+                log_event("tts.model_fallback_attempt", from_model=model_name, to_model=candidate_models[index + 1], status_code=status_code)
+                continue
+            return primary_response
 
-    response = primary_response
+        response = primary_response
+        response.headers["X-TTS-Model"] = model_name
+        response.headers["X-TTS-Model-Index"] = str(index)
+        break
+    else:
+        return jsonify({"ok": False, "error_code": "tts_unavailable", "error": "No usable TTS model found"}), 502
+
     response.headers["Cache-Control"] = "no-store"
-    response.headers["X-TTS-Model"] = MODEL_RUNNER_TTS_MODEL
     return response
 
 
