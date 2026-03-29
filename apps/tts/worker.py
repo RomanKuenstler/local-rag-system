@@ -13,9 +13,10 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 MODEL_RUNNER_BASE_URL = (os.getenv("MODEL_RUNNER_BASE_URL", "http://model-runner.docker.internal").rstrip("/")
                          or "http://model-runner.docker.internal")
-MODEL_RUNNER_TTS_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS", "hf.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base").strip() or "hf.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+MODEL_RUNNER_TTS_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS", "hf.co/hexgrad/Kokoro-82M").strip() or "hf.co/hexgrad/Kokoro-82M"
 MODEL_RUNNER_TTS_FALLBACK_MODEL = os.getenv("MODEL_RUNNER_LLM_TTS_FALLBACK", "hf.co/rhasspy/piper-voices").strip() or "hf.co/rhasspy/piper-voices"
 TTS_DEFAULT_FORMAT = os.getenv("TTS_AUDIO_FORMAT", "wav").strip().lower() or "wav"
+TTS_DEFAULT_VOICE = os.getenv("TTS_DEFAULT_VOICE", "af_heart").strip() or "af_heart"
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("TTS_UPSTREAM_TIMEOUT_SECONDS", "180"))
 
 app = Flask(__name__)
@@ -46,7 +47,7 @@ def parse_request_payload(payload: object) -> tuple[str, str, str, float | None]
     if not text:
         raise ValueError("Field 'text' is required")
 
-    voice = str(payload.get("voice") or "").strip()
+    voice = str(payload.get("voice") or TTS_DEFAULT_VOICE).strip() or TTS_DEFAULT_VOICE
     audio_format = str(payload.get("audio_format") or TTS_DEFAULT_FORMAT).strip().lower() or TTS_DEFAULT_FORMAT
     speed = payload.get("speed")
 

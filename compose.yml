@@ -262,6 +262,6 @@ models:
   audio-model:
     model: hf.co/openai/whisper-small
   tts-model:
-    model: hf.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base
+    model: hf.co/hexgrad/Kokoro-82M
   tts-fallback-model:
     model: hf.co/rhasspy/piper-voices
