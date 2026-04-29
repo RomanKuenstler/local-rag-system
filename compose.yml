@@ -194,7 +194,7 @@ models:
   embedding-model:
 
     # EmbeddingGemma model optimized for text embeddings
-    model: ai/embeddinggemma:latest
+    model: hf.co/Qwen/Qwen3-Embedding-0.6B-GGUF
 
 
 # ------------------------------------------------------------------------------
